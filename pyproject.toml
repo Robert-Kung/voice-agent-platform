@@ -9,5 +9,7 @@ dependencies = [
     "httpx>=0.28.1",
     "livekit-agents[deepgram,mcp,openai,silero,turn-detector]>=1.2.15",
     "livekit-plugins-noise-cancellation~=0.2",
+    "pydub>=0.25.1",
     "python-dotenv>=1.1.1",
+    "pyyaml>=6.0.3",
 ]

@@ -42,7 +42,7 @@ LiveKit Cloud is the fastest way to get a voice agent running. It provides:
    - `LIVEKIT_API_KEY` - API key for authentication
    - `LIVEKIT_API_SECRET` - API secret for authentication
 
-4. Set these as environment variables (typically in `.env.local`):
+4. Set these as environment variables (typically in `.env`):
 ```bash
 LIVEKIT_URL=wss://your-project.livekit.cloud
 LIVEKIT_API_KEY=your-api-key

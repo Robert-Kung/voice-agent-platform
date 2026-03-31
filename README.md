@@ -21,7 +21,7 @@ Step 3: Install dependencies using uv
     uv sync
     ```
 
-Step 4: Create a `.env.local` file in the root of the project and add your API keys
+Step 4: Create a `.env` file in the root of the project and add your API keys
 
     ```
     LIVEKIT_URL=
@@ -35,7 +35,7 @@ You can load the LiveKit environment automatically using the [LiveKit CLI](https
 
 ```bash
 lk cloud auth
-lk app env -w -d .env.local
+lk app env -w -d .env
 ```
 
 Step 5: Run your new agent in the console
@@ -77,7 +77,7 @@ To setup the Coval connection, follow these steps:
 7. Select "LiveKit" as the simulator type
 8. For token endpoint, use `https://cloud-api.livekit.io/api/sandbox/connection-details`
 9. For the token sandbox id, use the `sandboxId`
-10. Add your LiveKit server URL (it's in your `.env.local` file)
+10. Add your LiveKit server URL (it's in your `.env` file)
 11. Set content type to `application/json`
 
 You should now be ready to test your agent in Coval.
