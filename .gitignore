@@ -14,6 +14,4 @@ KMS
 # 暫存 / 轉檔工具（不納入版控）
 _tmp/
 
-# Agent profiles — 只保留 example.yaml 作格式範本
-profiles/*.yaml
-!profiles/example.yaml
+
