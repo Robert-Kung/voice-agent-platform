@@ -1,3 +1,4 @@
+import json
 import logging
 import os
 import sys
@@ -25,44 +26,90 @@ logger = logging.getLogger("agent")
 load_dotenv(".env")
 
 # ── Profile 選擇 ──────────────────────────────────────────
-# 透過環境變數 AGENT_PROFILE 或命令列 --profile / -p 指定
-# 預設使用 car_inspection
+# 支援三種方式選擇 profile（優先順序由高到低）：
 #
-# 用法：
-#   uv run agent.py console --profile restaurant
-#   uv run agent.py console -p dental_clinic
-#   AGENT_PROFILE=restaurant uv run agent.py console
+# 1. Room metadata — 部署在 Cloud 時，前端建房間時帶上 metadata
+#    例：{"profile": "restaurant"}
+#    → 同一個 agent 可服務不同場域，免費版只需部署一個 agent
+#
+# 2. 命令列參數 --profile / -p
+#    例：uv run agent.py console --profile restaurant
+#
+# 3. 環境變數 AGENT_PROFILE
+#    例：AGENT_PROFILE=restaurant uv run agent.py console
+#
+# 預設：car_inspection
 # ───────────────────────────────────────────────────────────
 
-def _get_profile_name() -> str:
-    """從 sys.argv 或環境變數取得 profile 名稱。"""
-    # 先檢查命令列參數 --profile / -p
+DEFAULT_PROFILE = "car_inspection"
+
+
+def _get_cli_profile_name() -> str:
+    """從 sys.argv 或環境變數取得 profile 名稱（啟動時的預設值）。"""
     for i, arg in enumerate(sys.argv):
         if arg in ("--profile", "-p") and i + 1 < len(sys.argv):
             name = sys.argv.pop(i + 1)
             sys.argv.pop(i)
             return name
-
-    # 再檢查環境變數
-    return os.environ.get("AGENT_PROFILE", "car_inspection")
+    return os.environ.get("AGENT_PROFILE", DEFAULT_PROFILE)
 
 
-PROFILE_NAME = _get_profile_name()
+def _get_runtime_profile_name(ctx: JobContext) -> str:
+    """
+    從 Room metadata 動態決定 profile（Cloud 部署用）。
 
-try:
-    PROFILE = load_profile(PROFILE_NAME)
-except FileNotFoundError as e:
-    logger.error(str(e))
-    sys.exit(1)
+    前端建房間時可帶：
+      metadata: '{"profile": "restaurant"}'
 
-PhoneAgent = create_agent_class(PROFILE)
-AGENT_NAME = PROFILE.get("agent_name", "voice-assistant")
+    若 metadata 不存在或無 profile 欄位，fallback 到 CLI/env 設定。
+    """
+    # 1. 先嘗試從 room metadata 讀取
+    try:
+        room_metadata = ctx.job.room.metadata
+        if room_metadata:
+            data = json.loads(room_metadata)
+            profile_name = data.get("profile")
+            if profile_name and profile_name in list_profiles():
+                logger.info("Profile from room metadata: %s", profile_name)
+                return profile_name
+            elif profile_name:
+                logger.warning(
+                    "Room metadata requested profile '%s' but not found. "
+                    "Available: %s. Falling back to default.",
+                    profile_name, ", ".join(list_profiles()),
+                )
+    except (json.JSONDecodeError, AttributeError) as e:
+        logger.debug("No valid profile in room metadata: %s", e)
 
-logger.info("Loaded profile: %s (%s)", PROFILE.get("name"), PROFILE_NAME)
+    # 2. 嘗試從 agent dispatch metadata 讀取
+    try:
+        job_metadata = ctx.job.metadata
+        if job_metadata:
+            data = json.loads(job_metadata)
+            profile_name = data.get("profile")
+            if profile_name and profile_name in list_profiles():
+                logger.info("Profile from dispatch metadata: %s", profile_name)
+                return profile_name
+    except (json.JSONDecodeError, AttributeError):
+        pass
+
+    # 3. Fallback: CLI / env
+    return CLI_PROFILE_NAME
+
+
+CLI_PROFILE_NAME = _get_cli_profile_name()
+
+logger.info("Default profile: %s", CLI_PROFILE_NAME)
 logger.info("Available profiles: %s", ", ".join(list_profiles()))
 
 
 async def entrypoint(ctx: JobContext):
+    # ── 動態選擇 profile（支援 room metadata 切換）──
+    profile_name = _get_runtime_profile_name(ctx)
+    profile = load_profile(profile_name)
+    PhoneAgent = create_agent_class(profile)
+    logger.info("Session using profile: %s (%s)", profile.get("name"), profile_name)
+
     vad = silero.VAD.load()
 
     session = AgentSession(
@@ -128,4 +175,4 @@ async def entrypoint(ctx: JobContext):
     )
 
 if __name__ == "__main__":
-    cli.run_app(WorkerOptions(entrypoint_fnc=entrypoint, agent_name=AGENT_NAME))
+    cli.run_app(WorkerOptions(entrypoint_fnc=entrypoint, agent_name="voice-assistant"))
