@@ -40,6 +40,13 @@ export async function POST(req: Request) {
     // Recreate the RoomConfiguration object from JSON object.
     const roomConfig = RoomConfiguration.fromJson(body?.room_config, { ignoreUnknownFields: true });
 
+    // If a profile is specified, set it as room metadata so the agent can
+    // dynamically load the correct YAML profile at runtime.
+    const profile = body?.profile;
+    if (profile && typeof profile === 'string') {
+      roomConfig.metadata = JSON.stringify({ profile });
+    }
+
     // Generate participant token
     const participantName = 'user';
     const participantIdentity = `voice_assistant_user_${Math.floor(Math.random() * 10_000)}`;

@@ -105,6 +105,10 @@ export function getSandboxTokenSource(appConfig: AppConfig) {
         }
       : undefined;
 
+    // Support runtime profile selection via URL query param: ?profile=restaurant
+    const urlParams = new URLSearchParams(window.location.search);
+    const profile = urlParams.get('profile') || appConfig.agentProfile || undefined;
+
     try {
       const res = await fetch(url.toString(), {
         method: 'POST',
@@ -114,6 +118,7 @@ export function getSandboxTokenSource(appConfig: AppConfig) {
         },
         body: JSON.stringify({
           room_config: roomConfig,
+          profile,
         }),
       });
       return await res.json();

@@ -28,6 +28,9 @@ export interface AppConfig {
   // agent dispatch configuration
   agentName?: string;
 
+  // agent profile selection (maps to backend YAML profiles)
+  agentProfile?: string;
+
   // LiveKit Cloud Sandbox configuration
   sandboxId?: string;
 }
@@ -66,6 +69,9 @@ export const APP_CONFIG_DEFAULTS: AppConfig = {
 
   // agent dispatch configuration
   agentName: process.env.AGENT_NAME ?? undefined,
+
+  // agent profile selection — set via query param ?profile=restaurant or env
+  agentProfile: process.env.AGENT_PROFILE ?? undefined,
 
   // LiveKit Cloud Sandbox configuration
   sandboxId: undefined,
