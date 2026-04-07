@@ -287,9 +287,9 @@ lk agent update-secrets --secrets "AGENT_PROFILE=car_inspection"
 
 **注意**：若新增或修改 profile YAML 內容，仍需 `lk agent deploy` 重新打包。
 
-### 議題 2：Google Real-time API 介接 🔧 進行中
+### 議題 2：Google Real-time API 介接 ✅ 已完成
 
-**現況**：Realtime 模式已可正常運作（歡迎語、tool calling 均驗證通過）。
+**現況**：Realtime 模式本地 & Cloud 均可正常運作，前端網頁測試通過。
 
 **已完成**：
 - [x] 評估 Google Real-time API 作為 STT+LLM+TTS 一體方案的可行性
@@ -301,6 +301,8 @@ lk agent update-secrets --secrets "AGENT_PROFILE=car_inspection"
 - [x] 修正 voice 名稱（Gemini 不支援 `Nova`，預設改為 `Kore`）
 - [x] Tool calling 延遲優化（`NON_BLOCKING` + `WHEN_IDLE`，避免靜音等待與截斷）
 - [x] 實機測試歡迎語與 tool 呼叫正常運作
+- [x] Cloud secrets 上傳成功（`GOOGLE_API_KEY`、`AGENT_MODE`、`AGENT_PROFILE`）
+- [x] 前端網頁 profile 切換測試通過
 
 **架構**：
 - **Pipeline 模式**（預設）：STT → LLM → TTS（LiveKit Inference，無需額外 API key）
@@ -335,11 +337,10 @@ lk agent update-secrets --secrets "AGENT_MODE=realtime" --secrets "GOOGLE_API_KE
 ```
 
 **待辦**：
-- [ ] Cloud secrets 上傳（`AGENT_MODE=realtime`、`GOOGLE_API_KEY`）— 上次因 LiveKit 後端 transaction 衝突失敗，需重試
 - [ ] 延遲 & 品質 A/B 比較（Pipeline vs Realtime）
 - [ ] 決定正式上線採用的模式
 
-### 議題 3：SIP 電話介接
+### 議題 3：SIP 電話介接 🔧 進行中
 
 **現況**：Inbound 電話已可介接。✅
 
@@ -349,7 +350,8 @@ lk agent update-secrets --secrets "AGENT_MODE=realtime" --secrets "GOOGLE_API_KE
 - [x] Inbound 通話可正常進入 agent
 
 **待辦**：
-- [ ] 電話號碼與 profile 的對應機制（不同號碼 → 不同場域）
+- [ ] SIP + profile 切換聯合測試（不同電話號碼 → 不同場域）
+- [ ] 電話號碼與 profile 的對應機制實作（如需要）
 - [ ] Outbound 電話撥打（如有需求）
 
 ---
