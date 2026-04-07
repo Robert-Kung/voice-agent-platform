@@ -61,7 +61,7 @@ def load_profile(name: str) -> dict:
 # ── Dynamic Agent class creation ───────────────────────────
 
 
-def create_agent_class(profile: dict):
+def create_agent_class(profile: dict, mode: str = "pipeline"):
     """
     根據 profile 動態建立主要 Phone Agent class。
 
@@ -70,6 +70,10 @@ def create_agent_class(profile: dict):
     2. 若 profile 沒有 tools 區塊 → 不附加任何 tool（純對話 agent）
 
     每個 tool 由 agent_tools.py 的 TOOL_REGISTRY 工廠函式建立。
+
+    mode：
+      - "pipeline"：session.say() 逐字播放歡迎詞（需要獨立 TTS）
+      - "realtime"：session.generate_reply() 指示 RealtimeModel 說出歡迎詞（無獨立 TTS）
     """
     agent_instructions = profile.get("instructions", "")
     welcome = profile.get("welcome_message", "您好，請問有什麼可以為您服務的？")
@@ -83,7 +87,14 @@ def create_agent_class(profile: dict):
             super().__init__(instructions=agent_instructions)
 
         async def on_enter(self) -> None:
-            await self.session.say(welcome)
+            if mode == "realtime":
+                # Realtime 模式無獨立 TTS，session.say() 會拋 RuntimeError
+                # 改用 generate_reply 指示 RealtimeModel 以音訊直接說出歡迎詞
+                await self.session.generate_reply(
+                    instructions=f"請直接說出以下歡迎語，不要改變內容：「{welcome}」"
+                )
+            else:
+                await self.session.say(welcome)
 
     # 動態掛載 tool 方法到 class 上
     for tool_name, tool_method in tool_methods.items():

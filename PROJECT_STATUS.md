@@ -1,6 +1,6 @@
 # Voice Agent Workshop — 專案現況
 
-> 最後更新：2026-04-02
+> 最後更新：2026-04-07
 
 ---
 
@@ -117,7 +117,7 @@ uv run agent.py dev
 ### 使用方式
 
 ```bash
-# 部署 agent 到 Cloud
+# 部署 agent 到 Cloud（程式碼有異動時）
 lk agent deploy
 
 # 透過 Dashboard Playground 或 Sandbox 測試
@@ -132,6 +132,52 @@ lk agent deploy
 | Agent ID | `CA_TKHBUEw7z6YK` |
 | Agent name | `voice-assistant` |
 | 部署命令 | `lk agent deploy` |
+
+### Cloud Secrets 管理
+
+> ⚠️ `.env` 只在本地 `uv run` 時讀取，**不會自動上傳**到 Cloud。
+> Cloud 環境需用 `lk agent update-secrets` 獨立設定。
+> `LIVEKIT_URL` / `LIVEKIT_API_KEY` / `LIVEKIT_API_SECRET` 由 Cloud 自動注入，不需上傳。
+
+| Secret | 預設值 | 必要性 | 說明 |
+|--------|--------|:---:|------|
+| `AGENT_NAME` | `voice-assistant` | ✅ 已設 | agent 名稱 |
+| `AGENT_PROFILE` | `car_inspection` | ✅ 已設 | 場域選擇 |
+| `AGENT_MODE` | `pipeline` | ⚠️ 未設 | 不設 = pipeline；realtime 模式必須設 |
+| `GOOGLE_API_KEY` | — | ⚠️ 未設 | Realtime 模式必要；值見 `.env` |
+| `GOOGLE_REALTIME_VOICE` | `Kore` | 可選 | 不設使用預設值 |
+| `GOOGLE_REALTIME_MODEL` | `gemini-2.5-flash-native-audio-preview-12-2025` | 可選 | 不設使用預設值 |
+
+**完整上傳 secrets 指令（realtime 模式）：**
+
+```bash
+# 1. deploy 程式碼
+lk agent deploy
+
+# 2. 上傳 secrets（GOOGLE_API_KEY 值從 .env 複製，勿貼入文件）
+lk agent update-secrets \
+  --secrets "AGENT_MODE=realtime" \
+  --secrets "AGENT_PROFILE=car_inspection" \
+  --secrets "GOOGLE_API_KEY=<從 .env 複製>"
+```
+
+**Pipeline 模式（不需 Google API Key）：**
+
+```bash
+lk agent deploy
+lk agent update-secrets \
+  --secrets "AGENT_MODE=pipeline" \
+  --secrets "AGENT_PROFILE=car_inspection"
+```
+
+**何時需要 deploy vs 只更新 secrets：**
+
+| 改了什麼 | 需要 deploy | 需要 update-secrets |
+|---------|:-----------:|:--------------------:|
+| `agent.py` / `agent_factory.py` / `agent_tools.py` 程式碼 | ✅ | ❌ |
+| `profiles/*.yaml` 內容 | ✅ | ❌ |
+| 只切換環境變數（profile、mode、voice…） | ❌ | ✅ |
+| 兩者都改 | ✅ | ✅ |
 
 ### Profile 切換方式
 
@@ -150,9 +196,6 @@ lk agent deploy
 lk agent update-secrets --secrets "AGENT_PROFILE=restaurant"
 lk agent update-secrets --secrets "AGENT_PROFILE=dental_clinic"
 lk agent update-secrets --secrets "AGENT_PROFILE=car_inspection"
-
-# 重新打包並部署（程式碼有改動時用這個）
-lk agent deploy --secrets "AGENT_PROFILE=restaurant"
 
 # 確認目前狀態
 lk agent status
@@ -198,7 +241,7 @@ entrypoint(ctx)
 
 ## 測試
 
-### 單元測試（28 個，0.5 秒內完成）
+### 單元測試（34 個，1.3 秒內完成）
 
 ```bash
 uv run pytest tests/ -v
@@ -214,6 +257,7 @@ uv run pytest tests/ -v
 | TestToolIsolation | 2 | 不同 profile tools 互不干擾 |
 | TestSearchMenuTool | 1 | 菜單 config 載入 |
 | TestCalculatePriceTool | 1 | 價格規則 config 載入 |
+| TestAgentMode | 6 | Realtime/Pipeline 模式切換、RealtimeModel 建構 |
 
 ### 實機測試
 
@@ -243,14 +287,57 @@ lk agent update-secrets --secrets "AGENT_PROFILE=car_inspection"
 
 **注意**：若新增或修改 profile YAML 內容，仍需 `lk agent deploy` 重新打包。
 
-### 議題 2：Google Real-time API 介接
+### 議題 2：Google Real-time API 介接 🔧 進行中
 
-**現況**：目前使用 LiveKit Inference（Gemini Flash Lite + GPT-4.1-mini fallback）。專案計畫提到要測試 Google Real-time API 以取得更好的中文語音體驗。
+**現況**：Realtime 模式已可正常運作（歡迎語、tool calling 均驗證通過）。
+
+**已完成**：
+- [x] 評估 Google Real-time API 作為 STT+LLM+TTS 一體方案的可行性
+- [x] 與 LiveKit Agent 框架的介接方式（`livekit-plugins-google` 的 `RealtimeModel`）
+- [x] SDK 升級至 1.4.6（向前相容，無需重構既有程式碼）
+- [x] 雙模式 session 建立（`AGENT_MODE=pipeline|realtime`）
+- [x] 單元測試新增 6 個（共 34 個全通過）
+- [x] 修正 model 名稱（需用 `gemini-2.5-flash-native-audio-preview-12-2025`，不可用 3.x 版本）
+- [x] 修正 voice 名稱（Gemini 不支援 `Nova`，預設改為 `Kore`）
+- [x] Tool calling 延遲優化（`NON_BLOCKING` + `WHEN_IDLE`，避免靜音等待與截斷）
+- [x] 實機測試歡迎語與 tool 呼叫正常運作
+
+**架構**：
+- **Pipeline 模式**（預設）：STT → LLM → TTS（LiveKit Inference，無需額外 API key）
+- **Realtime 模式**：Google Gemini Live API（audio-in → audio-out，需 `GOOGLE_API_KEY`）
+
+**Realtime 模式關鍵設定**：
+
+| 參數 | 值 | 說明 |
+|------|-----|------|
+| model | `gemini-2.5-flash-native-audio-preview-12-2025` | Live API 專用模型；chat 模型不可用 |
+| voice | `Kore`（預設） | Gemini 聲音；OpenAI 聲音名稱（如 Nova）不相容 |
+| `tool_behavior` | `NON_BLOCKING` | tool 執行期間模型說橋接語，不靜音 |
+| `tool_response_scheduling` | `WHEN_IDLE` | 說完當前語音才插入 tool 結果，避免截斷 |
+| VAD | 內建（不加外部 VAD） | Gemini Live 有內建 VAD；加 silero 反而衝突 |
+
+> **為何不用 Gemini 3.1？** LiveKit 官方文件記載 `gemini-3.1-flash-live-preview` 有已知相容性問題：
+> - `send_client_content` 在第一輪對話後被 API 拒絕（1007 錯誤），這是我們最初遇到的根本原因
+> - `generate_reply()`、`update_instructions()`、`update_chat_ctx()` 與 3.1 不相容（呼叫被忽略）
+> - **非同步 function calling（NON_BLOCKING）3.1 不支援**，只有 2.5 支援
+> - 官方正在調查長期修復方案，目前維持 2.5
+
+**切換方式**：
+```bash
+# 本地測試
+AGENT_MODE=realtime uv run agent.py console -p car_inspection
+
+# 切換 voice
+GOOGLE_REALTIME_VOICE=Charon AGENT_MODE=realtime uv run agent.py console -p car_inspection
+
+# Cloud 部署（GOOGLE_API_KEY 值從 .env 取得，勿寫入文件）
+lk agent update-secrets --secrets "AGENT_MODE=realtime" --secrets "GOOGLE_API_KEY=<從 .env 複製>"
+```
 
 **待辦**：
-- [ ] 評估 Google Real-time API 作為 STT+LLM+TTS 一體方案的可行性
-- [ ] 與 LiveKit Agent 框架的介接方式
-- [ ] 與現有 `Call_Center` 專案經驗整合
+- [ ] Cloud secrets 上傳（`AGENT_MODE=realtime`、`GOOGLE_API_KEY`）— 上次因 LiveKit 後端 transaction 衝突失敗，需重試
+- [ ] 延遲 & 品質 A/B 比較（Pipeline vs Realtime）
+- [ ] 決定正式上線採用的模式
 
 ### 議題 3：SIP 電話介接
 

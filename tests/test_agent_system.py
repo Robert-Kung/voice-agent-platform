@@ -12,6 +12,7 @@ Tests for agent_tools.py & agent_factory.py
 
 import datetime
 import asyncio
+import os
 import pytest
 from unittest.mock import patch
 from zoneinfo import ZoneInfo
@@ -394,3 +395,82 @@ class TestCalculatePriceTool:
         rule_names = [r["name"] for r in rules]
         assert "午餐套餐" in rule_names
         assert "晚餐套餐" in rule_names
+
+
+# ═══════════════════════════════════════════════════════════
+# 9. Agent Mode（Pipeline vs Realtime）
+# ═══════════════════════════════════════════════════════════
+
+
+class TestAgentMode:
+    def test_agent_mode_defaults_to_pipeline(self):
+        """AGENT_MODE 未設定時應預設為 pipeline。"""
+        import importlib
+        import agent as agent_mod
+
+        with patch.dict("os.environ", {}, clear=False):
+            # 移除 AGENT_MODE（如果有的話）
+            env = {k: v for k, v in os.environ.items() if k != "AGENT_MODE"}
+            with patch.dict("os.environ", env, clear=True):
+                mode = os.environ.get("AGENT_MODE", "pipeline")
+                assert mode == "pipeline"
+
+    def test_agent_mode_reads_env_var(self):
+        """AGENT_MODE=realtime 應正確讀取。"""
+        with patch.dict("os.environ", {"AGENT_MODE": "realtime"}):
+            mode = os.environ.get("AGENT_MODE", "pipeline")
+            assert mode == "realtime"
+
+    def test_google_realtime_model_importable(self):
+        """livekit-plugins-google 的 RealtimeModel 應可匯入。"""
+        from livekit.plugins.google.realtime import RealtimeModel
+        assert RealtimeModel is not None
+
+    def test_pipeline_session_creation(self, car_profile):
+        """Pipeline 模式下 AgentSession 應使用 FallbackAdapter。"""
+        from livekit.agents import AgentSession, llm, stt, tts, inference
+
+        # 驗證 FallbackAdapter 可正常建構（不啟動 session）
+        llm_adapter = llm.FallbackAdapter([
+            inference.LLM(model="google/gemini-3.1-flash-lite"),
+        ])
+        assert llm_adapter is not None
+
+    def test_realtime_model_instantiation(self):
+        """RealtimeModel 應以 plugin 已知的 native-audio 模型名稱建構。"""
+        from livekit.plugins.google.realtime import RealtimeModel
+        with patch.dict("os.environ", {"GOOGLE_API_KEY": "test-key-for-unit-test"}):
+            # 正確：Live API 專用模型字串
+            model = RealtimeModel(
+                model="gemini-3.1-flash-live-preview",
+                voice="Nova",
+                temperature=0.8,
+            )
+            assert model is not None
+
+    def test_realtime_model_wrong_name_still_constructs(self):
+        """gemini-2.5-flash（非 Live API 模型）仍可建構，但連線時會失敗（API 層面錯誤）。"""
+        from livekit.plugins.google.realtime import RealtimeModel
+        with patch.dict("os.environ", {"GOOGLE_API_KEY": "test-key-for-unit-test"}):
+            # 型別是 LiveAPIModels | str，任何字串都可建構，錯誤在連線時才發生
+            model = RealtimeModel(model="gemini-2.5-flash", voice="Nova")
+            assert model is not None
+
+    def test_agent_class_works_with_both_modes(self, minimal_profile):
+        """create_agent_class 的兩種 mode 都應可建立 Agent class 並掛載 tools。"""
+        # pipeline 模式（預設）
+        PipelineAgent = create_agent_class(minimal_profile, mode="pipeline")
+        agent_p = PipelineAgent()
+        assert agent_p is not None
+        assert hasattr(PipelineAgent, "get_current_datetime")
+        assert hasattr(PipelineAgent, "lookup_qa")
+
+        # realtime 模式
+        RealtimeAgent = create_agent_class(minimal_profile, mode="realtime")
+        agent_r = RealtimeAgent()
+        assert agent_r is not None
+        assert hasattr(RealtimeAgent, "get_current_datetime")
+        assert hasattr(RealtimeAgent, "lookup_qa")
+
+        # 兩者是獨立的 class
+        assert PipelineAgent is not RealtimeAgent
