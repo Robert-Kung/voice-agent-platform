@@ -7,11 +7,12 @@ from dotenv import load_dotenv
 from livekit.agents import (
     AgentSession,
     JobContext,
-    RoomInputOptions,
+    TurnHandlingOptions,
     WorkerOptions,
     cli,
     inference,
     llm,
+    room_io,
     stt,
     tts,
 )
@@ -24,6 +25,34 @@ from agent_factory import load_profile, create_agent_class, list_profiles
 from google.genai import types as genai_types
 
 logger = logging.getLogger("agent")
+
+
+# ── TextInputRealtimeModel ─────────────────────────────────
+# 解決 Gemini Live API 音頻上下文累積造成的延遲遞增問題。
+#
+# 問題原因：Gemini 接收原始音頻 → 音頻 token 隨對話時間累積
+#   → 回覆延遲從 1-2 秒遞增到 20-30 秒（已在所有 observability 資料中確認）
+#
+# 解法：攔截 push_audio / start_user_activity，不向 Gemini 傳送音頻，
+#   改由 STT（Deepgram）轉錄文字後，透過 send_client_content 傳入。
+#   文字 token 遠小於音頻 token，延遲可保持穩定。
+#
+# 完整信號流：
+#   [語音] → Silero VAD → Deepgram STT → MultilingualModel EOU
+#         → on_user_turn_completed → session.generate_reply(user_input=text)
+#         → Gemini（文字輸入）→ 語音輸出
+# ───────────────────────────────────────────────────────────
+
+class TextInputRealtimeModel(google.realtime.RealtimeModel):
+    """封裝 RealtimeModel，攔截音頻推送，改為純文字輸入模式。"""
+
+    def session(self):
+        sess = super().session()
+        # 不向 Gemini 推送音頻（避免 audio token 累積導致延遲遞增）
+        sess.push_audio = lambda frame: None
+        # 不發送 activity_start/end 信號（無音頻時不需要活動信號）
+        sess.start_user_activity = lambda: None
+        return sess
 
 load_dotenv(".env")
 
@@ -124,7 +153,11 @@ async def entrypoint(ctx: JobContext):
     PhoneAgent = create_agent_class(profile, mode=AGENT_MODE)
     logger.info("Session using profile: %s (%s), mode: %s", profile.get("name"), profile_name, AGENT_MODE)
 
-    vad = silero.VAD.load()
+    vad = silero.VAD.load(
+        activation_threshold=0.65,   # 預設 0.5；調高減少 echo/雜音誤觸
+        min_silence_duration=0.8,    # 預設 0.55s；調長避免 agent 說話停頓被誤判 EOU
+        min_speech_duration=0.1,     # 預設 0.05s；過濾短暫雜音
+    )
 
     if AGENT_MODE == "realtime":
         # ── Google Gemini Live API（全端對端 audio-in → audio-out）──
@@ -136,21 +169,44 @@ async def entrypoint(ctx: JobContext):
         realtime_voice = os.environ.get("GOOGLE_REALTIME_VOICE", "Kore")
         realtime_model = os.environ.get(
             "GOOGLE_REALTIME_MODEL",
-            "gemini-2.5-flash-native-audio-preview-12-2025",  # plugin 預設（Gemini API）
-            # Vertex AI 備選："gemini-live-2.5-flash-native-audio"
-            # gemini-3.1-flash-live-preview 是 Live API 最新模型，尚未在 plugin 預設中更新
+            "gemini-2.5-flash-native-audio-preview-12-2025",  # 2.5：generate_reply() 正常
+            # "gemini-3.1-flash-live-preview"  # 3.1：plugin 1.5.1 的 generate_reply() 用
+            #   send_client_content，3.1 完全封鎖此 API → 任何情況都會 1007
+            #   待 plugin 改用 send_realtime_input 後再切回
         )
         logger.info("Realtime mode: model=%s, voice=%s", realtime_model, realtime_voice)
-        
+
+        # 2.5：thinkingBudget=0 完全關閉 thinking → 最低延遲，等同 3.1 minimal 效果
+        # 3.1：改用 thinkingLevel="minimal"（3.1 不支援 thinkingBudget）
+        # 注意：3.1 仍不可用，generate_reply() 走 send_client_content，3.1 完全封鎖 → 1007
+        thinking_cfg = genai_types.ThinkingConfig(thinkingBudget=0)
+
+        # SIP Echo 解法：關閉 Gemini VAD，改由 LiveKit Silero VAD 控制
+        # 必須保持 disabled=True 以確保 SDK 不跳過 on_user_turn_completed 回調
+        # （SDK 在 turn_detection=True 時會直接 return，不觸發文字轉發流程）
+        #
+        # 架構：TextInputRealtimeModel 攔截音頻 → 只透過 STT 文字輸入 Gemini
+        # 解決 Gemini Live API 音頻 token 累積導致的延遲遞增（1s → 30s）
+        #
+        # 官方文件：使用 LiveKit turn detection 時，需要額外的 streaming STT
+        # https://docs.livekit.io/agents/models/realtime/plugins/gemini/#turn-detection
         session = AgentSession(
-            llm=google.realtime.RealtimeModel(
+            vad=vad,
+            stt=inference.STT(model="deepgram/nova-2", language="zh-TW"),
+            turn_handling=TurnHandlingOptions(
+                turn_detection=MultilingualModel(),
+            ),
+            llm=TextInputRealtimeModel(
                 model=realtime_model,
                 voice=realtime_voice,
                 temperature=0.8,
-                # NON_BLOCKING：tool call 時模型可繼續說橋接語，不會靜音等待
-                # WHEN_IDLE：等模型說完當前語音再插入 tool 結果（避免截斷）
-                tool_behavior=genai_types.Behavior.NON_BLOCKING,
-                tool_response_scheduling=genai_types.FunctionResponseScheduling.WHEN_IDLE,
+                thinking_config=thinking_cfg,
+                input_audio_transcription=None,  # 關閉 Gemini 內部轉寫，改用外部 STT
+                realtime_input_config=genai_types.RealtimeInputConfig(
+                    automatic_activity_detection=genai_types.AutomaticActivityDetection(
+                        disabled=True,
+                    ),
+                ),
             ),
         )
     else:
@@ -212,8 +268,10 @@ async def entrypoint(ctx: JobContext):
     await session.start(
         agent=PhoneAgent(),
         room=ctx.room,
-        room_input_options=RoomInputOptions(
-            noise_cancellation=noise_cancellation.BVC(),
+        room_options=room_io.RoomOptions(
+            audio_input=room_io.AudioInputOptions(
+                noise_cancellation=noise_cancellation.BVC(),
+            ),
         ),
     )
 
