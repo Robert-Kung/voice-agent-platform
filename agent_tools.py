@@ -53,6 +53,28 @@ def make_get_current_datetime(profile: dict, config: dict):
     return get_current_datetime
 
 
+def make_get_current_time(profile: dict, config: dict):
+    """只回傳目前時間與星期，讓 LLM 使用 system prompt 中的營業時間自行判斷。"""
+    tz = ZoneInfo(config.get("timezone", profile.get("timezone", "Asia/Taipei")))
+
+    @function_tool
+    async def get_current_time(self) -> dict:
+        """
+        取得目前台北時間與星期。
+        當使用者詢問任何服務是否營業、幾點開門、幾點關門時呼叫。
+        回傳後請依 system prompt 中的營業時間自行判斷並回答。
+        """
+        now = datetime.datetime.now(tz)
+        result = {
+            "current_time": now.strftime("%H:%M"),
+            "weekday": now.strftime("%A"),  # 英文全名，如 Monday / Saturday
+        }
+        logger.info("get_current_time: %s %s (%s)", result["current_time"], result["weekday"], now.strftime("%Z%z"))
+        return result
+
+    return get_current_time
+
+
 # ── 2. check_business_status ──────────────────────────────
 
 def _parse_time(s: str) -> int:
@@ -66,31 +88,57 @@ def _eval_business_status(profile: dict, service_type: str) -> dict:
     now = datetime.datetime.now(tz)
     current_minutes = now.hour * 60 + now.minute
     weekday = now.weekday()
+    current_time_str = now.strftime("%H:%M")
+    logger.info(
+        "check_business_status: service=%s local_time=%s weekday=%s tz=%s",
+        service_type, now.strftime("%Y-%m-%d %H:%M %Z%z"), now.strftime("%a"), tz,
+    )
 
     services = profile.get("services", {})
     svc = services.get(service_type)
     if not svc:
-        return {"is_open": False, "service_hours_text": "查無此服務類型。"}
+        return {
+            "is_open": False,
+            "current_time": current_time_str,
+            "service_hours_text": "查無此服務類型。",
+        }
 
     if svc.get("always_open"):
-        return {"is_open": True, "service_hours_text": svc.get("hours_text", "")}
+        return {
+            "is_open": True,
+            "current_time": current_time_str,
+            "service_hours_text": svc.get("hours_text", ""),
+        }
 
     closed_days = svc.get("closed_days", [])
     if weekday in closed_days:
         hours_text = svc.get("hours_text", {})
         text = hours_text if isinstance(hours_text, str) else hours_text.get("closed", "今日休息。")
-        return {"is_open": False, "service_hours_text": text}
+        return {
+            "is_open": False,
+            "current_time": current_time_str,
+            "service_hours_text": text,
+        }
 
     schedule = svc.get("schedule", {})
     is_open = False
+    close_time_str = ""
 
     if weekday == 5 and "saturday" in schedule:
         slot = schedule["saturday"]
         start, end = _parse_time(slot["start"]), _parse_time(slot["end"])
         is_open = start <= current_minutes < end
+        close_time_str = slot["end"] if is_open else ""
         hours_text = svc.get("hours_text", {})
         text = hours_text if isinstance(hours_text, str) else hours_text.get("saturday", hours_text.get("weekday", ""))
-        return {"is_open": is_open, "service_hours_text": text}
+        result = {
+            "is_open": is_open,
+            "current_time": current_time_str,
+            "service_hours_text": text,
+        }
+        if is_open and close_time_str:
+            result["closes_at"] = close_time_str
+        return result
 
     for slot_name, slot in schedule.items():
         if slot_name == "saturday":
@@ -98,11 +146,19 @@ def _eval_business_status(profile: dict, service_type: str) -> dict:
         start, end = _parse_time(slot["start"]), _parse_time(slot["end"])
         if start <= current_minutes < end:
             is_open = True
+            close_time_str = slot["end"]
             break
 
     hours_text = svc.get("hours_text", {})
     text = hours_text if isinstance(hours_text, str) else hours_text.get("weekday", "")
-    return {"is_open": is_open, "service_hours_text": text}
+    result = {
+        "is_open": is_open,
+        "current_time": current_time_str,
+        "service_hours_text": text,
+    }
+    if is_open and close_time_str:
+        result["closes_at"] = close_time_str
+    return result
 
 
 def make_check_business_status(profile: dict, config: dict):
@@ -118,7 +174,9 @@ def make_check_business_status(profile: dict, config: dict):
     @function_tool(description=description)
     async def check_business_status(self, service_type: str) -> dict:
         """依服務別判斷目前是否營業。"""
-        return _eval_business_status(_profile, service_type)
+        result = _eval_business_status(_profile, service_type)
+        logger.info("check_business_status result: %s", result)
+        return result
 
     return check_business_status
 
@@ -132,15 +190,20 @@ def make_lookup_qa(profile: dict, config: dict):
     @function_tool
     async def lookup_qa(self, question_intent: str) -> dict:
         """
-        查詢已建檔的相關 QA。
+        查詢已建檔的 QA，涵蓋汽車代檢、洗車、加油三項服務。
+        當使用者詢問任一服務的細節（費用、流程、規定、注意事項等）時呼叫。
 
         Args:
-            question_intent: 使用者問題的意圖摘要（中文），例如「要攜帶什麼文件」
+            question_intent: 使用者問題的意圖摘要（中文），需包含服務類型，
+                例如「驗車要攜帶什麼文件」、「洗車費用多少」、「加油有哪些油種」
         """
+        logger.info("lookup_qa: intent=%r", question_intent)
         for item in qa_data:
             keywords = item.get("keywords", [])
             if any(kw in question_intent for kw in keywords):
+                logger.info("lookup_qa: hit keywords=%s", keywords)
                 return {"found": True, "answer_text": item["answer"]}
+        logger.info("lookup_qa: no match found")
         return {"found": False, "answer_text": ""}
 
     return lookup_qa
@@ -170,6 +233,9 @@ def make_transfer_to_human(profile: dict, config: dict):
             super().__init__(instructions=instructions, chat_ctx=chat_ctx)
 
         async def on_enter(self) -> None:
+            # handoff 發生時仍在同一個 session 內（第一個 model turn 已完成）
+            # generate_reply() 此時對 Gemini 3.1 可能觸發 1007，
+            # 但 pipeline 模式下此路徑完全正常
             await self.session.generate_reply(instructions=greeting)
 
     _HumanOperator.__name__ = f"HumanOperator_{profile.get('name', 'unknown')}"
@@ -180,6 +246,7 @@ def make_transfer_to_human(profile: dict, config: dict):
         轉接真人接聽。
         僅在無法對應任何已建檔 QA、意圖不明、或使用者明確要求轉接時使用。
         """
+        logger.info("transfer_to_human: handing off to %s", _HumanOperator.__name__)
         return _HumanOperator(chat_ctx=self.chat_ctx), transfer_msg
 
     return transfer_to_human
@@ -407,6 +474,7 @@ def make_calculate_price(profile: dict, config: dict):
 
 TOOL_REGISTRY: dict[str, callable] = {
     "get_current_datetime": make_get_current_datetime,
+    "get_current_time": make_get_current_time,        # 輕量版：只回傳時間，業務邏輯由 LLM 從 system prompt 判斷
     "check_business_status": make_check_business_status,
     "lookup_qa": make_lookup_qa,
     "transfer_to_human": make_transfer_to_human,
