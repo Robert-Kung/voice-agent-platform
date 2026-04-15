@@ -154,9 +154,9 @@ async def entrypoint(ctx: JobContext):
     logger.info("Session using profile: %s (%s), mode: %s", profile.get("name"), profile_name, AGENT_MODE)
 
     vad = silero.VAD.load(
-        activation_threshold=0.65,   # 預設 0.5；調高減少 echo/雜音誤觸
-        min_silence_duration=0.8,    # 預設 0.55s；調長避免 agent 說話停頓被誤判 EOU
-        min_speech_duration=0.1,     # 預設 0.05s；過濾短暫雜音
+        activation_threshold=0.7,    # 預設 0.5；調高減少 SIP echo/雜音誤觸
+        min_silence_duration=1.0,    # 預設 0.55s；調長避免 agent 說話停頓被誤判 EOU
+        min_speech_duration=0.15,    # 預設 0.05s；過濾短暫雜音
     )
 
     if AGENT_MODE == "realtime":

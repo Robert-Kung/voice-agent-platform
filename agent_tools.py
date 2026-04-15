@@ -212,8 +212,15 @@ def make_lookup_qa(profile: dict, config: dict):
 # ── 4. transfer_to_human ─────────────────────────────────
 
 def make_transfer_to_human(profile: dict, config: dict):
-    """轉接真人服務。"""
-    from livekit.agents import Agent
+    """轉接真人服務。
+
+    config 範例（YAML profile 的 tools 區塊）：
+      - name: transfer_to_human
+        config:
+          voice: "Puck"           # Handoff 後使用不同聲音，讓使用者感知已切換
+          transfer_message: "正在為您轉接服務人員，請稍候。"
+    """
+    from livekit.agents import Agent, StopResponse, llm as _llm
 
     instructions = profile.get(
         "human_operator_instructions",
@@ -228,15 +235,82 @@ def make_transfer_to_human(profile: dict, config: dict):
         "感謝您的耐心等候，現在為您轉接服務人員，請稍候。",
     )
 
+    # Realtime 模式下 _HumanOperator 使用的聲音
+    # 優先順序：config.voice > profile.human_operator_voice > 預設 "Puck"
+    # 預設用男聲 Puck，與主 Agent 的女聲 Kore 區別，讓使用者聽到切換
+    human_voice = config.get(
+        "voice",
+        profile.get("human_operator_voice", "Puck"),
+    )
+
+    def _build_human_realtime_model(session_llm):
+        """從目前 session 的 RealtimeModel 複製設定，但替換聲音。
+
+        handoff 後新 AgentActivity 會用此 model 建立新的 Gemini WebSocket，
+        使用者會聽到不同聲音，確認已切換到門市人員。
+        """
+        try:
+            from google.genai import types as _genai_types
+
+            # 從現有 model 取得設定
+            opts = session_llm._opts
+            model_name = opts.model
+
+            # 動態判斷是否為 TextInputRealtimeModel（攔截音頻的子類）
+            model_cls = type(session_llm)
+
+            human_model = model_cls(
+                model=model_name,
+                voice=human_voice,
+                temperature=opts.temperature,
+                thinking_config=opts.thinking_config,
+                input_audio_transcription=opts.input_audio_transcription,
+                realtime_input_config=opts.realtime_input_config,
+            )
+            logger.info(
+                "Built HumanOperator realtime model: %s voice=%s (cls=%s)",
+                model_name, human_voice, model_cls.__name__,
+            )
+            return human_model
+        except Exception:
+            logger.exception("Failed to build HumanOperator realtime model, falling back to session LLM")
+            return None
+
     class _HumanOperator(Agent):
-        def __init__(self, chat_ctx=None):
-            super().__init__(instructions=instructions, chat_ctx=chat_ctx)
+        def __init__(self, chat_ctx=None, llm_override=None):
+            kwargs = dict(instructions=instructions, chat_ctx=chat_ctx)
+            if llm_override is not None:
+                kwargs["llm"] = llm_override
+            super().__init__(**kwargs)
 
         async def on_enter(self) -> None:
-            # handoff 發生時仍在同一個 session 內（第一個 model turn 已完成）
-            # generate_reply() 此時對 Gemini 3.1 可能觸發 1007，
-            # 但 pipeline 模式下此路徑完全正常
             await self.session.generate_reply(instructions=greeting)
+
+        async def on_user_turn_completed(self, turn_ctx, new_message) -> None:
+            """Realtime 模式：攔截 STT 文字轉發給 Gemini，與主 Agent 同邏輯。
+
+            問題背景：TextInputRealtimeModel 攔截了 push_audio（no-op），
+            Gemini 收不到音頻。SDK 對 RealtimeModel 會在
+            on_user_turn_completed 後將 user_message 設為 None，
+            導致 generate_reply(user_input=None) 不送任何內容給 Gemini。
+
+            若 _HumanOperator 不覆寫此方法，handoff 後使用者說話
+            Gemini 完全聽不到，對話斷裂。
+            """
+            # Pipeline 模式：session.llm 是 LLM 類型，交由 SDK 預設流程
+            if not isinstance(self.session.llm, _llm.RealtimeModel):
+                return
+
+            user_text = new_message.text_content
+            if user_text:
+                logger.info(
+                    "HumanOperator realtime: forwarding STT text to Gemini (%d chars)",
+                    len(user_text),
+                )
+                self.session.generate_reply(user_input=user_text)
+            else:
+                logger.warning("HumanOperator realtime: empty STT transcript, skipping reply")
+            raise StopResponse()
 
     _HumanOperator.__name__ = f"HumanOperator_{profile.get('name', 'unknown')}"
 
@@ -246,8 +320,17 @@ def make_transfer_to_human(profile: dict, config: dict):
         轉接真人接聽。
         僅在無法對應任何已建檔 QA、意圖不明、或使用者明確要求轉接時使用。
         """
-        logger.info("transfer_to_human: handing off to %s", _HumanOperator.__name__)
-        return _HumanOperator(chat_ctx=self.chat_ctx), transfer_msg
+        # Realtime 模式：建立不同聲音的 model，讓使用者聽到切換
+        llm_override = None
+        if isinstance(self.session.llm, _llm.RealtimeModel):
+            llm_override = _build_human_realtime_model(self.session.llm)
+
+        logger.info(
+            "transfer_to_human: handing off to %s (voice=%s)",
+            _HumanOperator.__name__,
+            human_voice if llm_override else "session_default",
+        )
+        return _HumanOperator(chat_ctx=self.chat_ctx, llm_override=llm_override), transfer_msg
 
     return transfer_to_human
 

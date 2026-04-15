@@ -81,6 +81,11 @@ def create_agent_class(profile: dict, mode: str = "pipeline"):
     """
     agent_instructions = profile.get("instructions", "")
     welcome = profile.get("welcome_message", "您好，請問有什麼可以為您服務的？")
+    # Realtime 用描述性指令（Gemini 自然生成），Pipeline 用逐字稿（TTS 直讀）
+    welcome_instructions = profile.get(
+        "welcome_instructions",
+        "向來電者打招呼，簡短介紹自己並詢問需要什麼協助。"
+    )
 
     # 自動將 qa_data 嵌入 system instructions（取代 lookup_qa tool）
     # 好處：零額外 tool call 延遲，tokens 在 session 開始時一次載入，後續每輪不增加
@@ -103,13 +108,17 @@ def create_agent_class(profile: dict, mode: str = "pipeline"):
 
         async def on_enter(self) -> None:
             if mode == "realtime":
-                # Realtime 模式：用 generate_reply() 觸發模型主動說出歡迎詞
-                # on_enter 在第一個 model turn 前呼叫，send_client_content 對 3.1 有效
+                # Realtime 模式：用描述性指令觸發 Gemini 自然生成歡迎語
+                #
+                # 不能放逐字稿！instructions 在 SDK 中會作為 user turn 送入模型，
+                # 塞入完整歡迎文句 → Gemini 誤以為「使用者」在打招呼 → 回「聽不懂」。
+                # 改用描述性指令（welcome_instructions），讓 Gemini 依角色自然開口。
+                # welcome_message 保留給 pipeline 的 session.say() 使用。
                 await self.session.generate_reply(
-                    instructions=f"請直接說出以下歡迎語，不要改變內容：「{welcome}」"
+                    instructions=welcome_instructions,
                 )
             else:
-                # Pipeline 模式有獨立 TTS，直接播放
+                # Pipeline 模式有獨立 TTS，直接播放逐字稿
                 await self.session.say(welcome)
 
         async def on_user_turn_completed(self, turn_ctx, new_message) -> None:
