@@ -1,4 +1,50 @@
 services:
+  # ── Agent Worker ────────────────────────────────────────────
+  # 本機跑 LiveKit voice agent（連到 LiveKit Cloud）。
+  # 若 agent 改用 `lk agent create` 部署到 LiveKit Cloud，可註解掉此 service。
+  agent:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["uv", "run", "agent.py", "start"]
+    env_file:
+      - .env
+    environment:
+      - AGENT_DB_PATH=/app/data/agent_platform.db
+    volumes:
+      - ./data:/app/data
+    restart: unless-stopped
+
+  # ── Management API ──────────────────────────────────────────
+  # FastAPI — profiles / sessions / stats CRUD，供 admin UI 使用。
+  # 與 agent 共用同一個 SQLite 檔（data volume）。
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command:
+      - "uv"
+      - "run"
+      - "uvicorn"
+      - "api.main:app"
+      - "--host"
+      - "0.0.0.0"
+      - "--port"
+      - "8080"
+    ports:
+      - "8080:8080"
+    env_file:
+      - .env
+    environment:
+      - AGENT_DB_PATH=/app/data/agent_platform.db
+    volumes:
+      - ./data:/app/data
+    restart: unless-stopped
+
+  # ── Frontend (Next.js) ──────────────────────────────────────
+  # Voice 測試頁 (`/`) + Admin UI (`/admin/*`)。
+  # NEXT_PUBLIC_ADMIN_API_URL 預設 http://localhost:8080；
+  # 若部署到非本機環境，請改為對外可存取的 API URL 並以 build arg 傳入。
   frontend:
     build:
       context: ./frontend
@@ -8,8 +54,11 @@ services:
         LIVEKIT_API_KEY: ${LIVEKIT_API_KEY}
         LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET}
         AGENT_NAME: ${AGENT_NAME:-}
+        NEXT_PUBLIC_ADMIN_API_URL: ${NEXT_PUBLIC_ADMIN_API_URL:-http://localhost:8080}
     ports:
       - "3003:3000"
     env_file:
       - .env
+    depends_on:
+      - api
     restart: unless-stopped

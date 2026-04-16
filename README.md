@@ -89,3 +89,139 @@ You are welcome to continue working on your agent after the workshop, or start a
 - [Deploying to production](https://docs.livekit.io/agents/ops/deployment/)
 - [Web & mobile starter apps](https://docs.livekit.io/agents/start/frontend/#starter-apps)
 - [Telephony integrations](https://docs.livekit.io/agents/start/telephony/)
+
+---
+
+## Agent Management Platform (MVP)
+
+除了 workshop 的單一 agent，本 repo 擴充為「多 Profile / 多 Session」管理平台，包含：
+
+- **Profile CRUD** — 從 DB 管理 agent 配置（取代 YAML）
+- **Session 追蹤** — 每場通話自動寫入 DB，含 metrics、成本估算
+- **Dashboard UI** — `/admin/*` 提供 profiles / sessions / stats 管理介面
+- **Management API** — FastAPI + SQLite，供 UI 與未來整合
+
+詳細設計見 [`AGENT_PLATFORM_PLAN.md`](./AGENT_PLATFORM_PLAN.md)，最近一次品質審查見 [`CODE_REVIEW.md`](./CODE_REVIEW.md)。
+
+### 架構
+
+```
+┌───────────────────┐   ┌──────────────────┐   ┌───────────────┐
+│ Next.js Frontend  │──▶│ Management API   │──▶│  SQLite       │
+│ :3003 (/admin/*)  │   │ FastAPI :8080    │   │  data/*.db    │
+└───────────────────┘   └──────────────────┘   └───────┬───────┘
+                                                       │
+                                ┌──────────────────────▼───────┐
+                                │ Agent Worker (agent.py)      │
+                                │ 讀 profile / 寫 session      │
+                                └──────────────────────────────┘
+```
+
+### 使用 Docker Compose（推薦）
+
+一鍵啟動三個 service（agent + api + frontend）：
+
+```bash
+# 第一次啟動（會自動跑 DB migration + 從 profiles/*.yaml 匯入）
+docker compose up -d --build
+
+# 檢查狀態
+docker compose ps
+docker compose logs -f api
+
+# 訪問
+open http://localhost:3003          # 語音測試頁
+open http://localhost:3003/admin    # 管理後台
+open http://localhost:8080/docs     # OpenAPI 文件
+```
+
+SQLite DB 掛載於 host 的 `./data/agent_platform.db`，container 重建不會遺失資料。
+
+**若 agent 已部署到 LiveKit Cloud**，可只啟動 api + frontend：
+
+```bash
+docker compose up -d --build api frontend
+```
+
+### 本機開發（不用 Docker）
+
+需要三個 terminal：
+
+```bash
+# Terminal 1: Agent worker
+uv run agent.py dev
+
+# Terminal 2: Management API
+uv run uvicorn api.main:app --reload --port 8080
+
+# Terminal 3: Frontend
+cd frontend && pnpm dev
+```
+
+訪問：
+
+- 語音測試：http://localhost:3000
+- Admin UI：http://localhost:3000/admin
+- API docs：http://localhost:8080/docs
+
+### DB 初始化
+
+API / agent 首次啟動時會自動：
+
+1. 建立 `data/agent_platform.db`
+2. 若 `profiles` table 為空，從 `profiles/*.yaml` 匯入為 DB profile
+
+也可手動跑：
+
+```bash
+uv run python -m db.migrate
+```
+
+### 自訂 API URL（非本機部署）
+
+前端的 `NEXT_PUBLIC_ADMIN_API_URL` 在 build time 被編譯進 client bundle，預設 `http://localhost:8080`。
+若要部署到非本機環境，請在 build 時指定：
+
+```bash
+# docker-compose.yml
+args:
+  NEXT_PUBLIC_ADMIN_API_URL: https://api.example.com
+
+# 或
+docker build --build-arg NEXT_PUBLIC_ADMIN_API_URL=https://api.example.com ./frontend
+```
+
+### 安全性提醒
+
+**本 MVP 不含認證**（符合計畫書的取捨）。若部署到公網，**必須透過下列方式之一保護**：
+
+- 部署到內網 / VPN，僅授權 IP 可存取
+- 前置 reverse proxy（nginx / caddy / traefik）加 basic auth
+- Cloudflare Access / Tailscale / 類似的 zero-trust 閘道
+
+現在的 CORS 設定為 `allow_origins=["*"]`（見 CODE_REVIEW.md §C1），不適合直接面向公網。
+
+### 執行測試
+
+```bash
+# Python 單元測試（DB + API）
+uv run pytest
+
+# 預期輸出：27 passed
+```
+
+### API 快速參考
+
+| 路徑 | 用途 |
+|---|---|
+| `GET /health` | 健康檢查 |
+| `GET /api/profiles` | 列出 profiles（預設只顯示 active） |
+| `POST /api/profiles` | 建立新 profile |
+| `PATCH /api/profiles/{id}` | 更新 profile 設定（含 config JSON） |
+| `DELETE /api/profiles/{id}` | Soft-delete（`is_active=false`） |
+| `GET /api/sessions?status=&profile_id=&limit=` | 列出 sessions |
+| `GET /api/sessions/{id}` | Session 詳情（含 raw_report） |
+| `GET /api/sessions/{id}/events` | Session 逐筆事件 |
+| `GET /api/sessions/{id}/livekit-link` | LiveKit Cloud 錄音頁連結 |
+| `GET /api/stats/profiles` | 各 profile 累計統計 |
+| `GET /api/stats/daily` | 每日統計 |
