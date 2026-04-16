@@ -24,6 +24,16 @@ from agent_factory import load_profile, create_agent_class, list_profiles
 
 from google.genai import types as genai_types
 
+# DB integration — graceful fallback if DB not initialized
+try:
+    from db.engine import init_db, get_session_factory
+    from db import session_store, profile_store
+    from db.cost import compute_cost
+    init_db()
+    _db_available = True
+except Exception:
+    _db_available = False
+
 logger = logging.getLogger("agent")
 
 
@@ -153,6 +163,24 @@ async def entrypoint(ctx: JobContext):
     PhoneAgent = create_agent_class(profile, mode=AGENT_MODE)
     logger.info("Session using profile: %s (%s), mode: %s", profile.get("name"), profile_name, AGENT_MODE)
 
+    # ── DB session tracking ──
+    db_session_id: str | None = None
+    if _db_available:
+        try:
+            factory = get_session_factory()
+            with factory() as db:
+                db_profile_id = profile.get("_db_profile_id")
+                room_name = ctx.job.room.name if ctx.job.room else "unknown"
+                db_sess = session_store.create_session(
+                    db,
+                    room_name=room_name,
+                    profile_id=db_profile_id,
+                )
+                db_session_id = db_sess.id
+                logger.info("DB session created: %s", db_session_id)
+        except Exception:
+            logger.exception("Failed to create DB session")
+
     vad = silero.VAD.load(
         activation_threshold=0.7,    # 預設 0.5；調高減少 SIP echo/雜音誤觸
         min_silence_duration=1.0,    # 預設 0.55s；調長避免 agent 說話停頓被誤判 EOU
@@ -249,6 +277,31 @@ async def entrypoint(ctx: JobContext):
     async def log_usage():
         summary = usage_collector.get_summary()
         logger.info("Usage summary: %s", summary)
+
+        # ── Write session results to DB ──
+        if _db_available and db_session_id:
+            try:
+                cost_result = compute_cost(summary)
+                factory = get_session_factory()
+                with factory() as db:
+                    session_store.complete_session(
+                        db,
+                        db_session_id,
+                        shutdown_reason="session_end",
+                        duration_seconds=summary.get("duration", None),
+                        total_cost_usd=cost_result.get("total_usd"),
+                        raw_report_json={
+                            "usage_summary": summary,
+                            "cost": cost_result,
+                        },
+                    )
+                logger.info(
+                    "DB session completed: %s (cost=$%s)",
+                    db_session_id,
+                    cost_result.get("total_usd", "N/A"),
+                )
+            except Exception:
+                logger.exception("Failed to complete DB session %s", db_session_id)
 
     ctx.add_shutdown_callback(log_usage)
 

@@ -14,5 +14,8 @@ KMS
 # 暫存 / 轉檔工具（不納入版控）
 _tmp/
 
+# SQLite DB（runtime data）
+data/
+
 
 .gstack/
