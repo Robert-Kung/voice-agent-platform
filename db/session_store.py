@@ -1,0 +1,137 @@
+"""Session and SessionEvent store operations."""
+
+import json
+from datetime import datetime, timezone
+
+from sqlalchemy import desc
+from sqlalchemy.orm import Session as DbSession
+
+from db.models import Session, SessionEvent
+
+
+def create_session(
+    db: DbSession,
+    *,
+    room_name: str,
+    profile_id: str | None = None,
+    participant_identity: str = "",
+) -> Session:
+    """Create a new session record (status=running)."""
+    sess = Session(
+        room_name=room_name,
+        profile_id=profile_id,
+        participant_identity=participant_identity,
+        status="running",
+    )
+    db.add(sess)
+    db.commit()
+    db.refresh(sess)
+    return sess
+
+
+def complete_session(
+    db: DbSession,
+    session_id: str,
+    *,
+    shutdown_reason: str = "",
+    duration_seconds: float | None = None,
+    total_cost_usd: float | None = None,
+    raw_report_json: str | dict = "{}",
+) -> Session | None:
+    """Mark a session as completed with final metrics."""
+    sess = db.get(Session, session_id)
+    if sess is None:
+        return None
+
+    if isinstance(raw_report_json, dict):
+        raw_report_json = json.dumps(raw_report_json, ensure_ascii=False)
+
+    sess.status = "completed"
+    sess.ended_at = datetime.now(timezone.utc)
+    sess.shutdown_reason = shutdown_reason
+    sess.duration_seconds = duration_seconds
+    sess.total_cost_usd = total_cost_usd
+    sess.raw_report_json = raw_report_json
+
+    db.commit()
+    db.refresh(sess)
+    return sess
+
+
+def fail_session(db: DbSession, session_id: str, reason: str = "") -> Session | None:
+    """Mark a session as failed."""
+    sess = db.get(Session, session_id)
+    if sess is None:
+        return None
+
+    sess.status = "failed"
+    sess.ended_at = datetime.now(timezone.utc)
+    sess.shutdown_reason = reason
+
+    db.commit()
+    db.refresh(sess)
+    return sess
+
+
+def get_session(db: DbSession, session_id: str) -> Session | None:
+    """Get a session by ID."""
+    return db.get(Session, session_id)
+
+
+def list_sessions(
+    db: DbSession,
+    *,
+    profile_id: str | None = None,
+    status: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
+) -> list[Session]:
+    """List sessions with optional filters."""
+    q = db.query(Session)
+    if profile_id is not None:
+        q = q.filter(Session.profile_id == profile_id)
+    if status is not None:
+        q = q.filter(Session.status == status)
+    return q.order_by(desc(Session.started_at)).offset(offset).limit(limit).all()
+
+
+def add_events(
+    db: DbSession,
+    session_id: str,
+    events: list[dict],
+) -> int:
+    """Batch-insert session events.
+
+    Each event dict should have: seq, event_type, timestamp (optional), payload_json (str or dict).
+    Returns the number of events inserted.
+    """
+    rows = []
+    for ev in events:
+        payload = ev.get("payload_json", "{}")
+        if isinstance(payload, dict):
+            payload = json.dumps(payload, ensure_ascii=False)
+
+        rows.append(SessionEvent(
+            session_id=session_id,
+            seq=ev["seq"],
+            event_type=ev["event_type"],
+            timestamp=ev.get("timestamp", datetime.now(timezone.utc)),
+            payload_json=payload,
+        ))
+
+    db.add_all(rows)
+    db.commit()
+    return len(rows)
+
+
+def get_events(
+    db: DbSession,
+    session_id: str,
+    *,
+    event_type: str | None = None,
+) -> list[SessionEvent]:
+    """Get all events for a session, ordered by seq."""
+    q = db.query(SessionEvent).filter(SessionEvent.session_id == session_id)
+    if event_type is not None:
+        q = q.filter(SessionEvent.event_type == event_type)
+    return q.order_by(SessionEvent.seq).all()
