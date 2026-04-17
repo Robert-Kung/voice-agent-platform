@@ -12,6 +12,7 @@ from api.routes_sessions import router as sessions_router
 from api.routes_stats import router as stats_router
 from db import session_store
 from db.engine import get_session_factory, init_db
+from db.migrate import import_yaml_profiles
 
 logger = logging.getLogger("api")
 
@@ -20,6 +21,16 @@ logger = logging.getLogger("api")
 async def lifespan(app: FastAPI):
     init_db()
     logger.info("Database initialized.")
+
+    # Import YAML profiles if profiles table is empty (first run).
+    try:
+        factory = get_session_factory()
+        with factory() as db:
+            imported = import_yaml_profiles(db)
+        if imported:
+            logger.info("Imported %d YAML profile(s) on startup.", imported)
+    except Exception:
+        logger.exception("YAML profile import failed (non-fatal)")
 
     # Reconcile orphan running sessions from previous agent crashes.
     # Cutoff configurable via STALE_SESSION_MAX_AGE_HOURS (default 1h).
