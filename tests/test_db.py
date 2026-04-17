@@ -147,6 +147,37 @@ class TestSessionStore:
         completed = session_store.list_sessions(db, status="completed")
         assert len(completed) == 1
 
+    def test_mark_stale_sessions_reconciles_old_running(self, db):
+        """Running sessions older than cutoff → status=failed."""
+        from datetime import datetime, timedelta, timezone
+
+        # Stale: started 2 hours ago, still "running"
+        stale = session_store.create_session(db, room_name="stale-room")
+        stale.started_at = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=2)
+        db.commit()
+
+        # Fresh: just started, still "running"
+        fresh = session_store.create_session(db, room_name="fresh-room")
+
+        # Completed: should not be touched
+        done = session_store.create_session(db, room_name="done-room")
+        session_store.complete_session(db, done.id, shutdown_reason="normal")
+
+        reconciled = session_store.mark_stale_sessions(db, max_age_hours=1.0)
+        assert reconciled == 1
+
+        db.refresh(stale)
+        db.refresh(fresh)
+        db.refresh(done)
+        assert stale.status == "failed"
+        assert "stale" in stale.shutdown_reason
+        assert fresh.status == "running"
+        assert done.status == "completed"
+
+    def test_mark_stale_sessions_no_op_when_none(self, db):
+        session_store.create_session(db, room_name="fresh")
+        assert session_store.mark_stale_sessions(db, max_age_hours=1.0) == 0
+
     def test_add_and_get_events(self, db):
         s = session_store.create_session(db, room_name="room-ev")
         events = [

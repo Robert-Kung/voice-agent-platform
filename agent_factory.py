@@ -49,11 +49,23 @@ def list_profiles() -> list[str]:
         all_names = sorted(set(yaml_names + db_names))
         return all_names
     except Exception:
+        logger.exception("DB unavailable while listing profiles; falling back to YAML only")
         return yaml_names
 
 
-def load_profile_from_db(name: str) -> dict | None:
-    """嘗試從 DB 載入 profile，回傳 config dict 或 None。"""
+def load_profile_with_id(name: str) -> tuple[dict, str | None]:
+    """讀取 profile 並同時回傳 DB profile id。
+
+    先查 DB（active profile），找不到 fallback 到 YAML。
+
+    Returns:
+        (config_dict, db_profile_id)
+        db_profile_id 為 None 代表從 YAML 載入，無 DB 記錄可連結。
+
+    不把 db_profile_id 塞進 config dict — 避免 admin UI 把 config 存回
+    DB 時順便把 _db_profile_id 持久化，造成 config 每輪都膨脹。
+    """
+    # 1. 嘗試 DB
     try:
         from db.engine import get_session_factory
         from db.profile_store import get_profile_by_name
@@ -62,25 +74,10 @@ def load_profile_from_db(name: str) -> dict | None:
             profile = get_profile_by_name(db, name)
             if profile and profile.is_active:
                 data = json.loads(profile.config_json)
-                data["_db_profile_id"] = profile.id
                 logger.info("Loaded profile '%s' from DB (id=%s)", name, profile.id)
-                return data
-    except Exception as e:
-        logger.debug("DB profile load failed for '%s': %s", name, e)
-    return None
-
-
-def load_profile(name: str) -> dict:
-    """
-    讀取指定 profile，先查 DB，fallback 到 YAML。
-
-    Args:
-        name: profile 名稱，例如 "car_inspection"
-    """
-    # 1. 嘗試 DB
-    db_profile = load_profile_from_db(name)
-    if db_profile is not None:
-        return db_profile
+                return (data, profile.id)
+    except Exception:
+        logger.exception("DB profile load failed for '%s'; falling back to YAML", name)
 
     # 2. Fallback: YAML
     path = PROFILES_DIR / f"{name}.yaml"
@@ -92,7 +89,13 @@ def load_profile(name: str) -> dict:
             f"Profiles directory: {PROFILES_DIR}"
         )
     with open(path, "r", encoding="utf-8") as f:
-        return yaml.safe_load(f)
+        return (yaml.safe_load(f), None)
+
+
+def load_profile(name: str) -> dict:
+    """讀取 profile（僅 config，丟棄 DB id）— 相容舊呼叫端。"""
+    config, _ = load_profile_with_id(name)
+    return config
 
 
 # ── Dynamic Agent class creation ───────────────────────────

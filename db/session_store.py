@@ -1,7 +1,7 @@
 """Session and SessionEvent store operations."""
 
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import desc
 from sqlalchemy.orm import Session as DbSession
@@ -71,6 +71,41 @@ def fail_session(db: DbSession, session_id: str, reason: str = "") -> Session | 
     db.commit()
     db.refresh(sess)
     return sess
+
+
+def mark_stale_sessions(
+    db: DbSession,
+    *,
+    max_age_hours: float = 1.0,
+    reason: str = "stale (reconciled at startup)",
+) -> int:
+    """Mark orphaned `running` sessions (older than cutoff) as `failed`.
+
+    Agents that crash / OOM / get killed never reach the shutdown callback,
+    so their `sessions` row stays at status='running' forever. Call this at
+    API startup to clean them up. Returns the number of rows reconciled.
+    """
+    now = datetime.now(timezone.utc)
+    cutoff = now - timedelta(hours=max_age_hours)
+
+    # started_at may be naive (older rows written before tz fix) — compare
+    # against naive cutoff to avoid "offset-naive vs offset-aware" errors.
+    cutoff_naive = cutoff.replace(tzinfo=None)
+
+    stale = (
+        db.query(Session)
+        .filter(Session.status == "running")
+        .filter(Session.started_at < cutoff_naive)
+        .all()
+    )
+    for sess in stale:
+        sess.status = "failed"
+        sess.ended_at = now
+        sess.shutdown_reason = reason
+
+    if stale:
+        db.commit()
+    return len(stale)
 
 
 def get_session(db: DbSession, session_id: str) -> Session | None:

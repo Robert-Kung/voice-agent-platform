@@ -10,7 +10,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from api.routes_profiles import router as profiles_router
 from api.routes_sessions import router as sessions_router
 from api.routes_stats import router as stats_router
-from db.engine import init_db
+from db import session_store
+from db.engine import get_session_factory, init_db
 
 logger = logging.getLogger("api")
 
@@ -19,6 +20,19 @@ logger = logging.getLogger("api")
 async def lifespan(app: FastAPI):
     init_db()
     logger.info("Database initialized.")
+
+    # Reconcile orphan running sessions from previous agent crashes.
+    # Cutoff configurable via STALE_SESSION_MAX_AGE_HOURS (default 1h).
+    try:
+        max_age = float(os.environ.get("STALE_SESSION_MAX_AGE_HOURS", "1.0"))
+        factory = get_session_factory()
+        with factory() as db:
+            reconciled = session_store.mark_stale_sessions(db, max_age_hours=max_age)
+        if reconciled:
+            logger.warning("Reconciled %d stale running session(s) on startup.", reconciled)
+    except Exception:
+        logger.exception("Stale session reconciliation failed (non-fatal)")
+
     yield
 
 

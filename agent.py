@@ -21,11 +21,15 @@ from livekit.plugins import google, noise_cancellation, silero
 from livekit.plugins.turn_detector.multilingual import MultilingualModel
 from livekit.agents import metrics, MetricsCollectedEvent, AgentStateChangedEvent
 
-from agent_factory import load_profile, create_agent_class, list_profiles
+from agent_factory import load_profile_with_id, create_agent_class, list_profiles
 
 from google.genai import types as genai_types
 
-# DB integration — graceful fallback if DB not initialized
+logger = logging.getLogger("agent")
+
+# DB integration — graceful fallback if DB layer can't be initialized.
+# Import/init failures must be visible (not silent) so ops can tell why the
+# agent is running without session tracking.
 try:
     from db.engine import init_db, get_session_factory
     from db import session_store, profile_store
@@ -34,8 +38,7 @@ try:
     _db_available = True
 except Exception:
     _db_available = False
-
-logger = logging.getLogger("agent")
+    logger.exception("DB layer unavailable; session tracking disabled")
 
 
 # ── TextInputRealtimeModel ─────────────────────────────────
@@ -160,17 +163,17 @@ logger.info("Available profiles: %s", ", ".join(list_profiles()))
 async def entrypoint(ctx: JobContext):
     # ── 動態選擇 profile（支援 room metadata 切換）──
     profile_name = _get_runtime_profile_name(ctx)
-    profile = load_profile(profile_name)
+    profile, db_profile_id = load_profile_with_id(profile_name)
     PhoneAgent = create_agent_class(profile, mode=AGENT_MODE)
     logger.info("Session using profile: %s (%s), mode: %s", profile.get("name"), profile_name, AGENT_MODE)
 
     # ── DB session tracking ──
     db_session_id: str | None = None
+    session_started_at = datetime.now(timezone.utc)
     if _db_available:
         try:
             factory = get_session_factory()
             with factory() as db:
-                db_profile_id = profile.get("_db_profile_id")
                 room_name = ctx.job.room.name if ctx.job.room else "unknown"
                 db_sess = session_store.create_session(
                     db,
@@ -178,6 +181,7 @@ async def entrypoint(ctx: JobContext):
                     profile_id=db_profile_id,
                 )
                 db_session_id = db_sess.id
+                session_started_at = db_sess.started_at
                 logger.info("DB session created: %s", db_session_id)
         except Exception:
             logger.exception("Failed to create DB session")
@@ -324,6 +328,13 @@ async def entrypoint(ctx: JobContext):
                     )
 
                 cost_result = compute_cost(summary)
+                # UsageCollector.get_summary() has no "duration" key; compute
+                # it from the wall clock so the UI shows real session length.
+                started_at = session_started_at
+                if started_at.tzinfo is None:
+                    started_at = started_at.replace(tzinfo=timezone.utc)
+                duration = (datetime.now(timezone.utc) - started_at).total_seconds()
+
                 factory = get_session_factory()
                 with factory() as db:
                     if events_buffer:
@@ -332,7 +343,7 @@ async def entrypoint(ctx: JobContext):
                         db,
                         db_session_id,
                         shutdown_reason="session_end",
-                        duration_seconds=summary.get("duration", None),
+                        duration_seconds=duration,
                         total_cost_usd=cost_result.get("total_usd"),
                         raw_report_json={
                             "usage_summary": summary,
@@ -340,9 +351,10 @@ async def entrypoint(ctx: JobContext):
                         },
                     )
                 logger.info(
-                    "DB session completed: %s (events=%d, cost=$%s)",
+                    "DB session completed: %s (events=%d, duration=%.1fs, cost=$%s)",
                     db_session_id,
                     len(events_buffer),
+                    duration,
                     cost_result.get("total_usd", "N/A"),
                 )
             except Exception:
