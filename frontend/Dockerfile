@@ -1,7 +1,7 @@
 FROM node:20-alpine AS base
 
 # Install pnpm
-RUN corepack enable && corepack prepare pnpm@latest --activate
+RUN npm install -g pnpm@9.15.9
 
 # ── Stage 1: Install dependencies ─────────────────────────────────────────────
 FROM base AS deps
@@ -20,11 +20,14 @@ ARG LIVEKIT_URL
 ARG LIVEKIT_API_KEY
 ARG LIVEKIT_API_SECRET
 ARG AGENT_NAME
+# NEXT_PUBLIC_* 需於 build time 注入（會被編譯進 client bundle）
+ARG NEXT_PUBLIC_ADMIN_API_URL=http://localhost:8080
 
 ENV LIVEKIT_URL=$LIVEKIT_URL
 ENV LIVEKIT_API_KEY=$LIVEKIT_API_KEY
 ENV LIVEKIT_API_SECRET=$LIVEKIT_API_SECRET
 ENV AGENT_NAME=$AGENT_NAME
+ENV NEXT_PUBLIC_ADMIN_API_URL=$NEXT_PUBLIC_ADMIN_API_URL
 ENV NEXT_TELEMETRY_DISABLED=1
 
 RUN pnpm build

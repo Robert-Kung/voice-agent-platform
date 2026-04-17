@@ -2,6 +2,7 @@ import json
 import logging
 import os
 import sys
+from datetime import datetime, timezone
 
 from dotenv import load_dotenv
 from livekit.agents import (
@@ -20,11 +21,24 @@ from livekit.plugins import google, noise_cancellation, silero
 from livekit.plugins.turn_detector.multilingual import MultilingualModel
 from livekit.agents import metrics, MetricsCollectedEvent, AgentStateChangedEvent
 
-from agent_factory import load_profile, create_agent_class, list_profiles
+from agent_factory import load_profile_with_id, create_agent_class, list_profiles
 
 from google.genai import types as genai_types
 
 logger = logging.getLogger("agent")
+
+# DB integration — graceful fallback if DB layer can't be initialized.
+# Import/init failures must be visible (not silent) so ops can tell why the
+# agent is running without session tracking.
+try:
+    from db.engine import init_db, get_session_factory
+    from db import session_store, profile_store
+    from db.cost import compute_cost
+    init_db()
+    _db_available = True
+except Exception:
+    _db_available = False
+    logger.exception("DB layer unavailable; session tracking disabled")
 
 
 # ── TextInputRealtimeModel ─────────────────────────────────
@@ -149,9 +163,28 @@ logger.info("Available profiles: %s", ", ".join(list_profiles()))
 async def entrypoint(ctx: JobContext):
     # ── 動態選擇 profile（支援 room metadata 切換）──
     profile_name = _get_runtime_profile_name(ctx)
-    profile = load_profile(profile_name)
+    profile, db_profile_id = load_profile_with_id(profile_name)
     PhoneAgent = create_agent_class(profile, mode=AGENT_MODE)
     logger.info("Session using profile: %s (%s), mode: %s", profile.get("name"), profile_name, AGENT_MODE)
+
+    # ── DB session tracking ──
+    db_session_id: str | None = None
+    session_started_at = datetime.now(timezone.utc)
+    if _db_available:
+        try:
+            factory = get_session_factory()
+            with factory() as db:
+                room_name = ctx.job.room.name if ctx.job.room else "unknown"
+                db_sess = session_store.create_session(
+                    db,
+                    room_name=room_name,
+                    profile_id=db_profile_id,
+                )
+                db_session_id = db_sess.id
+                session_started_at = db_sess.started_at
+                logger.info("DB session created: %s", db_session_id)
+        except Exception:
+            logger.exception("Failed to create DB session")
 
     vad = silero.VAD.load(
         activation_threshold=0.7,    # 預設 0.5；調高減少 SIP echo/雜音誤觸
@@ -238,17 +271,94 @@ async def entrypoint(ctx: JobContext):
     usage_collector = metrics.UsageCollector()
     last_eou_metrics: metrics.EOUMetrics | None = None
 
+    # Event buffer: metric events appended synchronously during the session,
+    # chat-history events appended once at shutdown. Flushed to DB inside
+    # log_usage() so the whole session write is atomic per DB session.
+    events_buffer: list[dict] = []
+    event_seq = 0
+
     @session.on("metrics_collected")
     def _on_metrics_collected(ev: MetricsCollectedEvent):
-        nonlocal last_eou_metrics
+        nonlocal last_eou_metrics, event_seq
         if ev.metrics.type == "eou_metrics":
             last_eou_metrics = ev.metrics
         metrics.log_metrics(ev.metrics)
         usage_collector.collect(ev.metrics)
 
+        if _db_available and db_session_id:
+            event_seq += 1
+            try:
+                payload = (
+                    ev.metrics.model_dump(mode="json")
+                    if hasattr(ev.metrics, "model_dump")
+                    else {"repr": repr(ev.metrics)}
+                )
+            except Exception:
+                payload = {"repr": repr(ev.metrics)}
+            events_buffer.append(
+                {
+                    "seq": event_seq,
+                    "event_type": f"metric_{ev.metrics.type}",
+                    "payload_json": payload,
+                }
+            )
+
     async def log_usage():
+        nonlocal event_seq
         summary = usage_collector.get_summary()
         logger.info("Usage summary: %s", summary)
+
+        # ── Write session results to DB ──
+        if _db_available and db_session_id:
+            try:
+                # Flush chat transcript (user/agent messages) from session.history
+                for item in getattr(session.history, "items", []):
+                    event_seq += 1
+                    role = getattr(item, "role", "message")
+                    text = getattr(item, "text_content", None)
+                    events_buffer.append(
+                        {
+                            "seq": event_seq,
+                            "event_type": f"chat_{role}",
+                            "payload_json": {
+                                "role": role,
+                                "text": text if text is not None else repr(item),
+                            },
+                        }
+                    )
+
+                cost_result = compute_cost(summary)
+                # UsageCollector.get_summary() has no "duration" key; compute
+                # it from the wall clock so the UI shows real session length.
+                started_at = session_started_at
+                if started_at.tzinfo is None:
+                    started_at = started_at.replace(tzinfo=timezone.utc)
+                duration = (datetime.now(timezone.utc) - started_at).total_seconds()
+
+                factory = get_session_factory()
+                with factory() as db:
+                    if events_buffer:
+                        session_store.add_events(db, db_session_id, events_buffer)
+                    session_store.complete_session(
+                        db,
+                        db_session_id,
+                        shutdown_reason="session_end",
+                        duration_seconds=duration,
+                        total_cost_usd=cost_result.get("total_usd"),
+                        raw_report_json={
+                            "usage_summary": summary,
+                            "cost": cost_result,
+                        },
+                    )
+                logger.info(
+                    "DB session completed: %s (events=%d, duration=%.1fs, cost=$%s)",
+                    db_session_id,
+                    len(events_buffer),
+                    duration,
+                    cost_result.get("total_usd", "N/A"),
+                )
+            except Exception:
+                logger.exception("Failed to complete DB session %s", db_session_id)
 
     ctx.add_shutdown_callback(log_usage)
 

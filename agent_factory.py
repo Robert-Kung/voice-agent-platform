@@ -1,10 +1,10 @@
 """
-Agent Factory — 從 YAML profile 動態建立 LiveKit Voice Agent
+Agent Factory — 從 DB 或 YAML profile 動態建立 LiveKit Voice Agent
 
 用法：
     from agent_factory import load_profile, create_agent_class
 
-    profile = load_profile("car_inspection")       # 讀取 profiles/car_inspection.yaml
+    profile = load_profile("car_inspection")       # 先查 DB，fallback 到 YAML
     PhoneAgent = create_agent_class(profile)        # 動態建立 Agent class（包含 profile 指定的 tools）
 
 YAML profile 的 tools 區塊示例：
@@ -18,6 +18,7 @@ YAML profile 的 tools 區塊示例：
           location: "台北市"
 """
 
+import json
 import logging
 import pathlib
 
@@ -35,17 +36,50 @@ PROFILES_DIR = pathlib.Path(__file__).parent / "profiles"
 
 
 def list_profiles() -> list[str]:
-    """列出所有可用的 profile 名稱（不含副檔名）。"""
-    return sorted(p.stem for p in PROFILES_DIR.glob("*.yaml"))
+    """列出所有可用的 profile 名稱（DB + YAML 合併去重）。"""
+    yaml_names = sorted(p.stem for p in PROFILES_DIR.glob("*.yaml"))
+
+    try:
+        from db.engine import get_session_factory
+        from db.profile_store import list_profiles as db_list_profiles
+        factory = get_session_factory()
+        with factory() as db:
+            db_profiles = db_list_profiles(db)
+            db_names = [p.name for p in db_profiles]
+        all_names = sorted(set(yaml_names + db_names))
+        return all_names
+    except Exception:
+        logger.exception("DB unavailable while listing profiles; falling back to YAML only")
+        return yaml_names
 
 
-def load_profile(name: str) -> dict:
+def load_profile_with_id(name: str) -> tuple[dict, str | None]:
+    """讀取 profile 並同時回傳 DB profile id。
+
+    先查 DB（active profile），找不到 fallback 到 YAML。
+
+    Returns:
+        (config_dict, db_profile_id)
+        db_profile_id 為 None 代表從 YAML 載入，無 DB 記錄可連結。
+
+    不把 db_profile_id 塞進 config dict — 避免 admin UI 把 config 存回
+    DB 時順便把 _db_profile_id 持久化，造成 config 每輪都膨脹。
     """
-    讀取指定 profile YAML，回傳 dict。
+    # 1. 嘗試 DB
+    try:
+        from db.engine import get_session_factory
+        from db.profile_store import get_profile_by_name
+        factory = get_session_factory()
+        with factory() as db:
+            profile = get_profile_by_name(db, name)
+            if profile and profile.is_active:
+                data = json.loads(profile.config_json)
+                logger.info("Loaded profile '%s' from DB (id=%s)", name, profile.id)
+                return (data, profile.id)
+    except Exception:
+        logger.exception("DB profile load failed for '%s'; falling back to YAML", name)
 
-    Args:
-        name: profile 檔名（不含 .yaml），例如 "car_inspection"
-    """
+    # 2. Fallback: YAML
     path = PROFILES_DIR / f"{name}.yaml"
     if not path.exists():
         available = list_profiles()
@@ -55,7 +89,13 @@ def load_profile(name: str) -> dict:
             f"Profiles directory: {PROFILES_DIR}"
         )
     with open(path, "r", encoding="utf-8") as f:
-        return yaml.safe_load(f)
+        return (yaml.safe_load(f), None)
+
+
+def load_profile(name: str) -> dict:
+    """讀取 profile（僅 config，丟棄 DB id）— 相容舊呼叫端。"""
+    config, _ = load_profile_with_id(name)
+    return config
 
 
 # ── Dynamic Agent class creation ───────────────────────────
