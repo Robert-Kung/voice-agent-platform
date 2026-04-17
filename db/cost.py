@@ -33,11 +33,30 @@ STT_RATES: dict[str, float] = {
 
 
 def _match_rate(key: str, rate_table: dict[str, float]) -> float | None:
-    """Fuzzy-match a model/provider name against rate table keys."""
+    """Fuzzy-match a model/provider name against rate table keys.
+
+    Longer keys are checked first so that specific names (e.g. "gpt-4o-mini")
+    win over their substrings ("gpt-4o"). Without this ordering, the first
+    registered key wins and more-specific rates get silently skipped.
+    """
     key_lower = key.lower()
-    for k, v in rate_table.items():
+    for k in sorted(rate_table, key=len, reverse=True):
         if k.lower() in key_lower:
-            return v
+            return rate_table[k]
+    return None
+
+
+def _match_llm_rate(llm_model: str) -> dict[str, float] | None:
+    """Match the longest registered LLM key that is a substring of llm_model.
+
+    Dict iteration order is insertion-order, so naive `for k in LLM_RATES`
+    caused `google/gemini-2.5-flash-lite` to match `google/gemini-2.5-flash`
+    first and pay the wrong rate. Sorting by length reverse-first fixes this.
+    """
+    model_lower = llm_model.lower()
+    for model_key in sorted(LLM_RATES, key=len, reverse=True):
+        if model_key.lower() in model_lower:
+            return LLM_RATES[model_key]
     return None
 
 
@@ -67,11 +86,7 @@ def compute_cost(usage_summary: dict) -> dict:
     completion_tokens = usage_summary.get("llm_completion_tokens", 0)
     llm_model = usage_summary.get("llm_model", "")
     if prompt_tokens or completion_tokens:
-        rate = None
-        for model_key, rates in LLM_RATES.items():
-            if model_key.lower() in llm_model.lower():
-                rate = rates
-                break
+        rate = _match_llm_rate(llm_model)
         if rate:
             llm_usd = (prompt_tokens * rate["in"] + completion_tokens * rate["out"]) / 1_000_000
         else:

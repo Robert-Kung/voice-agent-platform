@@ -1,6 +1,7 @@
 """FastAPI main app — agent management platform."""
 
 import logging
+import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -28,11 +29,24 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# CORS — allow frontend (dev + prod)
+# CORS — allow frontend origins.
+# NOTE: browsers reject `Access-Control-Allow-Origin: *` together with
+# `Access-Control-Allow-Credentials: true`. Since the admin UI currently does
+# not send cookies / auth headers, we default `allow_credentials=False` which
+# lets us keep the permissive `*` wildcard. If auth is added later, replace `*`
+# with an explicit origin list (or set via ADMIN_API_CORS_ORIGINS env var).
+_cors_env = os.environ.get("ADMIN_API_CORS_ORIGINS", "").strip()
+if _cors_env:
+    _cors_origins = [o.strip() for o in _cors_env.split(",") if o.strip()]
+    _allow_credentials = True
+else:
+    _cors_origins = ["*"]
+    _allow_credentials = False
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=_cors_origins,
+    allow_credentials=_allow_credentials,
     allow_methods=["*"],
     allow_headers=["*"],
 )

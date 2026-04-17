@@ -2,6 +2,7 @@ import json
 import logging
 import os
 import sys
+from datetime import datetime, timezone
 
 from dotenv import load_dotenv
 from livekit.agents import (
@@ -266,24 +267,67 @@ async def entrypoint(ctx: JobContext):
     usage_collector = metrics.UsageCollector()
     last_eou_metrics: metrics.EOUMetrics | None = None
 
+    # Event buffer: metric events appended synchronously during the session,
+    # chat-history events appended once at shutdown. Flushed to DB inside
+    # log_usage() so the whole session write is atomic per DB session.
+    events_buffer: list[dict] = []
+    event_seq = 0
+
     @session.on("metrics_collected")
     def _on_metrics_collected(ev: MetricsCollectedEvent):
-        nonlocal last_eou_metrics
+        nonlocal last_eou_metrics, event_seq
         if ev.metrics.type == "eou_metrics":
             last_eou_metrics = ev.metrics
         metrics.log_metrics(ev.metrics)
         usage_collector.collect(ev.metrics)
 
+        if _db_available and db_session_id:
+            event_seq += 1
+            try:
+                payload = (
+                    ev.metrics.model_dump(mode="json")
+                    if hasattr(ev.metrics, "model_dump")
+                    else {"repr": repr(ev.metrics)}
+                )
+            except Exception:
+                payload = {"repr": repr(ev.metrics)}
+            events_buffer.append(
+                {
+                    "seq": event_seq,
+                    "event_type": f"metric_{ev.metrics.type}",
+                    "payload_json": payload,
+                }
+            )
+
     async def log_usage():
+        nonlocal event_seq
         summary = usage_collector.get_summary()
         logger.info("Usage summary: %s", summary)
 
         # ── Write session results to DB ──
         if _db_available and db_session_id:
             try:
+                # Flush chat transcript (user/agent messages) from session.history
+                for item in getattr(session.history, "items", []):
+                    event_seq += 1
+                    role = getattr(item, "role", "message")
+                    text = getattr(item, "text_content", None)
+                    events_buffer.append(
+                        {
+                            "seq": event_seq,
+                            "event_type": f"chat_{role}",
+                            "payload_json": {
+                                "role": role,
+                                "text": text if text is not None else repr(item),
+                            },
+                        }
+                    )
+
                 cost_result = compute_cost(summary)
                 factory = get_session_factory()
                 with factory() as db:
+                    if events_buffer:
+                        session_store.add_events(db, db_session_id, events_buffer)
                     session_store.complete_session(
                         db,
                         db_session_id,
@@ -296,8 +340,9 @@ async def entrypoint(ctx: JobContext):
                         },
                     )
                 logger.info(
-                    "DB session completed: %s (cost=$%s)",
+                    "DB session completed: %s (events=%d, cost=$%s)",
                     db_session_id,
+                    len(events_buffer),
                     cost_result.get("total_usd", "N/A"),
                 )
             except Exception:
