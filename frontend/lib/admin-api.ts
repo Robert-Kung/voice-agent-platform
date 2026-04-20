@@ -102,6 +102,17 @@ export const profilesApi = {
       body: JSON.stringify(data),
     }),
   deactivate: (id: string) => request<Profile>(`/api/profiles/${id}`, { method: 'DELETE' }),
+  reactivate: (id: string) =>
+    request<Profile>(`/api/profiles/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ is_active: true }),
+    }),
+};
+
+// ── Tools registry ─────────────────────────────────────────
+
+export const toolsApi = {
+  list: () => request<{ tools: string[] }>('/api/tools').then((r) => r.tools),
 };
 
 // ── Sessions ───────────────────────────────────────────────

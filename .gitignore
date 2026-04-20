@@ -19,3 +19,10 @@ data/
 
 
 .gstack/
+docker-compose.override.yml
+
+# pnpm local store (bind-mounted from docker container)
+frontend/.pnpm-store/
+
+# Playwright MCP 快照暫存
+.playwright-mcp/

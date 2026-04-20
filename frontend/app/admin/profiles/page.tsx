@@ -1,15 +1,22 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
+import { toast } from 'sonner';
+import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { profilesApi } from '@/lib/admin-api';
 import type { Profile } from '@/lib/admin-api';
+
+const TOOL_CHIP_LIMIT = 3;
 
 export default function ProfilesPage() {
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showInactive, setShowInactive] = useState(false);
+  const [search, setSearch] = useState('');
+  const [pendingDeactivate, setPendingDeactivate] = useState<Profile | null>(null);
+  const [expandedTools, setExpandedTools] = useState<Record<string, boolean>>({});
 
   const load = () => {
     setLoading(true);
@@ -25,65 +32,110 @@ export default function ProfilesPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showInactive]);
 
-  const handleDeactivate = async (id: string, name: string) => {
-    if (!confirm(`Deactivate profile "${name}"?`)) return;
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return profiles;
+    return profiles.filter(
+      (p) => p.name.toLowerCase().includes(q) || (p.display_name || '').toLowerCase().includes(q)
+    );
+  }, [profiles, search]);
+
+  const handleDeactivate = async (profile: Profile) => {
+    setPendingDeactivate(null);
     try {
-      await profilesApi.deactivate(id);
+      await profilesApi.deactivate(profile.id);
+      toast.success(`Profile "${profile.name}" 已停用`);
       load();
     } catch (e) {
-      alert(`Failed: ${(e as Error).message}`);
+      toast.error(`停用失敗: ${(e as Error).message}`);
     }
   };
 
-  if (loading) return <div>Loading...</div>;
+  const handleReactivate = async (profile: Profile) => {
+    try {
+      await profilesApi.reactivate(profile.id);
+      toast.success(`Profile "${profile.name}" 已啟用`);
+      load();
+    } catch (e) {
+      toast.error(`啟用失敗: ${(e as Error).message}`);
+    }
+  };
+
+  if (loading)
+    return (
+      <div className="space-y-3">
+        <div className="bg-foreground/10 h-8 w-32 animate-pulse rounded" />
+        <div className="bg-foreground/10 h-12 w-full animate-pulse rounded" />
+        <div className="bg-foreground/10 h-12 w-full animate-pulse rounded" />
+      </div>
+    );
   if (error) return <div className="text-red-500">Error: {error}</div>;
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h2 className="text-2xl font-bold">Profiles</h2>
           <p className="text-foreground/60 text-sm">Agent configuration profiles</p>
         </div>
-        <div className="flex items-center gap-3">
-          <label className="flex items-center gap-2 text-sm">
-            <input
-              type="checkbox"
-              checked={showInactive}
-              onChange={(e) => setShowInactive(e.target.checked)}
-            />
-            Show inactive
-          </label>
-          <Link
-            href="/admin/profiles/new"
-            className="bg-primary text-primary-foreground rounded px-3 py-1.5 text-sm font-medium"
-          >
-            + New Profile
-          </Link>
-        </div>
+        <Link
+          href="/admin/profiles/new"
+          className="bg-primary text-primary-foreground rounded-md px-3 py-1.5 text-sm font-medium transition-opacity hover:opacity-90"
+        >
+          + New Profile
+        </Link>
       </div>
 
-      {profiles.length === 0 ? (
-        <div className="text-foreground/60">No profiles found.</div>
+      <div className="flex flex-wrap items-center gap-3">
+        <input
+          type="search"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search by name or display name…"
+          className="border-border focus:ring-primary/40 min-w-[240px] flex-1 rounded-md border bg-transparent px-3 py-1.5 text-sm focus:ring-2 focus:outline-none"
+        />
+        <label className="flex items-center gap-2 text-sm whitespace-nowrap">
+          <input
+            type="checkbox"
+            checked={showInactive}
+            onChange={(e) => setShowInactive(e.target.checked)}
+          />
+          Show inactive
+        </label>
+        <span className="text-foreground/60 text-xs">
+          {filtered.length} / {profiles.length}
+        </span>
+      </div>
+
+      {filtered.length === 0 ? (
+        <div className="border-border text-foreground/60 rounded-md border p-8 text-center">
+          {search ? `沒有符合 "${search}" 的 profile` : '尚無 profile，點右上角建立第一個。'}
+        </div>
       ) : (
-        <div className="border-border rounded-md border">
+        <div className="border-border overflow-hidden rounded-md border">
           <table className="w-full text-sm">
-            <thead className="border-border text-foreground/60 border-b">
+            <thead className="border-border text-foreground/60 bg-foreground/5 border-b">
               <tr>
-                <th className="p-3 text-left font-medium">Name</th>
-                <th className="p-3 text-left font-medium">Display Name</th>
+                <th className="p-3 text-left font-medium whitespace-nowrap">Name</th>
+                <th className="p-3 text-left font-medium whitespace-nowrap">Display Name</th>
                 <th className="p-3 text-left font-medium">Tools</th>
-                <th className="p-3 text-left font-medium">Status</th>
-                <th className="p-3 text-left font-medium">Updated</th>
-                <th className="p-3 text-right font-medium">Actions</th>
+                <th className="p-3 text-left font-medium whitespace-nowrap">Status</th>
+                <th className="p-3 text-left font-medium whitespace-nowrap">Updated</th>
+                <th className="p-3 text-right font-medium whitespace-nowrap">Actions</th>
               </tr>
             </thead>
             <tbody>
-              {profiles.map((p) => {
+              {filtered.map((p) => {
                 const tools = (p.config.tools as Array<{ name: string }> | undefined) || [];
+                const expanded = expandedTools[p.id];
+                const visibleTools = expanded ? tools : tools.slice(0, TOOL_CHIP_LIMIT);
+                const overflow = tools.length - TOOL_CHIP_LIMIT;
                 return (
-                  <tr key={p.id} className="border-border border-b last:border-0">
-                    <td className="p-3 font-mono text-xs">
+                  <tr
+                    key={p.id}
+                    className="border-border hover:bg-foreground/5 border-b last:border-0"
+                  >
+                    <td className="p-3 font-mono text-xs whitespace-nowrap">
                       <Link
                         href={`/admin/profiles/${p.id}`}
                         className="text-primary hover:underline"
@@ -92,8 +144,35 @@ export default function ProfilesPage() {
                       </Link>
                     </td>
                     <td className="p-3">{p.display_name}</td>
-                    <td className="text-foreground/70 p-3">
-                      {tools.length ? tools.map((t) => t.name).join(', ') : '(none)'}
+                    <td className="p-3">
+                      {tools.length === 0 ? (
+                        <span className="text-foreground/40 text-xs">(none)</span>
+                      ) : (
+                        <div className="flex flex-wrap gap-1">
+                          {visibleTools.map((t) => (
+                            <span
+                              key={t.name}
+                              className="border-border rounded border px-1.5 py-0.5 font-mono text-xs"
+                            >
+                              {t.name}
+                            </span>
+                          ))}
+                          {!expanded && overflow > 0 && (
+                            <button
+                              onClick={() =>
+                                setExpandedTools((prev) => ({ ...prev, [p.id]: true }))
+                              }
+                              className="text-primary text-xs hover:underline"
+                              title={tools
+                                .slice(TOOL_CHIP_LIMIT)
+                                .map((t) => t.name)
+                                .join(', ')}
+                            >
+                              +{overflow} more
+                            </button>
+                          )}
+                        </div>
+                      )}
                     </td>
                     <td className="p-3">
                       <span
@@ -106,18 +185,44 @@ export default function ProfilesPage() {
                         {p.is_active ? 'active' : 'inactive'}
                       </span>
                     </td>
-                    <td className="text-foreground/70 p-3">
-                      {new Date(p.updated_at).toLocaleString()}
+                    <td className="text-foreground/70 p-3 text-xs whitespace-nowrap">
+                      <span title={new Date(p.updated_at).toLocaleString()}>
+                        {formatDate(p.updated_at)}
+                      </span>
                     </td>
-                    <td className="p-3 text-right">
-                      {p.is_active && (
-                        <button
-                          onClick={() => handleDeactivate(p.id, p.name)}
-                          className="text-red-500 hover:underline"
+                    <td className="p-3 text-right whitespace-nowrap">
+                      <div className="inline-flex items-center gap-2">
+                        <Link
+                          href={`/admin/profiles/${p.id}`}
+                          className="border-border hover:bg-foreground/10 rounded border px-2 py-1 text-xs"
                         >
-                          Deactivate
-                        </button>
-                      )}
+                          Edit
+                        </Link>
+                        {p.is_active && (
+                          <Link
+                            href={`/?profile=${p.name}`}
+                            className="border-border hover:bg-foreground/10 rounded border px-2 py-1 text-xs"
+                            title="開啟 voice 測試頁"
+                          >
+                            Try
+                          </Link>
+                        )}
+                        {p.is_active ? (
+                          <button
+                            onClick={() => setPendingDeactivate(p)}
+                            className="rounded border border-red-500/40 px-2 py-1 text-xs text-red-600 hover:bg-red-500/10 dark:text-red-400"
+                          >
+                            Deactivate
+                          </button>
+                        ) : (
+                          <button
+                            onClick={() => handleReactivate(p)}
+                            className="rounded border border-green-500/40 px-2 py-1 text-xs text-green-700 hover:bg-green-500/10 dark:text-green-400"
+                          >
+                            Reactivate
+                          </button>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 );
@@ -126,6 +231,29 @@ export default function ProfilesPage() {
           </table>
         </div>
       )}
+
+      <ConfirmDialog
+        open={pendingDeactivate !== null}
+        title="Deactivate profile?"
+        description={
+          pendingDeactivate
+            ? `Profile "${pendingDeactivate.name}" 將被停用。可隨時透過 Reactivate 還原。`
+            : ''
+        }
+        confirmLabel="Deactivate"
+        cancelLabel="Cancel"
+        variant="destructive"
+        onConfirm={() => pendingDeactivate && handleDeactivate(pendingDeactivate)}
+        onCancel={() => setPendingDeactivate(null)}
+      />
     </div>
   );
+}
+
+function formatDate(iso: string): string {
+  const d = new Date(iso);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(
+    d.getHours()
+  )}:${pad(d.getMinutes())}`;
 }

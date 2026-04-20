@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 import Link from 'next/link';
+import { Toaster } from '@/components/ui/sonner';
 
 export default function AdminLayout({ children }: { children: ReactNode }) {
   const navItems = [
@@ -27,6 +28,7 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
         </div>
       </nav>
       <main className="mx-auto w-full max-w-7xl flex-1 px-6 py-8">{children}</main>
+      <Toaster position="top-right" richColors />
     </div>
   );
 }

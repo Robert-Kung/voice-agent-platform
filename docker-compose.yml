@@ -31,9 +31,9 @@ services:
       - "--host"
       - "0.0.0.0"
       - "--port"
-      - "8080"
+      - "8083"
     ports:
-      - "8080:8080"
+      - "8083:8083"
     env_file:
       - .env
     environment:
@@ -56,9 +56,9 @@ services:
         LIVEKIT_API_KEY: ${LIVEKIT_API_KEY}
         LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET}
         AGENT_NAME: ${AGENT_NAME:-}
-        NEXT_PUBLIC_ADMIN_API_URL: ${NEXT_PUBLIC_ADMIN_API_URL:-http://localhost:8080}
+        NEXT_PUBLIC_ADMIN_API_URL: ${NEXT_PUBLIC_ADMIN_API_URL:-http://localhost:8083}
     ports:
-      - "3003:3000"
+      - "3004:3000"
     env_file:
       - .env
     depends_on:

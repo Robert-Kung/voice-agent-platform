@@ -10,6 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from api.routes_profiles import router as profiles_router
 from api.routes_sessions import router as sessions_router
 from api.routes_stats import router as stats_router
+from api.routes_tools import router as tools_router
 from db import session_store
 from db.engine import get_session_factory, init_db
 from db.migrate import import_yaml_profiles
@@ -85,3 +86,4 @@ def health():
 app.include_router(profiles_router)
 app.include_router(sessions_router)
 app.include_router(stats_router)
+app.include_router(tools_router)
