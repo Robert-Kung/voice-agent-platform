@@ -186,6 +186,7 @@ class TestSessionStore:
             {"seq": 3, "event_type": "tool_call", "payload_json": {"tool": "search"}},
         ]
         count = session_store.add_events(db, s.id, events)
+        db.commit()  # add_events no longer commits (atomic write support)
         assert count == 3
 
         all_events = session_store.get_events(db, s.id)

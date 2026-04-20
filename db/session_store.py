@@ -155,7 +155,9 @@ def add_events(
         ))
 
     db.add_all(rows)
-    db.commit()
+    # NOTE: no commit here — the caller is responsible for committing.
+    # This allows atomic writes when combined with complete_session() in
+    # a single transaction (see agent.py log_usage).
     return len(rows)
 
 

@@ -65,8 +65,9 @@ def update_profile(
     if "config_json" in kwargs and isinstance(kwargs["config_json"], dict):
         kwargs["config_json"] = json.dumps(kwargs["config_json"], ensure_ascii=False)
 
+    _UPDATABLE_FIELDS = {"display_name", "description", "config_json", "is_active"}
     for key, value in kwargs.items():
-        if hasattr(profile, key):
+        if key in _UPDATABLE_FIELDS:
             setattr(profile, key, value)
 
     profile.updated_at = datetime.now(timezone.utc)

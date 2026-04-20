@@ -1,5 +1,7 @@
 """Smoke tests for the Management API."""
 
+import os
+
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
@@ -27,6 +29,7 @@ def client():
         try:
             yield db
         finally:
+            db.rollback()
             db.close()
 
     app.dependency_overrides[get_db] = override_get_db
@@ -120,3 +123,63 @@ class TestStatsAPI:
         r = client.get("/api/stats/daily")
         assert r.status_code == 200
         assert r.json() == []
+
+
+class TestAdminAuth:
+    """Verify X-Admin-Token enforcement on write endpoints."""
+
+    @pytest.fixture()
+    def secured_client(self):
+        """Client with ADMIN_API_TOKEN set — write endpoints require token."""
+        engine = create_engine(
+            "sqlite:///:memory:",
+            connect_args={"check_same_thread": False},
+            poolclass=StaticPool,
+        )
+        Base.metadata.create_all(engine)
+        TestingSessionLocal = sessionmaker(bind=engine)
+
+        def override_get_db():
+            db = TestingSessionLocal()
+            try:
+                yield db
+            finally:
+                db.rollback()
+                db.close()
+
+        old_token = os.environ.get("ADMIN_API_TOKEN")
+        os.environ["ADMIN_API_TOKEN"] = "test-secret-token"
+
+        app.dependency_overrides[get_db] = override_get_db
+        with TestClient(app) as c:
+            yield c
+        app.dependency_overrides.clear()
+        if old_token is None:
+            os.environ.pop("ADMIN_API_TOKEN", None)
+        else:
+            os.environ["ADMIN_API_TOKEN"] = old_token
+
+    def test_post_without_token_rejected(self, secured_client):
+        r = secured_client.post("/api/profiles", json={"name": "x", "display_name": "X"})
+        assert r.status_code == 401
+
+    def test_post_with_wrong_token_rejected(self, secured_client):
+        r = secured_client.post(
+            "/api/profiles",
+            json={"name": "x", "display_name": "X"},
+            headers={"X-Admin-Token": "wrong"},
+        )
+        assert r.status_code == 401
+
+    def test_post_with_correct_token_ok(self, secured_client):
+        r = secured_client.post(
+            "/api/profiles",
+            json={"name": "auth_test", "display_name": "Auth"},
+            headers={"X-Admin-Token": "test-secret-token"},
+        )
+        assert r.status_code == 201
+
+    def test_get_without_token_ok(self, secured_client):
+        """GET (read) endpoints should work without a token."""
+        r = secured_client.get("/api/profiles")
+        assert r.status_code == 200

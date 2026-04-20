@@ -72,10 +72,17 @@ def load_profile_with_id(name: str) -> tuple[dict, str | None]:
         factory = get_session_factory()
         with factory() as db:
             profile = get_profile_by_name(db, name)
-            if profile and profile.is_active:
+            if profile is not None:
+                if not profile.is_active:
+                    raise ValueError(
+                        f"Profile '{name}' is deactivated. "
+                        f"Re-activate it via the admin API before use."
+                    )
                 data = json.loads(profile.config_json)
                 logger.info("Loaded profile '%s' from DB (id=%s)", name, profile.id)
                 return (data, profile.id)
+    except ValueError:
+        raise  # Let deactivation errors propagate — do NOT fallback to YAML
     except Exception:
         logger.exception("DB profile load failed for '%s'; falling back to YAML", name)
 

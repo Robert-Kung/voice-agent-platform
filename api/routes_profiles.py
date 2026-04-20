@@ -5,7 +5,7 @@ import json
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
-from api.deps import get_db
+from api.deps import get_db, require_admin
 from api.schemas import ProfileCreate, ProfileOut, ProfileUpdate
 from db import profile_store
 from db.models import Profile
@@ -36,7 +36,7 @@ def list_profiles_endpoint(
     return [_to_out(p) for p in profiles]
 
 
-@router.post("", response_model=ProfileOut, status_code=status.HTTP_201_CREATED)
+@router.post("", response_model=ProfileOut, status_code=status.HTTP_201_CREATED, dependencies=[Depends(require_admin)])
 def create_profile_endpoint(
     payload: ProfileCreate,
     db: Session = Depends(get_db),
@@ -70,13 +70,13 @@ def get_profile_endpoint(
     return _to_out(profile)
 
 
-@router.patch("/{profile_id}", response_model=ProfileOut)
+@router.patch("/{profile_id}", response_model=ProfileOut, dependencies=[Depends(require_admin)])
 def update_profile_endpoint(
     profile_id: str,
     payload: ProfileUpdate,
     db: Session = Depends(get_db),
 ):
-    update_data = {k: v for k, v in payload.model_dump().items() if v is not None}
+    update_data = payload.model_dump(exclude_unset=True)
     if "config" in update_data:
         update_data["config_json"] = update_data.pop("config")
 
@@ -86,7 +86,7 @@ def update_profile_endpoint(
     return _to_out(profile)
 
 
-@router.delete("/{profile_id}", response_model=ProfileOut)
+@router.delete("/{profile_id}", response_model=ProfileOut, dependencies=[Depends(require_admin)])
 def deactivate_profile_endpoint(
     profile_id: str,
     db: Session = Depends(get_db),

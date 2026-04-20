@@ -2,6 +2,7 @@
 
 import json
 import os
+from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
@@ -90,10 +91,11 @@ def get_livekit_link_endpoint(
     # LiveKit Cloud URL pattern:
     # https://cloud.livekit.io/projects/{project}/sessions?room={room_name}
     project = os.environ.get("LIVEKIT_CLOUD_PROJECT", "")
+    room_encoded = quote(sess.room_name, safe="")
     if project:
-        url = f"https://cloud.livekit.io/projects/{project}/sessions?room={sess.room_name}"
+        url = f"https://cloud.livekit.io/projects/{quote(project, safe='')}/sessions?room={room_encoded}"
     else:
-        url = f"https://cloud.livekit.io/sessions?room={sess.room_name}"
+        url = f"https://cloud.livekit.io/sessions?room={room_encoded}"
 
     return {
         "session_id": session_id,
