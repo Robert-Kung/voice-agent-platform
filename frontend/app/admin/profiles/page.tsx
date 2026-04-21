@@ -174,16 +174,34 @@ export default function ProfilesPage() {
                         </div>
                       )}
                     </td>
-                    <td className="p-3">
-                      <span
-                        className={`rounded px-2 py-0.5 text-xs ${
-                          p.is_active
-                            ? 'bg-green-500/20 text-green-700 dark:text-green-400'
-                            : 'bg-gray-500/20 text-gray-600 dark:text-gray-400'
-                        }`}
-                      >
-                        {p.is_active ? 'active' : 'inactive'}
-                      </span>
+                    <td className="p-3 whitespace-nowrap">
+                      <div className="flex flex-col gap-1">
+                        <span
+                          className={`w-fit rounded px-2 py-0.5 text-xs ${
+                            p.is_active
+                              ? 'bg-green-500/20 text-green-700 dark:text-green-400'
+                              : 'bg-gray-500/20 text-gray-600 dark:text-gray-400'
+                          }`}
+                        >
+                          {p.is_active ? 'active' : 'inactive'}
+                        </span>
+                        {p.is_active && p.is_dirty && (
+                          <span
+                            className="w-fit rounded bg-amber-500/20 px-2 py-0.5 text-xs text-amber-700 dark:text-amber-400"
+                            title="DB 有未 deploy 變更；啟用時會自動走完整 deploy"
+                          >
+                            ● dirty
+                          </span>
+                        )}
+                        {p.is_active && !p.is_dirty && p.last_deployed_at && (
+                          <span
+                            className="text-foreground/50 text-[10px]"
+                            title={new Date(p.last_deployed_at).toLocaleString()}
+                          >
+                            deployed {formatDate(p.last_deployed_at)}
+                          </span>
+                        )}
+                      </div>
                     </td>
                     <td className="text-foreground/70 p-3 text-xs whitespace-nowrap">
                       <span title={new Date(p.updated_at).toLocaleString()}>

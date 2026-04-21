@@ -9,6 +9,9 @@ export interface Profile {
   display_name: string;
   description: string;
   is_active: boolean;
+  is_dirty: boolean;
+  is_live: boolean;
+  last_deployed_at: string | null;
   config: Record<string, unknown>;
   created_at: string;
   updated_at: string;
@@ -136,6 +139,61 @@ export const sessionsApi = {
     request<{ session_id: string; room_name: string; url: string; note: string }>(
       `/api/sessions/${id}/livekit-link`
     ),
+};
+
+// ── Deploy (LiveKit Cloud) ────────────────────────────────
+
+export interface CloudAgent {
+  ID: string;
+  Version: string;
+  Region: string;
+  Status: string;
+  CPU: string;
+  Mem: string;
+  Replicas: string;
+  'Deployed At': string;
+}
+
+export interface CloudSecret {
+  Name: string;
+  'Created At': string;
+  'Updated At': string;
+}
+
+export interface DeployStatus {
+  agent: CloudAgent | null;
+  secrets: CloudSecret[];
+  raw: { status: string; secrets: string };
+}
+
+export interface DeployLogs {
+  lines: string[];
+  log_type: 'deploy' | 'build';
+}
+
+export interface DeployResult {
+  status: string;
+  mode: 'single' | 'all' | 'secret-only';
+  exported_profiles?: string[];
+  profiles_marked_clean?: number;
+  active_profile?: string;
+  stdout?: unknown;
+}
+
+export const deployApi = {
+  status: () => request<DeployStatus>('/api/deploy/status'),
+  logs: (tail = 200, logType: 'deploy' | 'build' = 'deploy') =>
+    request<DeployLogs>(`/api/deploy/logs?tail=${tail}&log_type=${logType}`),
+  deploy: (profileId?: string) =>
+    request<DeployResult>('/api/deploy/deploy', {
+      method: 'POST',
+      body: JSON.stringify(profileId ? { profile_id: profileId } : {}),
+    }),
+  switchProfile: (profileId: string) =>
+    request<DeployResult>('/api/deploy/switch-profile', {
+      method: 'POST',
+      body: JSON.stringify({ profile_id: profileId }),
+    }),
 };
 
 // ── Stats ──────────────────────────────────────────────────
