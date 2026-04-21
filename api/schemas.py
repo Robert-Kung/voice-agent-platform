@@ -30,6 +30,9 @@ class ProfileUpdate(BaseModel):
 class ProfileOut(ProfileBase):
     id: str
     config: dict[str, Any]
+    is_dirty: bool = True
+    is_live: bool = False
+    last_deployed_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
 

@@ -1,5 +1,6 @@
 """FastAPI dependency injection helpers."""
 
+import logging
 import os
 from typing import Generator
 
@@ -8,6 +9,8 @@ from fastapi.security.api_key import APIKeyHeader
 from sqlalchemy.orm import Session
 
 from db.engine import get_session_factory
+
+logger = logging.getLogger("api.auth")
 
 
 def get_db() -> Generator[Session, None, None]:
@@ -41,4 +44,5 @@ def require_admin(token: str | None = Security(_api_key_header)) -> None:
     if not expected:
         return  # No token configured — skip authentication (dev mode)
     if token != expected:
+        logger.warning("admin auth rejected: token %s", "missing" if not token else "mismatch")
         raise HTTPException(status_code=401, detail="Invalid or missing admin token")

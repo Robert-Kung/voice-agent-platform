@@ -1,6 +1,7 @@
 """Session query endpoints."""
 
 import json
+import logging
 import os
 from urllib.parse import quote
 
@@ -12,6 +13,8 @@ from api.schemas import SessionDetail, SessionEventOut, SessionSummary
 from db import session_store
 from db.models import Session as SessionModel
 from db.models import SessionEvent
+
+logger = logging.getLogger("api.sessions")
 
 router = APIRouter(prefix="/api/sessions", tags=["sessions"])
 
@@ -51,6 +54,14 @@ def list_sessions_endpoint(
         limit=limit,
         offset=offset,
     )
+    logger.info(
+        "list sessions: profile_id=%s status=%s limit=%d offset=%d → %d rows",
+        profile_id,
+        status,
+        limit,
+        offset,
+        len(sessions),
+    )
     return [_summary_to_out(s) for s in sessions]
 
 
@@ -61,6 +72,7 @@ def get_session_endpoint(
 ):
     sess = session_store.get_session(db, session_id)
     if sess is None:
+        logger.warning("get session 404: id=%s", session_id)
         raise HTTPException(status_code=404, detail="Session not found")
     return _detail_to_out(sess)
 
@@ -73,8 +85,12 @@ def get_session_events_endpoint(
 ):
     sess = session_store.get_session(db, session_id)
     if sess is None:
+        logger.warning("get session events 404: id=%s", session_id)
         raise HTTPException(status_code=404, detail="Session not found")
     events = session_store.get_events(db, session_id, event_type=event_type)
+    logger.info(
+        "session events: id=%s event_type=%s → %d events", session_id, event_type, len(events)
+    )
     return [_event_to_out(e) for e in events]
 
 
@@ -86,6 +102,7 @@ def get_livekit_link_endpoint(
     """Generate a LiveKit Cloud dashboard URL for this session's room recording."""
     sess = session_store.get_session(db, session_id)
     if sess is None:
+        logger.warning("livekit-link 404: id=%s", session_id)
         raise HTTPException(status_code=404, detail="Session not found")
 
     # LiveKit Cloud URL pattern:
@@ -97,6 +114,12 @@ def get_livekit_link_endpoint(
     else:
         url = f"https://cloud.livekit.io/sessions?room={room_encoded}"
 
+    logger.info(
+        "livekit-link: id=%s room=%s project_env=%s",
+        session_id,
+        sess.room_name,
+        bool(project),
+    )
     return {
         "session_id": session_id,
         "room_name": sess.room_name,

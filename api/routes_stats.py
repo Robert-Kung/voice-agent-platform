@@ -1,5 +1,6 @@
 """Aggregate statistics endpoints."""
 
+import logging
 from collections import defaultdict
 from datetime import datetime, timezone
 
@@ -11,6 +12,8 @@ from api.deps import get_db
 from api.schemas import DailyStatsOut, ProfileStatsOut
 from db.models import Profile
 from db.models import Session as SessionModel
+
+logger = logging.getLogger("api.stats")
 
 router = APIRouter(prefix="/api/stats", tags=["stats"])
 
@@ -47,6 +50,7 @@ def profile_stats_endpoint(
                 avg_duration_seconds=total_dur / cnt if cnt else 0.0,
             )
         )
+    logger.info("stats/profiles: %d profile buckets", len(results))
     return results
 
 
@@ -73,6 +77,9 @@ def daily_stats_endpoint(
         buckets[day]["duration"] += sess.duration_seconds or 0.0
         buckets[day]["cost"] += sess.total_cost_usd or 0.0
 
+    logger.info(
+        "stats/daily: profile_id=%s → %d day buckets", profile_id, len(buckets)
+    )
     return [
         DailyStatsOut(
             date=day,
