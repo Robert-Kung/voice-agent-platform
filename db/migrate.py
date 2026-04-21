@@ -29,6 +29,9 @@ def _yaml_to_profile(yaml_path: pathlib.Path) -> dict:
         "description": data.get("instructions", "")[:500],
         "config_json": json.dumps(data, ensure_ascii=False),
         "is_active": True,
+        # Imported YAMLs already match the on-disk file that would be baked into
+        # the next Cloud image, so start them clean.
+        "is_dirty": False,
     }
 
 

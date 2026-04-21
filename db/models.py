@@ -36,6 +36,16 @@ class Profile(Base):
     description: Mapped[str] = mapped_column(Text, nullable=False, default="")
     config_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    # True when DB config has edits not yet exported to YAML on disk. If True,
+    # the Cloud image's baked-in YAML is stale for this profile and a full
+    # `lk agent deploy` is required before switching to it.
+    is_dirty: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    # True when this profile is the one AGENT_PROFILE currently points to on Cloud.
+    # Exactly one row should have is_live=True after the first successful activation;
+    # the admin UI is the sole writer (if someone flips AGENT_PROFILE via `lk` CLI
+    # directly, DB will go stale until next admin-UI action).
+    is_live: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    last_deployed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=_utcnow, onupdate=_utcnow)
 

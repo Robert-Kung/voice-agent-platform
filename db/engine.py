@@ -44,10 +44,39 @@ def get_session_factory(engine: Engine | None = None) -> sessionmaker[Session]:
 
 
 def init_db(engine: Engine | None = None) -> None:
-    """Create all tables if they don't exist."""
+    """Create all tables if they don't exist, and add any missing columns."""
     if engine is None:
         engine = get_engine()
     Base.metadata.create_all(engine)
+    _add_missing_columns(engine)
+
+
+# ── Lightweight column migrations ──────────────────────────────
+# SQLite supports ADD COLUMN (not DROP / RENAME easily). We only add
+# columns that newer model versions introduced on top of an existing DB.
+
+from sqlalchemy import inspect, text  # noqa: E402
+
+
+def _add_missing_columns(engine: Engine) -> None:
+    """Add columns present in models but missing from the live DB."""
+    expected: dict[str, list[tuple[str, str]]] = {
+        # table -> [(column_name, SQL type + default), ...]
+        "profiles": [
+            ("is_dirty", "BOOLEAN NOT NULL DEFAULT 1"),
+            ("is_live", "BOOLEAN NOT NULL DEFAULT 0"),
+            ("last_deployed_at", "DATETIME NULL"),
+        ],
+    }
+    insp = inspect(engine)
+    with engine.begin() as conn:
+        for table, cols in expected.items():
+            if not insp.has_table(table):
+                continue
+            existing = {c["name"] for c in insp.get_columns(table)}
+            for col_name, col_def in cols:
+                if col_name not in existing:
+                    conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {col_name} {col_def}"))
 
 
 def reset_singletons() -> None:
