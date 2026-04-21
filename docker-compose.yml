@@ -38,8 +38,14 @@ services:
       - .env
     environment:
       - AGENT_DB_PATH=/app/data/agent_platform.db
+      # `lk` still stats $HOME/.livekit/cli-config.yaml even when --url/--api-key/--api-secret
+      # come from env vars; point HOME at a writable empty dir so stat returns ENOENT cleanly.
+      - HOME=/app
     volumes:
       - ./data:/app/data
+      # Share profiles dir with host so DB→YAML exports (used by /deploy/redeploy)
+      # show up on disk and make it into `lk agent deploy`'s upload tarball.
+      - ./profiles:/app/profiles
     restart: unless-stopped
 
   # ── Frontend (Next.js) ──────────────────────────────────────

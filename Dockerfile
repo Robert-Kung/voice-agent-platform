@@ -55,9 +55,25 @@ RUN uv run "agent.py" download-files
 # Build tools (gcc, g++, python3-dev) are not included in the final image
 FROM base
 
+# Install the `lk` CLI so the management API container can shell out to
+# `lk agent status / logs / deploy / update-secrets`. Pinned to a known-good
+# version; bump when Cloud requires newer features.
+ARG LK_VERSION=2.16.0
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      curl ca-certificates \
+  && curl -fsSL "https://github.com/livekit/livekit-cli/releases/download/v${LK_VERSION}/lk_${LK_VERSION}_linux_amd64.tar.gz" \
+      -o /tmp/lk.tgz \
+  && tar -xzf /tmp/lk.tgz -C /usr/local/bin lk \
+  && rm /tmp/lk.tgz \
+  && apt-get purge -y curl \
+  && apt-get autoremove -y \
+  && rm -rf /var/lib/apt/lists/*
+
 # Create a non-privileged user that the app will run under.
 # See https://docs.docker.com/build/building/best-practices/#user
-ARG UID=10001
+# Use UID 1000 to match the typical host user, so bind-mounted volumes
+# (e.g. ./profiles, ./data) are writable without extra chmod.
+ARG UID=1000
 RUN adduser \
     --disabled-password \
     --gecos "" \
