@@ -2,18 +2,18 @@ services:
   # ── Agent Worker ────────────────────────────────────────────
   # 本機跑 LiveKit voice agent（連到 LiveKit Cloud）。
   # 若 agent 改用 `lk agent create` 部署到 LiveKit Cloud，可註解掉此 service。
-  agent:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    command: ["uv", "run", "agent.py", "start"]
-    env_file:
-      - .env
-    environment:
-      - AGENT_DB_PATH=/app/data/agent_platform.db
-    volumes:
-      - ./data:/app/data
-    restart: unless-stopped
+  # agent:
+  #   build:
+  #     context: .
+  #     dockerfile: Dockerfile
+  #   command: ["uv", "run", "agent.py", "start"]
+  #   env_file:
+  #     - .env
+  #   environment:
+  #     - AGENT_DB_PATH=/app/data/agent_platform.db
+  #   volumes:
+  #     - ./data:/app/data
+  #   restart: unless-stopped
 
   # ── Management API ──────────────────────────────────────────
   # FastAPI — profiles / sessions / stats CRUD，供 admin UI 使用。
