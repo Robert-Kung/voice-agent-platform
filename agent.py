@@ -97,7 +97,7 @@ DEFAULT_PROFILE = "car_inspection"
 #   AGENT_MODE=realtime uv run agent.py console -p car_inspection
 #   lk agent update-secrets --secrets "AGENT_MODE=realtime"
 # ───────────────────────────────────────────────────────────
-AGENT_MODE = os.environ.get("AGENT_MODE", "pipeline")
+AGENT_MODE = os.environ.get("AGENT_MODE", "realtime")
 
 
 def _get_cli_profile_name() -> str:
@@ -346,7 +346,12 @@ async def entrypoint(ctx: JobContext):
                         duration_seconds=duration,
                         total_cost_usd=cost_result.get("total_usd"),
                         raw_report_json={
-                            "usage_summary": summary,
+                            "usage_summary": (
+                                summary if isinstance(summary, dict)
+                                else {k: getattr(summary, k, None) for k in summary.__dataclass_fields__}
+                                if hasattr(summary, "__dataclass_fields__")
+                                else str(summary)
+                            ),
                             "cost": cost_result,
                         },
                     )
