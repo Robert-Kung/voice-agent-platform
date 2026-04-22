@@ -141,10 +141,10 @@ lk agent deploy
 
 | Secret | 預設值 | 必要性 | 說明 |
 |--------|--------|:---:|------|
-| `AGENT_NAME` | `voice-assistant` | ✅ 已設 | agent 名稱 |
+| `AGENT_NAME` | `voice-assistant` | 不需上傳 | 程式碼 hard-coded，免費版固定一個 |
 | `AGENT_PROFILE` | `car_inspection` | ✅ 已設 | 場域選擇 |
-| `AGENT_MODE` | `pipeline` | ⚠️ 未設 | 不設 = pipeline；realtime 模式必須設 |
-| `GOOGLE_API_KEY` | — | ⚠️ 未設 | Realtime 模式必要；值見 `.env` |
+| `AGENT_MODE` | `realtime` | ✅ 已設 | 預設 realtime；設 pipeline 改走 LiveKit Inference |
+| `GOOGLE_API_KEY` | — | ✅ 已設 | Realtime 模式必要；值見 `.env` |
 | `GOOGLE_REALTIME_VOICE` | `Kore` | 可選 | 不設使用預設值 |
 | `GOOGLE_REALTIME_MODEL` | `gemini-2.5-flash-native-audio-preview-12-2025` | 可選 | 不設使用預設值 |
 
