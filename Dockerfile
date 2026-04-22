@@ -46,9 +46,9 @@ RUN uv sync --locked
 # (Excludes files specified in .dockerignore)
 COPY . .
 
-# Pre-download any ML models or files the agent needs
-# This ensures the container is ready to run immediately without downloading
-# dependencies at runtime, which improves startup time and reliability
+# Pre-download any ML models or files the agent needs.
+# HF_HOME must point under /app so the cache survives the multi-stage COPY.
+ENV HF_HOME=/app/.hf_cache
 RUN uv run "agent.py" download-files
 
 # --- Production stage ---
@@ -87,6 +87,9 @@ WORKDIR /app
 # Copy the application and virtual environment with correct ownership in a single layer
 # This avoids expensive recursive chown and excludes build tools from the final image
 COPY --from=build --chown=appuser:appuser /app /app
+
+# Keep HF_HOME consistent so the runtime finds the pre-downloaded models.
+ENV HF_HOME=/app/.hf_cache
 
 # Switch to the non-privileged user for all subsequent operations
 # This improves security by not running as root
