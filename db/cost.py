@@ -60,12 +60,13 @@ def _match_llm_rate(llm_model: str) -> dict[str, float] | None:
     return None
 
 
-def compute_cost(usage_summary: dict) -> dict:
-    """Compute cost from a UsageCollector summary dict.
+def compute_cost(usage_summary) -> dict:
+    """Compute cost from a UsageCollector summary (dict or UsageSummary object).
 
     Args:
-        usage_summary: dict with keys like 'llm_prompt_tokens', 'llm_completion_tokens',
-                       'tts_characters', 'stt_audio_duration', etc.
+        usage_summary: dict or livekit.agents.metrics.UsageSummary with fields
+                       like 'llm_prompt_tokens', 'llm_completion_tokens',
+                       'tts_characters_count', 'stt_audio_duration', etc.
 
     Returns:
         {
@@ -76,15 +77,23 @@ def compute_cost(usage_summary: dict) -> dict:
             "incomplete": bool,
         }
     """
+    # Normalise: accept both plain dict and UsageSummary dataclass/object
+    if isinstance(usage_summary, dict):
+        def _get(key: str, default=0):
+            return usage_summary.get(key, default)
+    else:
+        def _get(key: str, default=0):
+            return getattr(usage_summary, key, default) or default
+
     llm_usd = None
     tts_usd = None
     stt_usd = None
     incomplete = False
 
     # LLM cost
-    prompt_tokens = usage_summary.get("llm_prompt_tokens", 0)
-    completion_tokens = usage_summary.get("llm_completion_tokens", 0)
-    llm_model = usage_summary.get("llm_model", "")
+    prompt_tokens = _get("llm_prompt_tokens", 0)
+    completion_tokens = _get("llm_completion_tokens", 0)
+    llm_model = _get("llm_model", "")
     if prompt_tokens or completion_tokens:
         rate = _match_llm_rate(llm_model)
         if rate:
@@ -93,8 +102,8 @@ def compute_cost(usage_summary: dict) -> dict:
             incomplete = True
 
     # TTS cost — estimate from characters (rough: 150 chars ≈ 1 minute for zh)
-    tts_chars = usage_summary.get("tts_characters", 0)
-    tts_provider = usage_summary.get("tts_model", "")
+    tts_chars = _get("tts_characters_count", 0) or _get("tts_characters", 0)
+    tts_provider = _get("tts_model", "")
     if tts_chars:
         rate = _match_rate(tts_provider, TTS_RATES)
         if rate:
@@ -104,8 +113,8 @@ def compute_cost(usage_summary: dict) -> dict:
             incomplete = True
 
     # STT cost — from audio duration in seconds
-    stt_duration = usage_summary.get("stt_audio_duration", 0)
-    stt_provider = usage_summary.get("stt_model", "")
+    stt_duration = _get("stt_audio_duration", 0)
+    stt_provider = _get("stt_model", "")
     if stt_duration:
         rate = _match_rate(stt_provider, STT_RATES)
         if rate:
