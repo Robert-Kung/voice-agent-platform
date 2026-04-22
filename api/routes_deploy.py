@@ -242,7 +242,13 @@ def _lk_agent_deploy() -> subprocess.CompletedProcess[str]:
 
 
 def _lk_set_active_profile(profile_name: str) -> subprocess.CompletedProcess[str]:
-    """`lk agent update-secrets --overwrite AGENT_PROFILE=<name>`. Raises on failure."""
+    """`lk agent update-secrets AGENT_PROFILE=<name>`.
+
+    Does NOT use --overwrite, which would wipe ALL existing secrets
+    (e.g. GOOGLE_API_KEY, AGENT_MODE). Instead we just upsert the
+    AGENT_PROFILE key — `lk` already treats same-name updates as
+    upserts so this is safe.
+    """
     import time as _time
 
     logger.info("lk update-secrets AGENT_PROFILE=%s: starting (timeout=120s)", profile_name)
@@ -254,7 +260,6 @@ def _lk_set_active_profile(profile_name: str) -> subprocess.CompletedProcess[str
                 "--yes",
                 "agent",
                 "update-secrets",
-                "--overwrite",
                 "--secrets",
                 f"AGENT_PROFILE={profile_name}",
             ],
