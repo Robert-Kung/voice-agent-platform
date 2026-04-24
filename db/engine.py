@@ -22,10 +22,21 @@ def get_engine(db_url: str | None = None) -> Engine:
         return _engine
 
     if db_url is None:
-        db_path = os.environ.get("AGENT_DB_PATH", str(_DEFAULT_DB_PATH))
-        pathlib.Path(db_path).parent.mkdir(parents=True, exist_ok=True)
-        db_url = f"sqlite:///{db_path}"
+        env_db_url = os.environ.get("AGENT_DB_URL", "").strip()
+        if env_db_url:
+            db_url = env_db_url
+        else:
+            db_path = os.environ.get("AGENT_DB_PATH", str(_DEFAULT_DB_PATH))
+            pathlib.Path(db_path).parent.mkdir(parents=True, exist_ok=True)
+            db_url = f"sqlite:///{db_path}"
 
+    if db_url.startswith("sqlite:///"):
+        sqlite_path = db_url.removeprefix("sqlite:///")
+        # For sqlite:///relative/path or sqlite:////absolute/path, make sure the
+        # parent directory exists. Special SQLite URLs (e.g. :memory:) are skipped.
+        if sqlite_path and sqlite_path != ":memory:" and not sqlite_path.startswith("file:"):
+            pathlib.Path(sqlite_path).parent.mkdir(parents=True, exist_ok=True)
+                                                         
     _engine = create_engine(db_url, echo=False)
     return _engine
 
