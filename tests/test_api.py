@@ -1,6 +1,7 @@
 """Smoke tests for the Management API."""
 
 import os
+from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
@@ -111,6 +112,38 @@ class TestSessionsAPI:
     def test_events_for_nonexistent_session_404(self, client):
         r = client.get("/api/sessions/fake-id/events")
         assert r.status_code == 404
+
+    def test_livekit_link_with_project(self, client, monkeypatch):
+        from api import routes_sessions
+
+        monkeypatch.setenv("LIVEKIT_CLOUD_PROJECT", "proj demo")
+        monkeypatch.setattr(
+            routes_sessions.session_store,
+            "get_session",
+            lambda _db, _sid: SimpleNamespace(room_name="room / A"),
+        )
+
+        r = client.get("/api/sessions/s1/livekit-link")
+        assert r.status_code == 200
+        data = r.json()
+        assert data["url"] == "https://cloud.livekit.io/projects/proj%20demo/agents"
+        assert data["room_query"] == "room%20%2F%20A"
+
+    def test_livekit_link_without_project(self, client, monkeypatch):
+        from api import routes_sessions
+
+        monkeypatch.delenv("LIVEKIT_CLOUD_PROJECT", raising=False)
+        monkeypatch.setattr(
+            routes_sessions.session_store,
+            "get_session",
+            lambda _db, _sid: SimpleNamespace(room_name="room_B"),
+        )
+
+        r = client.get("/api/sessions/s1/livekit-link")
+        assert r.status_code == 200
+        data = r.json()
+        assert data["url"] == "https://cloud.livekit.io/agents"
+        assert data["room_query"] == "room_B"
 
 
 class TestStatsAPI:
