@@ -205,3 +205,23 @@ export const statsApi = {
     return request<DailyStats[]>(`/api/stats/daily${suffix}`);
   },
 };
+
+// ── Local connect-mode test ─────────────────────────────────
+
+export interface TestStartResponse {
+  room: string;
+  pid: number;
+  log_path: string;
+}
+
+export const testApi = {
+  start: (profile: string) =>
+    request<TestStartResponse>('/api/test/start', {
+      method: 'POST',
+      body: JSON.stringify({ profile }),
+    }),
+  stop: (room: string) =>
+    request<{ ok: boolean }>(`/api/test/stop/${encodeURIComponent(room)}`, {
+      method: 'DELETE',
+    }),
+};

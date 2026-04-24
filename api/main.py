@@ -13,6 +13,7 @@ from api.routes_deploy import router as deploy_router
 from api.routes_profiles import router as profiles_router
 from api.routes_sessions import router as sessions_router
 from api.routes_stats import router as stats_router
+from api.routes_test import router as test_router
 from api.routes_tools import router as tools_router
 from db import session_store
 from db.engine import get_session_factory, init_db
@@ -152,3 +153,4 @@ app.include_router(sessions_router)
 app.include_router(stats_router)
 app.include_router(tools_router)
 app.include_router(deploy_router)
+app.include_router(test_router)
