@@ -18,12 +18,8 @@ const LIVEKIT_URL = process.env.LIVEKIT_URL;
 export const revalidate = 0;
 
 export async function POST(req: Request) {
-  if (process.env.NODE_ENV !== 'development') {
-    throw new Error(
-      'THIS API ROUTE IS INSECURE. DO NOT USE THIS ROUTE IN PRODUCTION WITHOUT AN AUTHENTICATION LAYER.'
-    );
-  }
-
+  // Auth is enforced by middleware.ts (ADMIN_PASSWORD + session cookie).
+  // If ADMIN_PASSWORD is unset the middleware passes all requests through (local dev).
   try {
     if (LIVEKIT_URL === undefined) {
       throw new Error('LIVEKIT_URL is not defined');
@@ -36,9 +32,12 @@ export async function POST(req: Request) {
     }
 
     // Parse room config from request body.
-    const body = await req.json();
-    // Recreate the RoomConfiguration object from JSON object.
-    const roomConfig = RoomConfiguration.fromJson(body?.room_config, { ignoreUnknownFields: true });
+    const body = await req.json().catch(() => ({}));
+    // fromJson throws if given undefined/null — guard with an empty object.
+    const roomConfig = RoomConfiguration.fromJson(
+      body?.room_config ?? {},
+      { ignoreUnknownFields: true }
+    );
 
     // If a profile is specified, set it as room metadata so the agent can
     // dynamically load the correct YAML profile at runtime.
@@ -50,7 +49,10 @@ export async function POST(req: Request) {
     // Generate participant token
     const participantName = 'user';
     const participantIdentity = `voice_assistant_user_${Math.floor(Math.random() * 10_000)}`;
-    const roomName = `voice_assistant_room_${Math.floor(Math.random() * 10_000)}`;
+    // Allow ?room= override for connect-mode local testing (agent already in that room)
+    const roomName = (body?.room && typeof body.room === 'string')
+      ? body.room
+      : `voice_assistant_room_${Math.floor(Math.random() * 10_000)}`;
 
     const participantToken = await createParticipantToken(
       { identity: participantIdentity, name: participantName },
