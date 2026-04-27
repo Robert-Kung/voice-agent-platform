@@ -15,6 +15,7 @@ def create_session(
     room_name: str,
     profile_id: str | None = None,
     participant_identity: str = "",
+    agent_mode: str | None = None,
 ) -> Session:
     """Create a new session record (status=running)."""
     sess = Session(
@@ -22,6 +23,7 @@ def create_session(
         profile_id=profile_id,
         participant_identity=participant_identity,
         status="running",
+        agent_mode=agent_mode,
     )
     db.add(sess)
     db.commit()
@@ -122,12 +124,32 @@ def list_sessions(
     offset: int = 0,
 ) -> list[Session]:
     """List sessions with optional filters."""
+    q = _filtered_query(db, profile_id=profile_id, status=status)
+    return q.order_by(desc(Session.started_at)).offset(offset).limit(limit).all()
+
+
+def count_sessions(
+    db: DbSession,
+    *,
+    profile_id: str | None = None,
+    status: str | None = None,
+) -> int:
+    """Count sessions matching the same filters as list_sessions."""
+    return _filtered_query(db, profile_id=profile_id, status=status).count()
+
+
+def _filtered_query(
+    db: DbSession,
+    *,
+    profile_id: str | None,
+    status: str | None,
+):
     q = db.query(Session)
     if profile_id is not None:
         q = q.filter(Session.profile_id == profile_id)
     if status is not None:
         q = q.filter(Session.status == status)
-    return q.order_by(desc(Session.started_at)).offset(offset).limit(limit).all()
+    return q
 
 
 def add_events(

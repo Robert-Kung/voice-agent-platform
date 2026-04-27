@@ -5,12 +5,13 @@ import logging
 import os
 from urllib.parse import quote
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy.orm import Session
 
 from api.deps import get_db
 from api.schemas import SessionDetail, SessionEventOut, SessionSummary
 from db import session_store
+from db.cost import compute_cost
 from db.models import Session as SessionModel
 from db.models import SessionEvent
 
@@ -19,13 +20,63 @@ logger = logging.getLogger("api.sessions")
 router = APIRouter(prefix="/api/sessions", tags=["sessions"])
 
 
+def _derive_agent_mode(sess: SessionModel, raw_report: dict | None = None) -> str | None:
+    """Infer agent_mode for legacy rows that pre-date the column.
+
+    New rows have it set on insert. Old rows fall back to a heuristic:
+    audio token presence in the usage_summary indicates a realtime model.
+    """
+    if sess.agent_mode:
+        return sess.agent_mode
+    report = raw_report
+    if report is None:
+        report = json.loads(sess.raw_report_json) if sess.raw_report_json else {}
+    usage = report.get("usage_summary", {}) if isinstance(report, dict) else {}
+    if not isinstance(usage, dict):
+        return None
+    if usage.get("llm_input_audio_tokens") or usage.get("llm_output_audio_tokens"):
+        return "realtime"
+    if usage.get("llm_prompt_tokens") or usage.get("llm_completion_tokens"):
+        return "pipeline"
+    return None
+
+
 def _summary_to_out(sess: SessionModel) -> SessionSummary:
-    return SessionSummary.model_validate(sess)
+    out = SessionSummary.model_validate(sess)
+    if out.agent_mode is None:
+        out.agent_mode = _derive_agent_mode(sess)
+    # Backfill cost for legacy realtime rows whose total was null because the
+    # old compute_cost couldn't price audio tokens. Cheap: only recomputes
+    # when stored value is missing.
+    if out.total_cost_usd is None and out.agent_mode:
+        report = json.loads(sess.raw_report_json) if sess.raw_report_json else {}
+        usage = report.get("usage_summary") if isinstance(report, dict) else None
+        if isinstance(usage, dict):
+            recomputed = compute_cost(usage, agent_mode=out.agent_mode)
+            if recomputed.get("total_usd") is not None:
+                out.total_cost_usd = recomputed["total_usd"]
+    return out
 
 
 def _detail_to_out(sess: SessionModel) -> SessionDetail:
-    base = SessionSummary.model_validate(sess)
     raw_report = json.loads(sess.raw_report_json) if sess.raw_report_json else {}
+    base = SessionSummary.model_validate(sess)
+    if base.agent_mode is None:
+        base.agent_mode = _derive_agent_mode(sess, raw_report)
+    # If stored cost is missing/null, recompute and merge into raw_report so the
+    # detail page shows a current Gemini Live breakdown for legacy realtime rows.
+    if isinstance(raw_report, dict):
+        usage = raw_report.get("usage_summary")
+        if isinstance(usage, dict):
+            recomputed = compute_cost(usage, agent_mode=base.agent_mode)
+            existing_cost = raw_report.get("cost") or {}
+            if (
+                not isinstance(existing_cost, dict)
+                or existing_cost.get("total_usd") is None
+            ):
+                raw_report["cost"] = recomputed
+                if base.total_cost_usd is None and recomputed.get("total_usd") is not None:
+                    base.total_cost_usd = recomputed["total_usd"]
     return SessionDetail(**base.model_dump(), raw_report=raw_report)
 
 
@@ -41,6 +92,7 @@ def _event_to_out(ev: SessionEvent) -> SessionEventOut:
 
 @router.get("", response_model=list[SessionSummary])
 def list_sessions_endpoint(
+    response: Response,
     profile_id: str | None = Query(None),
     status: str | None = Query(None, pattern="^(running|completed|failed)$"),
     limit: int = Query(50, ge=1, le=200),
@@ -54,13 +106,17 @@ def list_sessions_endpoint(
         limit=limit,
         offset=offset,
     )
+    total = session_store.count_sessions(db, profile_id=profile_id, status=status)
+    response.headers["X-Total-Count"] = str(total)
+    response.headers["Access-Control-Expose-Headers"] = "X-Total-Count"
     logger.info(
-        "list sessions: profile_id=%s status=%s limit=%d offset=%d → %d rows",
+        "list sessions: profile_id=%s status=%s limit=%d offset=%d → %d/%d rows",
         profile_id,
         status,
         limit,
         offset,
         len(sessions),
+        total,
     )
     return [_summary_to_out(s) for s in sessions]
 

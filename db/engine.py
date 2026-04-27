@@ -78,6 +78,9 @@ def _add_missing_columns(engine: Engine) -> None:
             ("is_live", "BOOLEAN NOT NULL DEFAULT 0"),
             ("last_deployed_at", "DATETIME NULL"),
         ],
+        "sessions": [
+            ("agent_mode", "VARCHAR(20) NULL"),
+        ],
     }
     insp = inspect(engine)
     with engine.begin() as conn:

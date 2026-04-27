@@ -291,6 +291,7 @@ async def entrypoint(ctx: JobContext):
                     db,
                     room_name=room_name,
                     profile_id=db_profile_id,
+                    agent_mode=AGENT_MODE,
                 )
                 db_session_id = db_sess.id
                 session_started_at = db_sess.started_at
@@ -439,7 +440,7 @@ async def entrypoint(ctx: JobContext):
                         }
                     )
 
-                cost_result = compute_cost(summary)
+                cost_result = compute_cost(summary, agent_mode=AGENT_MODE)
                 # UsageCollector.get_summary() has no "duration" key; compute
                 # it from the wall clock so the UI shows real session length.
                 started_at = session_started_at

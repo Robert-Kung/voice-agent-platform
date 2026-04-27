@@ -131,3 +131,61 @@ class TestTotalCost:
         assert r["tts_usd"] is None
         assert r["total_usd"] == 0.15  # sum of known parts
         assert r["incomplete"] is True
+
+
+class TestRealtimeCost:
+    def test_realtime_explicit_mode(self):
+        """Explicit agent_mode='realtime' uses Gemini Live audio rates."""
+        r = compute_cost(
+            {
+                "llm_input_audio_tokens": 1_000_000,
+                "llm_output_audio_tokens": 1_000_000,
+                "llm_input_text_tokens": 0,
+                "llm_output_text_tokens": 0,
+            },
+            agent_mode="realtime",
+        )
+        # 1M audio_in × $3 + 1M audio_out × $12 = $15
+        assert r["mode"] == "realtime"
+        assert r["llm_usd"] == 15.0
+        assert r["total_usd"] == 15.0
+        assert r["incomplete"] is False
+        assert r["tokens"]["audio_in"] == 1_000_000
+
+    def test_realtime_mixed_audio_text(self):
+        r = compute_cost(
+            {
+                "llm_input_audio_tokens": 100,
+                "llm_output_audio_tokens": 200,
+                "llm_input_text_tokens": 1_000_000,
+                "llm_output_text_tokens": 1_000_000,
+            },
+            agent_mode="realtime",
+        )
+        # 100 × 3 + 200 × 12 + 1M × 0.5 + 1M × 2 = 0.0003 + 0.0024 + 0.5 + 2 ≈ 2.5027
+        assert abs(r["llm_usd"] - 2.5027) < 1e-4
+
+    def test_realtime_cached_input_discount(self):
+        r = compute_cost(
+            {
+                "llm_input_audio_tokens": 1_000_000,
+                "llm_input_cached_audio_tokens": 1_000_000,  # all cached
+                "llm_output_audio_tokens": 0,
+            },
+            agent_mode="realtime",
+        )
+        # billable audio_in = 0; cached = 1M × 0.075 = 0.075
+        assert abs(r["llm_usd"] - 0.075) < 1e-9
+
+    def test_auto_detect_realtime_via_audio_tokens(self):
+        """No agent_mode given but audio tokens present → realtime path."""
+        r = compute_cost({"llm_input_audio_tokens": 1_000_000})
+        assert r["mode"] == "realtime"
+
+    def test_pipeline_explicit_mode_skips_audio_path(self):
+        """Explicit agent_mode='pipeline' forces pipeline path."""
+        r = compute_cost(
+            {"llm_input_audio_tokens": 1_000_000},  # would auto-detect as realtime
+            agent_mode="pipeline",
+        )
+        assert r["mode"] == "pipeline"

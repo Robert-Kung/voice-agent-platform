@@ -1,8 +1,34 @@
-"""Cost estimation — derive USD from session metrics_collected data."""
+"""Cost estimation — derive USD from session metrics_collected data.
+
+Two modes:
+  - "pipeline": separate STT + LLM + TTS plugins; cost = LLM tokens + STT minutes + TTS minutes.
+  - "realtime": one streaming model (e.g. Gemini Live native audio) with mixed
+    audio + text token billing; cost = audio_in × audio_in_rate + audio_out × audio_out_rate
+    + text_in × text_in_rate + text_out × text_out_rate.
+"""
 
 from __future__ import annotations
 
-# USD per 1M tokens (input / output)
+# ── Realtime: per-1M token rates for streaming/native-audio models ─────────
+# Source: Google Gemini Live API pricing (2.5 Flash native audio preview).
+# Update these alongside model changes.
+REALTIME_RATES: dict[str, dict[str, float]] = {
+    # Default key used when usage_summary indicates audio tokens but no model
+    # name is captured — most current sessions hit this path.
+    "google/gemini-live-2.5-flash-native-audio": {
+        "audio_in": 3.00,
+        "audio_out": 12.00,
+        "text_in": 0.50,
+        "text_out": 2.00,
+        "cached_in": 0.075,
+    },
+}
+
+# Default realtime rate to use when only summary tokens are available.
+_REALTIME_DEFAULT = "google/gemini-live-2.5-flash-native-audio"
+
+
+# ── Pipeline: per-1M tokens (LLM) / per-minute (audio) ────────────────────
 LLM_RATES: dict[str, dict[str, float]] = {
     # Google
     "google/gemini-2.5-flash": {"in": 0.15, "out": 0.60},
@@ -36,8 +62,7 @@ def _match_rate(key: str, rate_table: dict[str, float]) -> float | None:
     """Fuzzy-match a model/provider name against rate table keys.
 
     Longer keys are checked first so that specific names (e.g. "gpt-4o-mini")
-    win over their substrings ("gpt-4o"). Without this ordering, the first
-    registered key wins and more-specific rates get silently skipped.
+    win over their substrings ("gpt-4o").
     """
     key_lower = key.lower()
     for k in sorted(rate_table, key=len, reverse=True):
@@ -47,12 +72,6 @@ def _match_rate(key: str, rate_table: dict[str, float]) -> float | None:
 
 
 def _match_llm_rate(llm_model: str) -> dict[str, float] | None:
-    """Match the longest registered LLM key that is a substring of llm_model.
-
-    Dict iteration order is insertion-order, so naive `for k in LLM_RATES`
-    caused `google/gemini-2.5-flash-lite` to match `google/gemini-2.5-flash`
-    first and pay the wrong rate. Sorting by length reverse-first fixes this.
-    """
     model_lower = llm_model.lower()
     for model_key in sorted(LLM_RATES, key=len, reverse=True):
         if model_key.lower() in model_lower:
@@ -60,40 +79,71 @@ def _match_llm_rate(llm_model: str) -> dict[str, float] | None:
     return None
 
 
-def compute_cost(usage_summary) -> dict:
-    """Compute cost from a UsageCollector summary (dict or UsageSummary object).
-
-    Args:
-        usage_summary: dict or livekit.agents.metrics.UsageSummary with fields
-                       like 'llm_prompt_tokens', 'llm_completion_tokens',
-                       'tts_characters_count', 'stt_audio_duration', etc.
-
-    Returns:
-        {
-            "llm_usd": float | None,
-            "tts_usd": float | None,
-            "stt_usd": float | None,
-            "total_usd": float | None,
-            "incomplete": bool,
-        }
-    """
-    # Normalise: accept both plain dict and UsageSummary dataclass/object
+def _is_realtime(usage_summary, agent_mode: str | None) -> bool:
+    """Heuristic: explicit agent_mode wins; else fall back to audio-token
+    presence which only realtime / native-audio models produce."""
+    if agent_mode == "realtime":
+        return True
+    if agent_mode == "pipeline":
+        return False
     if isinstance(usage_summary, dict):
-        def _get(key: str, default=0):
-            return usage_summary.get(key, default)
-    else:
-        def _get(key: str, default=0):
-            return getattr(usage_summary, key, default) or default
+        return bool(usage_summary.get("llm_input_audio_tokens") or usage_summary.get("llm_output_audio_tokens"))
+    return bool(getattr(usage_summary, "llm_input_audio_tokens", 0) or getattr(usage_summary, "llm_output_audio_tokens", 0))
 
+
+def _compute_realtime_cost(get) -> dict:
+    """Compute cost for a realtime streaming model using granular token fields."""
+    rate = REALTIME_RATES[_REALTIME_DEFAULT]
+
+    audio_in = get("llm_input_audio_tokens", 0)
+    audio_in_cached = get("llm_input_cached_audio_tokens", 0)
+    text_in = get("llm_input_text_tokens", 0)
+    text_in_cached = get("llm_input_cached_text_tokens", 0)
+    audio_out = get("llm_output_audio_tokens", 0)
+    text_out = get("llm_output_text_tokens", 0)
+
+    audio_in_billable = max(audio_in - audio_in_cached, 0)
+    text_in_billable = max(text_in - text_in_cached, 0)
+    cached_total = audio_in_cached + text_in_cached
+
+    llm_usd = (
+        audio_in_billable * rate["audio_in"]
+        + audio_out * rate["audio_out"]
+        + text_in_billable * rate["text_in"]
+        + text_out * rate["text_out"]
+        + cached_total * rate["cached_in"]
+    ) / 1_000_000
+
+    return {
+        "mode": "realtime",
+        "model": _REALTIME_DEFAULT,
+        "rates_per_1m": rate,
+        "tokens": {
+            "audio_in": audio_in,
+            "audio_in_cached": audio_in_cached,
+            "audio_out": audio_out,
+            "text_in": text_in,
+            "text_in_cached": text_in_cached,
+            "text_out": text_out,
+        },
+        "llm_usd": llm_usd,
+        "tts_usd": None,
+        "stt_usd": None,
+        "total_usd": llm_usd,
+        "incomplete": False,
+    }
+
+
+def _compute_pipeline_cost(get) -> dict:
+    """Compute cost for the STT + LLM + TTS pipeline."""
     llm_usd = None
     tts_usd = None
     stt_usd = None
     incomplete = False
 
-    # LLM cost
-    prompt_tokens = _get("llm_prompt_tokens", 0)
-    completion_tokens = _get("llm_completion_tokens", 0)
-    llm_model = _get("llm_model", "")
+    prompt_tokens = get("llm_prompt_tokens", 0)
+    completion_tokens = get("llm_completion_tokens", 0)
+    llm_model = get("llm_model", "")
     if prompt_tokens or completion_tokens:
         rate = _match_llm_rate(llm_model)
         if rate:
@@ -101,9 +151,8 @@ def compute_cost(usage_summary) -> dict:
         else:
             incomplete = True
 
-    # TTS cost — estimate from characters (rough: 150 chars ≈ 1 minute for zh)
-    tts_chars = _get("tts_characters_count", 0) or _get("tts_characters", 0)
-    tts_provider = _get("tts_model", "")
+    tts_chars = get("tts_characters_count", 0) or get("tts_characters", 0)
+    tts_provider = get("tts_model", "")
     if tts_chars:
         rate = _match_rate(tts_provider, TTS_RATES)
         if rate:
@@ -112,9 +161,8 @@ def compute_cost(usage_summary) -> dict:
         else:
             incomplete = True
 
-    # STT cost — from audio duration in seconds
-    stt_duration = _get("stt_audio_duration", 0)
-    stt_provider = _get("stt_model", "")
+    stt_duration = get("stt_audio_duration", 0)
+    stt_provider = get("stt_model", "")
     if stt_duration:
         rate = _match_rate(stt_provider, STT_RATES)
         if rate:
@@ -122,14 +170,38 @@ def compute_cost(usage_summary) -> dict:
         else:
             incomplete = True
 
-    # Total
     parts = [x for x in [llm_usd, tts_usd, stt_usd] if x is not None]
     total_usd = sum(parts) if parts else None
 
     return {
+        "mode": "pipeline",
         "llm_usd": llm_usd,
         "tts_usd": tts_usd,
         "stt_usd": stt_usd,
         "total_usd": total_usd,
         "incomplete": incomplete,
     }
+
+
+def compute_cost(usage_summary, agent_mode: str | None = None) -> dict:
+    """Compute cost from a UsageCollector summary.
+
+    Args:
+        usage_summary: dict or UsageSummary with token / audio fields.
+        agent_mode: "realtime" / "pipeline" / None — when None, auto-detect
+                    from the presence of audio tokens.
+
+    Returns:
+        Realtime: {mode, model, rates_per_1m, tokens, llm_usd, total_usd, incomplete=False, ...}
+        Pipeline: {mode, llm_usd, tts_usd, stt_usd, total_usd, incomplete}
+    """
+    if isinstance(usage_summary, dict):
+        def get(key: str, default=0):
+            return usage_summary.get(key, default) or default
+    else:
+        def get(key: str, default=0):
+            return getattr(usage_summary, key, default) or default
+
+    if _is_realtime(usage_summary, agent_mode):
+        return _compute_realtime_cost(get)
+    return _compute_pipeline_cost(get)

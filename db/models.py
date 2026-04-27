@@ -66,6 +66,9 @@ class Session(Base):
     duration_seconds: Mapped[float | None] = mapped_column(Float, nullable=True)
     total_cost_usd: Mapped[float | None] = mapped_column(Float, nullable=True)
     raw_report_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    # "realtime" or "pipeline" — captured from AGENT_MODE env at session start.
+    # Nullable for rows written before this column existed.
+    agent_mode: Mapped[str | None] = mapped_column(String(20), nullable=True)
 
     profile: Mapped[Profile | None] = relationship(back_populates="sessions")
     events: Mapped[list["SessionEvent"]] = relationship(back_populates="session", cascade="all, delete-orphan")
