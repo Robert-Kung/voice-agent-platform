@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import { toast } from 'sonner';
-import { profilesApi, toolsApi } from '@/lib/admin-api';
+import { profilesApi, testApi, toolsApi } from '@/lib/admin-api';
 import type { Profile } from '@/lib/admin-api';
 
 const KNOWN_KEYS = [
@@ -13,6 +13,7 @@ const KNOWN_KEYS = [
   'language',
   'timezone',
   'welcome_message',
+  'welcome_instructions',
   'human_operator_instructions',
   'human_operator_greeting',
   'instructions',
@@ -43,6 +44,7 @@ interface KnownConfig {
   language?: string;
   timezone?: string;
   welcome_message?: string;
+  welcome_instructions?: string;
   human_operator_instructions?: string;
   human_operator_greeting?: string;
   instructions?: string;
@@ -96,6 +98,7 @@ export default function ProfileDetailPage() {
 
   const [availableTools, setAvailableTools] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
+  const [trying, setTrying] = useState(false);
   const [initialSnapshot, setInitialSnapshot] = useState<string>('');
 
   // Snapshot for dirty-check
@@ -187,6 +190,23 @@ export default function ProfileDetailPage() {
       }
       return { ...prev, tools: [...tools, { name: toolName }] };
     });
+  };
+
+  const handleTry = async () => {
+    if (!profile || isNew) return;
+    if (isDirty) {
+      toast.error('有未儲存變更。先儲存後再 Try（Try 跑的是 DB 最新版本）。');
+      return;
+    }
+    setTrying(true);
+    try {
+      const { room } = await testApi.start(profile.name);
+      window.open(`/?room=${encodeURIComponent(room)}`, '_blank');
+    } catch (e) {
+      toast.error(`無法啟動測試 agent: ${(e as Error).message}`);
+    } finally {
+      setTrying(false);
+    }
   };
 
   const handleSave = async () => {
@@ -375,12 +395,27 @@ export default function ProfileDetailPage() {
             Messages
           </h3>
           <div>
-            <label className="mb-1 block text-sm font-medium">Welcome Message</label>
+            <label className="mb-1 block text-sm font-medium">
+              Welcome Message <span className="text-foreground/50">(pipeline 逐字 TTS)</span>
+            </label>
             <textarea
               value={known.welcome_message ?? ''}
               onChange={(e) => updateKnown('welcome_message', e.target.value)}
               rows={4}
               placeholder="進線第一句歡迎語…"
+              className={textareaClass}
+            />
+          </div>
+          <div>
+            <label className="mb-1 block text-sm font-medium">
+              Welcome Instructions{' '}
+              <span className="text-foreground/50">(realtime 模式 Gemini 描述性提示)</span>
+            </label>
+            <textarea
+              value={known.welcome_instructions ?? ''}
+              onChange={(e) => updateKnown('welcome_instructions', e.target.value)}
+              rows={3}
+              placeholder="向來電者打招呼，簡短介紹自己並詢問需要什麼協助。"
               className={textareaClass}
             />
           </div>
@@ -515,11 +550,26 @@ export default function ProfileDetailPage() {
             {saving ? 'Saving…' : isNew ? 'Create Profile' : 'Save'}
           </button>
           {!isNew && (
-            <Link
-              href={`/?profile=${encodeURIComponent(profile.name)}`}
-              className="border-border hover:bg-foreground/5 rounded-md border px-4 py-2 text-sm"
+            <button
+              onClick={handleTry}
+              disabled={trying || isDirty}
+              title={
+                isDirty
+                  ? '先儲存變更，否則 Try 跑的會是上次儲存版本'
+                  : '啟動本機 connect-mode agent 並開啟測試頁'
+              }
+              className="border-border hover:bg-foreground/5 rounded-md border px-4 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-50"
             >
-              Try this profile →
+              {trying ? '啟動中…' : 'Try (本機)'}
+            </button>
+          )}
+          {!isNew && (
+            <Link
+              href={`/admin/deploy?profile=${encodeURIComponent(profile.name)}`}
+              className="border-border hover:bg-foreground/5 rounded-md border px-4 py-2 text-sm"
+              title="到 Deploy 頁面把此 profile 上 LiveKit Cloud"
+            >
+              Deploy →
             </Link>
           )}
           {isDirty && <span className="text-xs text-amber-600 dark:text-amber-400">未儲存</span>}
