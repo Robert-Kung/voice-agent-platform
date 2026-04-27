@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { profilesApi, sessionsApi, statsApi } from '@/lib/admin-api';
+import { formatDate, profilesApi, sessionsApi, statsApi } from '@/lib/admin-api';
 import type { DailyStats, Profile, ProfileStats, SessionSummary } from '@/lib/admin-api';
 
 export default function DashboardPage() {
@@ -22,7 +22,7 @@ export default function DashboardPage() {
     ])
       .then(([ps, ss, pstats, dstats]) => {
         setProfiles(ps);
-        setSessions(ss);
+        setSessions(ss.items);
         setProfileStats(pstats);
         setDailyStats(dstats);
       })
@@ -132,8 +132,10 @@ export default function DashboardPage() {
                     <td className="p-3">
                       <StatusBadge status={s.status} />
                     </td>
-                    <td className="text-foreground/70 p-3">
-                      {new Date(s.started_at).toLocaleString()}
+                    <td className="text-foreground/70 p-3 text-xs whitespace-nowrap">
+                      <span title={new Date(s.started_at).toLocaleString()}>
+                        {formatDate(s.started_at)}
+                      </span>
                     </td>
                     <td className="p-3 text-right">{formatDuration(s.duration_seconds)}</td>
                     <td className="p-3 text-right">

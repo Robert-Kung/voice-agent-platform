@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { toast } from 'sonner';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { deployApi, profilesApi } from '@/lib/admin-api';
@@ -8,7 +9,18 @@ import type { DeployLogs, DeployStatus, Profile } from '@/lib/admin-api';
 
 const LOG_TYPES: Array<'deploy' | 'build'> = ['deploy', 'build'];
 
+const LOG_TYPE_HELP: Record<'deploy' | 'build', string> = {
+  deploy:
+    'Cloud agent 執行時的 stdout/stderr（agent.py logger、SDK 訊息、tool call 結果）。空閒時無內容。',
+  build: '上次 lk agent deploy 的 Docker image build 輸出。Deploy 結束後會逐漸過期。',
+};
+
+const LIVEKIT_PROJECT_DASHBOARD = 'https://cloud.livekit.io/agents';
+
 export default function DeployPage() {
+  const searchParams = useSearchParams();
+  const requestedProfileName = searchParams.get('profile');
+
   const [status, setStatus] = useState<DeployStatus | null>(null);
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [logs, setLogs] = useState<DeployLogs | null>(null);
@@ -60,14 +72,21 @@ export default function DeployPage() {
     [profiles, selectedId]
   );
 
-  // Default selection: prefer live profile if clean (disabled), else first dirty.
+  // Default selection: ?profile=<name> wins, else live profile, else first.
   useEffect(() => {
     if (selectedId !== null) return;
     if (profiles.length === 0) return;
+    if (requestedProfileName) {
+      const requested = profiles.find((p) => p.name === requestedProfileName);
+      if (requested) {
+        setSelectedId(requested.id);
+        return;
+      }
+    }
     const live = profiles.find((p) => p.is_live);
     if (live) setSelectedId(live.id);
     else setSelectedId(profiles[0].id);
-  }, [profiles, selectedId]);
+  }, [profiles, selectedId, requestedProfileName]);
 
   const action = useMemo(() => {
     if (!selected) return { label: 'Deploy & Activate', disabled: true, slow: false };
@@ -328,48 +347,122 @@ export default function DeployPage() {
         </>
       )}
 
-      <section>
-        <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-          <h3 className="text-lg font-semibold">Logs</h3>
-          <div className="flex items-center gap-2">
-            <div className="border-border inline-flex overflow-hidden rounded border text-xs">
-              {LOG_TYPES.map((t) => (
-                <button
-                  key={t}
-                  onClick={() => setLogType(t)}
-                  className={`px-2 py-1 ${
-                    logType === t ? 'bg-foreground/10 font-medium' : 'hover:bg-foreground/5'
-                  }`}
-                >
-                  {t}
-                </button>
-              ))}
-            </div>
-            <button
-              onClick={loadLogs}
-              disabled={logsLoading}
-              aria-label="Refresh logs"
-              title="Refresh logs"
-              className="border-border hover:bg-foreground/10 rounded border px-2 py-1 text-xs disabled:opacity-50"
-            >
-              <span className={logsLoading ? 'inline-block animate-spin' : 'inline-block'}>⟳</span>
-            </button>
-          </div>
-        </div>
-        {logsError ? (
-          <div className="rounded-md border border-red-500/40 bg-red-500/10 p-3 text-xs text-red-700 dark:text-red-400">
-            {logsError}
-          </div>
-        ) : (
-          <pre className="border-border text-foreground/90 max-h-[480px] overflow-auto rounded-md border bg-black/80 p-3 text-xs leading-relaxed text-green-200">
-            {logsLoading && !logs
-              ? 'Fetching logs…'
-              : (logs?.lines || []).join('\n') || '(no log output)'}
-          </pre>
-        )}
-      </section>
+      <LogsSection
+        logs={logs}
+        logType={logType}
+        setLogType={setLogType}
+        logsLoading={logsLoading}
+        logsError={logsError}
+        onRefresh={loadLogs}
+      />
     </div>
   );
+}
+
+// ── Logs ───────────────────────────────────────────────────────
+
+function LogsSection({
+  logs,
+  logType,
+  setLogType,
+  logsLoading,
+  logsError,
+  onRefresh,
+}: {
+  logs: DeployLogs | null;
+  logType: 'deploy' | 'build';
+  setLogType: (t: 'deploy' | 'build') => void;
+  logsLoading: boolean;
+  logsError: string | null;
+  onRefresh: () => void;
+}) {
+  const lines = logs?.lines || [];
+  // The lk CLI prints `Using agent [CA_xxx]` as a selector echo before tailing.
+  // When that's the only line back, it means there's nothing recent to tail.
+  const isEmpty =
+    !logsLoading &&
+    lines.length <= 1 &&
+    (lines[0]?.startsWith('Using agent ') || lines.length === 0);
+
+  return (
+    <section>
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+        <h3 className="text-lg font-semibold">Logs</h3>
+        <div className="flex items-center gap-2">
+          <div className="border-border inline-flex overflow-hidden rounded border text-xs">
+            {LOG_TYPES.map((t) => (
+              <button
+                key={t}
+                onClick={() => setLogType(t)}
+                className={`px-2 py-1 ${
+                  logType === t ? 'bg-foreground/10 font-medium' : 'hover:bg-foreground/5'
+                }`}
+              >
+                {t}
+              </button>
+            ))}
+          </div>
+          <a
+            href={LIVEKIT_PROJECT_DASHBOARD}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="border-border hover:bg-foreground/10 rounded border px-2 py-1 text-xs"
+            title="完整 session-level log 在 LiveKit Cloud Dashboard"
+          >
+            Open in Cloud ↗
+          </a>
+          <button
+            onClick={onRefresh}
+            disabled={logsLoading}
+            aria-label="Refresh logs"
+            title="Refresh logs"
+            className="border-border hover:bg-foreground/10 rounded border px-2 py-1 text-xs disabled:opacity-50"
+          >
+            <span className={logsLoading ? 'inline-block animate-spin' : 'inline-block'}>⟳</span>
+          </button>
+        </div>
+      </div>
+
+      <div className="border-border bg-foreground/5 mb-2 rounded-md border p-3 text-xs">
+        <strong className="font-mono">{logType}</strong>: {LOG_TYPE_HELP[logType]}
+      </div>
+
+      {logsError ? (
+        <div className="rounded-md border border-red-500/40 bg-red-500/10 p-3 text-xs text-red-700 dark:text-red-400">
+          {logsError}
+        </div>
+      ) : isEmpty ? (
+        <div className="border-border bg-foreground/5 text-foreground/70 rounded-md border p-6 text-center text-sm">
+          <p>目前無近期 {logType} log。</p>
+          <p className="text-foreground/60 mt-1 text-xs">
+            {logType === 'deploy'
+              ? 'Cloud agent 空閒時不產生輸出。發起一次測試（profile detail 頁的 Try）後再回來看。'
+              : '上次 deploy 的 build log 已過期。下次 deploy 時可即時觀察。'}
+          </p>
+        </div>
+      ) : (
+        <pre className="border-border max-h-[480px] overflow-auto rounded-md border bg-black/85 p-3 font-mono text-[11px] leading-relaxed">
+          {logsLoading && !logs ? (
+            <span className="text-green-300">Fetching logs…</span>
+          ) : (
+            lines.map((ln, i) => (
+              <div key={i} className={logLineClass(ln)}>
+                {ln}
+              </div>
+            ))
+          )}
+        </pre>
+      )}
+    </section>
+  );
+}
+
+function logLineClass(line: string): string {
+  const s = line.toLowerCase();
+  if (/\b(error|exception|traceback|fatal|critical)\b/.test(s)) return 'text-red-300';
+  if (/\b(warn|warning)\b/.test(s)) return 'text-amber-200';
+  if (/\b(debug)\b/.test(s)) return 'text-foreground/40';
+  return 'text-green-200';
 }
 
 function ProfileRow({

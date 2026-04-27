@@ -53,6 +53,7 @@ class SessionSummary(BaseModel):
     shutdown_reason: str
     duration_seconds: float | None
     total_cost_usd: float | None
+    agent_mode: str | None = None
 
     model_config = ConfigDict(from_attributes=True)
 

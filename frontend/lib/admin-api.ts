@@ -28,6 +28,12 @@ export interface SessionSummary {
   shutdown_reason: string;
   duration_seconds: number | null;
   total_cost_usd: number | null;
+  agent_mode: 'realtime' | 'pipeline' | null;
+}
+
+export interface SessionsListPage {
+  items: SessionSummary[];
+  total: number;
 }
 
 export interface SessionDetail extends SessionSummary {
@@ -73,6 +79,30 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   }
   if (res.status === 204) return undefined as T;
   return res.json();
+}
+
+async function requestWithTotal<T>(path: string): Promise<{ items: T; total: number }> {
+  const res = await fetch(`${API_BASE}${path}`, {
+    headers: { 'Content-Type': 'application/json' },
+    cache: 'no-store',
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`API ${res.status}: ${text || res.statusText}`);
+  }
+  const items = (await res.json()) as T;
+  const total = parseInt(res.headers.get('X-Total-Count') || '0', 10);
+  return { items, total: Number.isFinite(total) ? total : 0 };
+}
+
+export function formatDate(iso: string | null | undefined): string {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '—';
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(
+    d.getHours()
+  )}:${pad(d.getMinutes())}`;
 }
 
 // ── Profiles ───────────────────────────────────────────────
@@ -121,14 +151,20 @@ export const toolsApi = {
 // ── Sessions ───────────────────────────────────────────────
 
 export const sessionsApi = {
-  list: (params?: { profile_id?: string; status?: string; limit?: number; offset?: number }) => {
+  list: async (params?: {
+    profile_id?: string;
+    status?: string;
+    limit?: number;
+    offset?: number;
+  }): Promise<SessionsListPage> => {
     const qs = new URLSearchParams();
     if (params?.profile_id) qs.set('profile_id', params.profile_id);
     if (params?.status) qs.set('status', params.status);
     if (params?.limit) qs.set('limit', String(params.limit));
     if (params?.offset) qs.set('offset', String(params.offset));
     const suffix = qs.toString() ? `?${qs}` : '';
-    return request<SessionSummary[]>(`/api/sessions${suffix}`);
+    const { items, total } = await requestWithTotal<SessionSummary[]>(`/api/sessions${suffix}`);
+    return { items, total };
   },
   get: (id: string) => request<SessionDetail>(`/api/sessions/${id}`),
   getEvents: (id: string, eventType?: string) => {

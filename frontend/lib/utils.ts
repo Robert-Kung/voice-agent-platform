@@ -102,9 +102,8 @@ export function getLocalTokenSource(appConfig: AppConfig) {
     const profile = urlParams.get('profile') || appConfig.agentProfile || undefined;
 
     // In connect mode (?room=xxx), agent is already in the room — skip agent dispatch
-    const roomConfig = (!room && appConfig.agentName)
-      ? { agents: [{ agent_name: appConfig.agentName }] }
-      : undefined;
+    const roomConfig =
+      !room && appConfig.agentName ? { agents: [{ agent_name: appConfig.agentName }] } : undefined;
 
     try {
       const res = await fetch('/api/token', {
