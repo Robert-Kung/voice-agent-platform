@@ -8,17 +8,27 @@ with the deployed Cloud agent.
 import asyncio
 import logging
 import os
+import re
 import shutil
 import sys
 import uuid
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
+
+from api.deps import require_admin
 
 logger = logging.getLogger("api.test")
 
-router = APIRouter(prefix="/api/test", tags=["test"])
+router = APIRouter(
+    prefix="/api/test",
+    tags=["test"],
+    dependencies=[Depends(require_admin)],
+)
+
+# Whitelist for room names — used both as subprocess arg and log file name.
+_ROOM_NAME_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 
 # room_name → (Process, log_file_handle)
 _running: dict[str, tuple[asyncio.subprocess.Process, object]] = {}
@@ -54,8 +64,14 @@ async def start_test_agent(body: StartRequest):
     profile = body.profile.strip()
     if not profile:
         raise HTTPException(status_code=400, detail="profile is required")
+    # Profile names must also be safe — they're passed as a CLI argument and
+    # used to derive the room name below.
+    if not _ROOM_NAME_RE.match(profile):
+        raise HTTPException(status_code=400, detail="Invalid profile name")
 
     room = body.room or f"test-{profile}-{uuid.uuid4().hex[:8]}"
+    if not _ROOM_NAME_RE.match(room):
+        raise HTTPException(status_code=400, detail="Invalid room name")
 
     # Kill stale process for same room if still alive
     if room in _running:
@@ -99,6 +115,8 @@ async def start_test_agent(body: StartRequest):
 
 @router.delete("/stop/{room}")
 async def stop_test_agent(room: str):
+    if not _ROOM_NAME_RE.match(room):
+        raise HTTPException(status_code=400, detail="Invalid room name")
     entry = _running.pop(room, None)
     if entry is None:
         raise HTTPException(status_code=404, detail="No running test agent for this room")

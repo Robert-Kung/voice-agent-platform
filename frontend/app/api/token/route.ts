@@ -17,6 +17,10 @@ const LIVEKIT_URL = process.env.LIVEKIT_URL;
 // don't cache the results
 export const revalidate = 0;
 
+// Same whitelist as the API agent-runner uses for room names (api/routes_test.py).
+// 1–64 chars, alphanumerics plus _ and -.
+const ROOM_NAME_RE = /^[A-Za-z0-9_-]{1,64}$/;
+
 export async function POST(req: Request) {
   // Auth is enforced by middleware.ts (ADMIN_PASSWORD + session cookie).
   // If ADMIN_PASSWORD is unset the middleware passes all requests through (local dev).
@@ -31,11 +35,21 @@ export async function POST(req: Request) {
       throw new Error('LIVEKIT_API_SECRET is not defined');
     }
 
-    // Parse room config from request body.
-    const body = await req.json().catch(() => ({}));
+    // Parse JSON body. Surface parse errors as 400 instead of silently
+    // treating the request as `{}` — this makes client bugs debuggable.
+    let body: Record<string, unknown> = {};
+    try {
+      const raw = await req.text();
+      if (raw.trim().length > 0) {
+        body = JSON.parse(raw);
+      }
+    } catch {
+      return new NextResponse('Invalid JSON body', { status: 400 });
+    }
     // fromJson throws if given undefined/null — guard with an empty object.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const roomConfig = RoomConfiguration.fromJson(
-      body?.room_config ?? {},
+      (body?.room_config as any) ?? {},
       { ignoreUnknownFields: true }
     );
 
@@ -49,10 +63,18 @@ export async function POST(req: Request) {
     // Generate participant token
     const participantName = 'user';
     const participantIdentity = `voice_assistant_user_${Math.floor(Math.random() * 10_000)}`;
-    // Allow ?room= override for connect-mode local testing (agent already in that room)
-    const roomName = (body?.room && typeof body.room === 'string')
-      ? body.room
-      : `voice_assistant_room_${Math.floor(Math.random() * 10_000)}`;
+    // Allow ?room= override for connect-mode local testing (agent already in that room).
+    // Validate against a whitelist so callers can't smuggle arbitrary strings into
+    // the LiveKit grant.
+    let roomName: string;
+    if (body?.room && typeof body.room === 'string') {
+      if (!ROOM_NAME_RE.test(body.room)) {
+        return new NextResponse('Invalid room name', { status: 400 });
+      }
+      roomName = body.room;
+    } else {
+      roomName = `voice_assistant_room_${Math.floor(Math.random() * 10_000)}`;
+    }
 
     const participantToken = await createParticipantToken(
       { identity: participantIdentity, name: participantName },

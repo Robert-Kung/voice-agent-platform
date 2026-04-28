@@ -4,10 +4,20 @@ import { useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 
+function safeRedirect(from: string | null): string {
+  // Only allow same-origin admin paths. Reject protocol-relative URLs (//evil.com),
+  // absolute URLs (https://evil.com), and any non-/admin/ paths.
+  if (!from) return '/admin/dashboard';
+  if (!from.startsWith('/admin/')) return '/admin/dashboard';
+  if (from.includes('//')) return '/admin/dashboard';
+  if (from.includes('\\')) return '/admin/dashboard';
+  return from;
+}
+
 export default function LoginPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const from = searchParams.get('from') ?? '/admin/dashboard';
+  const from = safeRedirect(searchParams.get('from'));
 
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
