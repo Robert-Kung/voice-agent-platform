@@ -81,6 +81,10 @@ async def start_test_agent(body: StartRequest):
         except ProcessLookupError:
             pass
         try:
+            await asyncio.wait_for(old_proc.wait(), timeout=5.0)
+        except (asyncio.TimeoutError, ProcessLookupError):
+            pass
+        try:
             old_log.close()
         except Exception:
             pass
@@ -98,13 +102,22 @@ async def start_test_agent(body: StartRequest):
     # Cloud agent never sees this var → stays on inference.STT.
     child_env = {**os.environ, "AGENT_STT_PROVIDER": "deepgram"}
 
-    proc = await asyncio.create_subprocess_exec(
-        *cmd,
-        cwd=_PROJECT_ROOT,
-        env=child_env,
-        stdout=log_file,
-        stderr=asyncio.subprocess.STDOUT,
-    )
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            cwd=_PROJECT_ROOT,
+            env=child_env,
+            stdout=log_file,
+            stderr=asyncio.subprocess.STDOUT,
+        )
+    except Exception as exc:
+        try:
+            log_file.close()
+        except Exception:
+            pass
+        logger.exception("Failed to spawn test agent for room=%s", room)
+        raise HTTPException(status_code=500, detail=f"Failed to spawn test agent: {exc}") from exc
+
     _running[room] = (proc, log_file)
     logger.info("Test agent started: room=%s profile=%s pid=%d", room, profile, proc.pid)
 
@@ -126,6 +139,12 @@ async def stop_test_agent(room: str):
         logger.info("Killed test agent for room=%s", room)
     except ProcessLookupError:
         pass
+    # Reap the child so it doesn't linger as a zombie. Bound the wait so a
+    # wedged process can't hang the request.
+    try:
+        await asyncio.wait_for(proc.wait(), timeout=5.0)
+    except (asyncio.TimeoutError, ProcessLookupError):
+        pass
     try:
         log_file.close()
     except Exception:
@@ -141,7 +160,11 @@ def list_running():
 
 async def _watch(room: str, proc: asyncio.subprocess.Process, log_file):
     await proc.wait()
-    _running.pop(room, None)
+    # Only evict if the tracked entry is still *our* process. A rapid restart
+    # can replace _running[room] with a fresh process before this watcher fires.
+    current = _running.get(room)
+    if current is not None and current[0] is proc:
+        _running.pop(room, None)
     try:
         log_file.close()
     except Exception:

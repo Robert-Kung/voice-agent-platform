@@ -30,19 +30,21 @@ export function useAgentErrors() {
 
   useEffect(() => {
     // Diagnostic: capture agent.state transitions + attribute visibility.
-    // Kept post-fix so we can confirm lk.agent.state reaches "listening" on
-    // connect-mode sessions. Safe to remove once connect-mode stability is
-    // confirmed across multiple profiles.
-    const agentParticipant = agent.internal?.agentParticipant;
-    console.log('[agent]', agent.state, {
-      agentStateAttr: agentParticipant?.attributes?.['lk.agent.state'] ?? null,
-      agentIdentity: agentParticipant?.identity ?? null,
-      failureReasons: agent.failureReasons,
-    });
+    // Dev-only — leaks participant identity, so don't ship to production.
+    if (process.env.NODE_ENV !== 'production') {
+      const agentParticipant = agent.internal?.agentParticipant;
+      console.log('[agent]', agent.state, {
+        agentStateAttr: agentParticipant?.attributes?.['lk.agent.state'] ?? null,
+        agentIdentity: agentParticipant?.identity ?? null,
+        failureReasons: agent.failureReasons,
+      });
+    }
 
     if (isConnected && agent.state === 'failed') {
       const reasons = agent.failureReasons;
-      console.error('[agent] → failed, calling session.end()', { reasons });
+      if (process.env.NODE_ENV !== 'production') {
+        console.error('[agent] → failed, calling session.end()', { reasons });
+      }
 
       toastAlert({
         title: 'Session ended',

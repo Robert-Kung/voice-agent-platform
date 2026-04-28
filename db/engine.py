@@ -36,7 +36,7 @@ def get_engine(db_url: str | None = None) -> Engine:
         # parent directory exists. Special SQLite URLs (e.g. :memory:) are skipped.
         if sqlite_path and sqlite_path != ":memory:" and not sqlite_path.startswith("file:"):
             pathlib.Path(sqlite_path).parent.mkdir(parents=True, exist_ok=True)
-                                                         
+
     _engine = create_engine(db_url, echo=False)
     return _engine
 

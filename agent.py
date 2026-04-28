@@ -76,7 +76,37 @@ def _patch_connect_mode_token() -> None:
     AgentServer.simulate_job = _patched
 
 
-_patch_connect_mode_token()
+def _maybe_patch_connect_mode_token() -> None:
+    """Apply the connect-mode JWT patch only when this process is running the
+    `connect` subcommand. Cloud dispatch (`start`/`dev`) doesn't need it, and
+    leaving the patch off those paths avoids touching internal LiveKit APIs in
+    production. Also gate on a known-good livekit-agents version range so the
+    patch fails loudly on upgrades that change `simulate_job`'s signature
+    instead of silently breaking.
+    """
+    argv = sys.argv[1:]
+    if not argv or argv[0] != "connect":
+        return
+
+    try:
+        from importlib.metadata import version as _pkg_version
+        from packaging.version import Version
+
+        agents_version = Version(_pkg_version("livekit-agents"))
+        if agents_version >= Version("2.0"):
+            logger.warning(
+                "Skipping connect-mode token patch: livekit-agents %s "
+                "may have changed simulate_job(); review before re-enabling.",
+                agents_version,
+            )
+            return
+    except Exception:
+        logger.exception("connect-mode patch version check failed; applying anyway")
+
+    _patch_connect_mode_token()
+
+
+_maybe_patch_connect_mode_token()
 
 # DB integration — graceful fallback if DB layer can't be initialized.
 # Import/init failures must be visible (not silent) so ops can tell why the
