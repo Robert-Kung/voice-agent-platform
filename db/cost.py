@@ -27,6 +27,11 @@ REALTIME_RATES: dict[str, dict[str, float]] = {
 # Default realtime rate to use when only summary tokens are available.
 _REALTIME_DEFAULT = "google/gemini-live-2.5-flash-native-audio"
 
+# Realtime architecture uses Deepgram nova-2 for STT text input (avoids the
+# audio-token accumulation latency bug). Hard-coded because the deploy is
+# pinned to this combination — see project_plan.md week 2 notes.
+_REALTIME_STT_RATE_PER_MIN = 0.0043  # Deepgram nova-2
+
 
 # ── Pipeline: per-1M tokens (LLM) / per-minute (audio) ────────────────────
 LLM_RATES: dict[str, dict[str, float]] = {
@@ -114,10 +119,20 @@ def _compute_realtime_cost(get) -> dict:
         + cached_total * rate["cached_in"]
     ) / 1_000_000
 
+    # Deepgram STT is part of the realtime path — text-input architecture
+    # routes audio through Deepgram first, then forwards transcript to Gemini Live.
+    stt_seconds = get("stt_audio_duration", 0)
+    stt_usd = (stt_seconds / 60.0) * _REALTIME_STT_RATE_PER_MIN if stt_seconds > 0 else None
+
+    parts = [x for x in [llm_usd, stt_usd] if x is not None]
+    total_usd = sum(parts) if parts else None
+
     return {
         "mode": "realtime",
         "model": _REALTIME_DEFAULT,
+        "stt_provider": "deepgram/nova-2" if stt_usd is not None else None,
         "rates_per_1m": rate,
+        "stt_rate_per_min": _REALTIME_STT_RATE_PER_MIN,
         "tokens": {
             "audio_in": audio_in,
             "audio_in_cached": audio_in_cached,
@@ -126,10 +141,11 @@ def _compute_realtime_cost(get) -> dict:
             "text_in_cached": text_in_cached,
             "text_out": text_out,
         },
+        "stt_audio_seconds": stt_seconds,
         "llm_usd": llm_usd,
         "tts_usd": None,
-        "stt_usd": None,
-        "total_usd": llm_usd,
+        "stt_usd": stt_usd,
+        "total_usd": total_usd,
         "incomplete": False,
     }
 

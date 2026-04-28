@@ -166,6 +166,14 @@ function ConversationTab({ events }: { events: SessionEvent[] }) {
       {events.map((ev) => {
         const role = (ev.payload?.role as string) || 'message';
         const text = (ev.payload?.text as string) || '';
+        const fn = parseFunctionCallText(text);
+
+        // Tool calls / outputs render as a centered, collapsible row instead
+        // of a chat bubble — they're plumbing, not dialogue.
+        if (fn) {
+          return <FunctionCallRow key={ev.id} kind={fn.kind} name={fn.name} raw={text} />;
+        }
+
         const isUser = role === 'user';
         const isAssistant = role === 'assistant';
         const align = isUser ? 'items-end' : 'items-start';
@@ -187,6 +195,56 @@ function ConversationTab({ events }: { events: SessionEvent[] }) {
           </div>
         );
       })}
+    </div>
+  );
+}
+
+interface ParsedFunctionCall {
+  kind: 'call' | 'output';
+  name: string;
+}
+
+// Detect chat_message rows whose text is the repr of a FunctionCall /
+// FunctionCallOutput. Extract just the name= field so the conversation
+// stays readable; the full repr is kept behind <details> for debugging.
+function parseFunctionCallText(text: string): ParsedFunctionCall | null {
+  if (!text) return null;
+  const isCall = text.startsWith('FunctionCall(');
+  const isOutput = text.startsWith('FunctionCallOutput(');
+  if (!isCall && !isOutput) return null;
+  const m = text.match(/name='([^']+)'/);
+  return {
+    kind: isCall ? 'call' : 'output',
+    name: m?.[1] || '(unknown)',
+  };
+}
+
+function FunctionCallRow({
+  kind,
+  name,
+  raw,
+}: {
+  kind: 'call' | 'output';
+  name: string;
+  raw: string;
+}) {
+  const arrow = kind === 'call' ? '→' : '←';
+  const label = kind === 'call' ? 'tool call' : 'tool result';
+  return (
+    <div className="flex justify-center">
+      <details className="border-border bg-foreground/5 group w-full max-w-[60%] rounded-md border px-3 py-1.5 text-xs">
+        <summary className="text-foreground/70 flex cursor-pointer list-none items-center gap-2">
+          <span className="text-foreground/40 font-mono">{arrow}</span>
+          <span className="font-mono font-semibold">{name}</span>
+          <span className="text-foreground/50">{label}</span>
+          <span className="text-foreground/40 ml-auto transition-transform group-open:rotate-90">
+            ▶
+          </span>
+        </summary>
+        <pre className="text-foreground/70 mt-2 max-h-48 overflow-auto font-mono text-[11px] whitespace-pre-wrap">
+          {raw}
+        </pre>
+      </details>
     </div>
   );
 }
@@ -443,28 +501,41 @@ function CostSection({ cost, isRealtime }: { cost: Record<string, unknown>; isRe
   const rates = cost.rates_per_1m as Record<string, number> | undefined;
   const model = cost.model as string | undefined;
 
+  const sttRatePerMin = cost.stt_rate_per_min as number | undefined;
+  const sttProvider = cost.stt_provider as string | undefined;
+
   return (
     <section>
       <h3 className="mb-2 text-base font-semibold">Cost Breakdown</h3>
       <div className="border-border rounded-md border p-4">
         <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
           <CostRow label="LLM" usd={llmUsd} />
-          {!isRealtime && <CostRow label="STT" usd={sttUsd} />}
+          <CostRow label="STT" usd={sttUsd} />
           {!isRealtime && <CostRow label="TTS" usd={ttsUsd} />}
           <CostRow label="Total" usd={totalUsd ?? null} bold />
         </div>
         {isRealtime && rates && (
-          <div className="border-border mt-4 border-t pt-3">
-            <div className="text-foreground/60 mb-2 text-xs font-medium">
-              Gemini Live rates {model && <span className="font-mono">({model})</span>}
+          <div className="border-border mt-4 space-y-2 border-t pt-3">
+            <div>
+              <div className="text-foreground/60 mb-1 text-xs font-medium">
+                LLM — Gemini Live {model && <span className="font-mono">({model})</span>}
+              </div>
+              <div className="text-foreground/70 grid grid-cols-2 gap-1 text-xs md:grid-cols-5">
+                <span>audio in: ${rates.audio_in}/1M</span>
+                <span>audio out: ${rates.audio_out}/1M</span>
+                <span>text in: ${rates.text_in}/1M</span>
+                <span>text out: ${rates.text_out}/1M</span>
+                <span>cached: ${rates.cached_in}/1M</span>
+              </div>
             </div>
-            <div className="text-foreground/70 grid grid-cols-2 gap-1 text-xs md:grid-cols-5">
-              <span>audio in: ${rates.audio_in}/1M</span>
-              <span>audio out: ${rates.audio_out}/1M</span>
-              <span>text in: ${rates.text_in}/1M</span>
-              <span>text out: ${rates.text_out}/1M</span>
-              <span>cached: ${rates.cached_in}/1M</span>
-            </div>
+            {sttRatePerMin != null && (
+              <div>
+                <div className="text-foreground/60 mb-1 text-xs font-medium">
+                  STT {sttProvider && <span className="font-mono">({sttProvider})</span>}
+                </div>
+                <div className="text-foreground/70 text-xs">${sttRatePerMin}/min audio</div>
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -520,16 +591,6 @@ function groupEvents(events: SessionEvent[]): {
   const metrics: SessionEvent[] = [];
   for (const ev of events) {
     if (ev.event_type.startsWith('chat_')) {
-      // chat_message rows are a catch-all for non-user/assistant items
-      // (e.g. AgentHandoff). Show them as system messages — drop the
-      // ones whose text repr-dumps internal objects to avoid noise.
-      if (
-        ev.event_type === 'chat_message' &&
-        typeof ev.payload?.text === 'string' &&
-        (ev.payload.text as string).startsWith('AgentHandoff(')
-      ) {
-        continue;
-      }
       conversation.push(ev);
     } else if (ev.event_type.startsWith('metric_')) {
       metrics.push(ev);

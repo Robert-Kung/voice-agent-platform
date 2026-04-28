@@ -116,7 +116,7 @@ export default function ProfilesPage() {
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           placeholder="Search by name or display name…"
-          className="border-border focus:ring-primary/40 min-w-[240px] flex-1 rounded-md border bg-transparent px-3 py-1.5 text-sm focus:ring-2 focus:outline-none"
+          className="border-border bg-background text-foreground focus:ring-primary/40 min-w-[240px] flex-1 rounded-md border px-3 py-1.5 text-sm focus:ring-2 focus:outline-none"
         />
         <label className="flex items-center gap-2 text-sm whitespace-nowrap">
           <input
