@@ -108,7 +108,7 @@ You are welcome to continue working on your agent after the workshop, or start a
 ```
 ┌───────────────────┐   ┌──────────────────┐   ┌───────────────┐
 │ Next.js Frontend  │──▶│ Management API   │──▶│  SQLite       │
-│ :3003 (/admin/*)  │   │ FastAPI :8080    │   │  data/*.db    │
+│ :3004 (/admin/*)  │   │ FastAPI :8083    │   │  data/*.db    │
 └───────────────────┘   └──────────────────┘   └───────┬───────┘
                                                        │
                                 ┌──────────────────────▼───────┐
@@ -130,9 +130,9 @@ docker compose ps
 docker compose logs -f api
 
 # 訪問
-open http://localhost:3003          # 語音測試頁
-open http://localhost:3003/admin    # 管理後台
-open http://localhost:8080/docs     # OpenAPI 文件
+open http://localhost:3004          # 語音測試頁
+open http://localhost:3004/admin    # 管理後台（先 /admin/login，密碼 = ADMIN_PASSWORD env）
+open http://localhost:8083/docs     # OpenAPI 文件
 ```
 
 SQLite DB 掛載於 host 的 `./data/agent_platform.db`，container 重建不會遺失資料。
@@ -152,7 +152,7 @@ docker compose up -d --build api frontend
 uv run agent.py dev
 
 # Terminal 2: Management API
-uv run uvicorn api.main:app --reload --port 8080
+uv run uvicorn api.main:app --reload --port 8083
 
 # Terminal 3: Frontend
 cd frontend && pnpm dev
@@ -162,7 +162,7 @@ cd frontend && pnpm dev
 
 - 語音測試：http://localhost:3000
 - Admin UI：http://localhost:3000/admin
-- API docs：http://localhost:8080/docs
+- API docs：http://localhost:8083/docs
 
 ### DB 初始化
 
@@ -215,21 +215,24 @@ docker build --build-arg NEXT_PUBLIC_ADMIN_API_URL=https://api.example.com ./fro
 
 ### 安全性提醒
 
-**本 MVP 不含認證**（符合計畫書的取捨）。若部署到公網，**必須透過下列方式之一保護**：
+Admin UI 走 **`ADMIN_PASSWORD` cookie session**：環境變數設定後，所有 `/admin/*` 路由與 admin API 都需先登入；未設則跳過驗證（**僅限本機開發**）。生產建議再加：
 
 - 部署到內網 / VPN，僅授權 IP 可存取
-- 前置 reverse proxy（nginx / caddy / traefik）加 basic auth
+- 前置 reverse proxy（nginx / caddy / traefik）加 TLS
 - Cloudflare Access / Tailscale / 類似的 zero-trust 閘道
 
-現在的 CORS 設定為 `allow_origins=["*"]`（見 CODE_REVIEW.md §C1），不適合直接面向公網。
+CORS 預設仍為 `allow_origins=["*"]`（見 CODE_REVIEW.md §C1）— 即使有 admin auth，仍不建議直接面向公網。
 
 ### 執行測試
 
 ```bash
-# Python 單元測試（DB + API）
-uv run pytest
+# DB / API / cost 單元測試
+uv run pytest tests/test_db.py tests/test_api.py tests/test_cost.py
+# 預期輸出：53 passed in ~1.0s
 
-# 預期輸出：27 passed
+# Agent system（profile / tools / business hours / realtime）
+uv run pytest tests/test_agent_system.py
+# 預期輸出：34 passed
 ```
 
 ### API 快速參考
@@ -237,13 +240,28 @@ uv run pytest
 | 路徑 | 用途 |
 |---|---|
 | `GET /health` | 健康檢查 |
+| `POST /api/admin/login` | ADMIN_PASSWORD cookie 登入 |
+| `POST /api/admin/logout` | 清除 session cookie |
 | `GET /api/profiles` | 列出 profiles（預設只顯示 active） |
 | `POST /api/profiles` | 建立新 profile |
 | `PATCH /api/profiles/{id}` | 更新 profile 設定（含 config JSON） |
 | `DELETE /api/profiles/{id}` | Soft-delete（`is_active=false`） |
-| `GET /api/sessions?status=&profile_id=&limit=` | 列出 sessions |
-| `GET /api/sessions/{id}` | Session 詳情（含 raw_report） |
+| `GET /api/sessions?status=&profile_id=&limit=&offset=` | 分頁列出 sessions（response 含 `X-Total-Count` header） |
+| `GET /api/sessions/{id}` | Session 詳情（含 raw_report，舊 row 自動 backfill cost） |
 | `GET /api/sessions/{id}/events` | Session 逐筆事件 |
 | `GET /api/sessions/{id}/livekit-link` | LiveKit Cloud 錄音頁連結 |
 | `GET /api/stats/profiles` | 各 profile 累計統計 |
 | `GET /api/stats/daily` | 每日統計 |
+| `GET /api/deploy/status` | LiveKit Cloud agent 狀態 + secrets |
+| `GET /api/deploy/logs?log_type=deploy\|build` | Agent 執行 / build log 快照 |
+| `POST /api/deploy/deploy` | 觸發 `lk agent deploy` |
+| `POST /api/deploy/switch-profile` | 切換 AGENT_PROFILE secret |
+| `POST /api/test/start` | 起本機 connect-mode agent（admin Try 按鈕用） |
+| `DELETE /api/test/stop/{room}` | 停掉本機測試 agent |
+
+### Admin 主要功能
+
+- **Sessions** — 分頁列表（10/25/50）、Profile/Status/Mode filter；detail 頁有 Conversation chat bubble（function call 折疊）/ Metrics 表 / Raw events tabs
+- **Profiles** — 結構化編輯器（Display/Agent name、Language、Timezone、Welcome message + 給 realtime 用的 Welcome instructions、Instructions、Tools multi-select、Operator 折疊區）+ Advanced JSON 給未涵蓋欄位
+- **Deploy** — LiveKit Cloud agent 狀態 / Active profile 切換 / Secrets 列表 / 帶 level 著色的 deploy / build logs
+- **Cost** — Realtime 使用 Gemini Live audio + text token + 快取 + Deepgram STT 一起計算；舊 session 自動 backfill

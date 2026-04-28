@@ -1,6 +1,6 @@
 # Voice Agent Workshop — 專案現況
 
-> 最後更新：2026-04-07
+> 最後更新：2026-04-28
 
 ---
 
@@ -8,16 +8,36 @@
 
 ```
 voice-agent-workshop/
-├── agent.py              主程式入口（profile 選擇 + LiveKit session 啟動）
-├── agent_factory.py      YAML → 動態 Agent class 組裝
+├── agent.py              Agent worker 入口（profile 載入 + LiveKit session）
+├── agent_factory.py      DB / YAML → 動態 Agent class 組裝
 ├── agent_tools.py        模組化 Tool Registry（8 個內建 tool 工廠）
-├── profiles/             場域定義（YAML）
-│   ├── car_inspection.yaml    車容坊加油站
+├── profiles/             場域定義（YAML，作為 DB 初始化的 seed）
+│   ├── car_inspection.yaml    汽車代檢中心
 │   ├── dental_clinic.yaml     幸福牙醫診所
 │   └── restaurant.yaml        好食光餐廳
+├── api/                  Management API（FastAPI）
+│   ├── main.py                lifespan + middleware + routers
+│   ├── routes_profiles.py     Profile CRUD
+│   ├── routes_sessions.py     Session 查詢 + cost backfill
+│   ├── routes_deploy.py       lk CLI wrapper（status/logs/deploy/switch-profile）
+│   ├── routes_test.py         Connect-mode 本地 agent 管理（admin Try）
+│   ├── routes_auth.py         ADMIN_PASSWORD-gated cookie session
+│   └── routes_stats.py        Dashboard 統計
+├── db/                   SQLAlchemy 2.0 + 輕量 column migration
+│   ├── models.py              Profile / Session / SessionEvent
+│   ├── cost.py                Pipeline + Realtime（Gemini Live）成本計算
+│   ├── profile_store.py       DB ↔ YAML 雙向同步
+│   ├── session_store.py       Session lifecycle + filtered query
+│   └── engine.py              Engine + 自動補欄位 migration
+├── frontend/             Next.js + Admin UI
+│   ├── app/admin/             Dashboard / Profiles / Sessions / Deploy
+│   └── lib/admin-api.ts       型別化 API client
 ├── tests/
-│   └── test_agent_system.py   28 個單元測試
-├── frontend/             Next.js 前端（LiveKit 官方模板修改）
+│   ├── test_db.py             17
+│   ├── test_api.py            18（含 admin auth）
+│   ├── test_cost.py           18（含 Gemini Live + Deepgram realtime）
+│   └── test_agent_system.py   34（profile / tools / business hours / lookup_qa）
+├── docker-compose.yml    agent + api + frontend + 共享 data volume
 ├── livekit.toml          Cloud 部署設定
 └── pyproject.toml        Python 依賴
 ```
@@ -241,23 +261,28 @@ entrypoint(ctx)
 
 ## 測試
 
-### 單元測試（34 個，1.3 秒內完成）
+### 單元測試（53 個 admin / cost / db / api，~1 秒；agent_system 34 個需修 fixture）
 
 ```bash
-uv run pytest tests/ -v
+uv run pytest tests/test_db.py tests/test_api.py tests/test_cost.py
+# → 53 passed in ~1.0s
 ```
 
 | 測試類別 | 數量 | 驗證內容 |
 |---------|:----:|---------|
-| TestProfileLoading | 4 | YAML 載入、錯誤處理 |
-| TestToolRegistry | 5 | Registry 完整性、build 正確性 |
-| TestBusinessStatus | 8 | 營業時間判斷（各星期 / 時段） |
-| TestLookupQA | 4 | 關鍵字匹配 / 未匹配 |
-| TestAgentClassCreation | 3 | Agent class 動態組裝 |
-| TestToolIsolation | 2 | 不同 profile tools 互不干擾 |
-| TestSearchMenuTool | 1 | 菜單 config 載入 |
-| TestCalculatePriceTool | 1 | 價格規則 config 載入 |
-| TestAgentMode | 6 | Realtime/Pipeline 模式切換、RealtimeModel 建構 |
+| TestDB | 17 | profile_store / session_store / yaml_import |
+| TestAPI | 18 | health / profiles CRUD / sessions / stats / admin auth |
+| TestCost (pipeline) | 13 | LLM prefix-match / TTS chars / STT minutes / 總和 |
+| TestCost (realtime) | 5 | Gemini Live audio+text 拆分、cached 折扣、Deepgram STT 補上 |
+
+### 既有 agent_system 測試（34 個）
+
+```bash
+uv run pytest tests/test_agent_system.py
+```
+
+涵蓋 ProfileLoading / ToolRegistry / BusinessStatus / LookupQA / AgentClassCreation / ToolIsolation / SearchMenuTool / CalculatePriceTool / AgentMode（realtime/pipeline 切換 + RealtimeModel 建構）。
+此 suite 預設讀 host DB（`profiles` table），需先 `uv run python -m db.migrate` 才能跑。
 
 ### 實機測試
 
@@ -266,6 +291,41 @@ uv run pytest tests/ -v
 | Console | `uv run agent.py console -p restaurant` | 語音對話完整流程 |
 | 本地前端 | `pnpm dev` + `?profile=xxx` | 前端 UI + 語音 |
 | Cloud | `lk agent deploy` + Dashboard | 部署 + 雲端運行 |
+
+---
+
+## Admin 管理平台
+
+### Pages
+
+| 路徑 | 用途 |
+|------|------|
+| `/admin/login` | ADMIN_PASSWORD 登入 |
+| `/admin/dashboard` | 概覽：active profiles、running/total sessions、total cost、最近 session |
+| `/admin/profiles` | Profile 列表（search、show inactive、tools chip、Edit / Try / Deactivate / Reactivate） |
+| `/admin/profiles/[id]` | Profile 編輯（結構化欄位 + tools multi-select + welcome_instructions + Advanced JSON） |
+| `/admin/profiles/new` | 新建 profile（與 detail 共用元件） |
+| `/admin/sessions` | 列表 + 分頁（10/25/50）+ Mode 欄位 + Profile/Status filter |
+| `/admin/sessions/[id]` | Detail：Status/Mode/Duration/Cost/Started cards + Usage / Cost cards + Conversation/Metrics/Raw tabs |
+| `/admin/deploy` | LiveKit Cloud agent 狀態、profile activation、build/deploy logs |
+
+### Cost 計算（db/cost.py）
+
+| 模式 | 計算來源 | 單價 |
+|------|---------|------|
+| Pipeline | `llm_prompt/completion_tokens` × LLM rate + `stt_audio_duration` × `stt_rate` + `tts_characters_count` × `tts_rate` | 由 model name 匹配 |
+| Realtime | `llm_input_audio/text_tokens` + `llm_output_audio/text_tokens` + cached + `stt_audio_duration` × Deepgram nova-2 | Gemini Live: \$3 / \$12 / \$0.5 / \$2 / \$0.075（per 1M）；Deepgram \$0.0043/min |
+
+Realtime 架構固定為 Deepgram STT → Gemini Live LLM/TTS（text-input 模式避免延遲遞增 bug）。費率寫死於 `_REALTIME_STT_RATE_PER_MIN` 與 `REALTIME_RATES`，未來如需切其他組合再放開。
+
+### Connect-mode 本地測試流程
+
+`/admin/profiles` 列表頁的 `Try` 按鈕、`/admin/profiles/[id]` 詳細頁的 `Try (本機)` 按鈕，皆呼叫 `POST /api/test/start`：
+- API 起一個 `uv run agent.py connect --room <test-{profile}-{uuid}>` 的子行程
+- 自動拼出 LiveKit room URL 並開新分頁讓使用者連線測試
+- 行程結束 / 使用者點 stop 時 `POST /api/test/stop/{room}` 清理
+
+這條路徑跑的是 **DB 最新的** profile，不受 LiveKit Cloud deploy 是否最新影響 — 適合做 prompt 微調的快速 iterate。要實際上線到 Cloud，走 `/admin/deploy` 或 profile detail 的 `Deploy →` 按鈕。
 
 ---
 
@@ -305,8 +365,11 @@ lk agent update-secrets --secrets "AGENT_PROFILE=car_inspection"
 - [x] 前端網頁 profile 切換測試通過
 
 **架構**：
-- **Pipeline 模式**（預設）：STT → LLM → TTS（LiveKit Inference，無需額外 API key）
-- **Realtime 模式**：Google Gemini Live API（audio-in → audio-out，需 `GOOGLE_API_KEY`）
+- **Pipeline 模式**：STT → LLM → TTS（LiveKit Inference，無需額外 API key）
+- **Realtime 模式（生產採用）**：Deepgram nova-2 STT → 文字輸入 Gemini Live → 直接生成語音
+  - 採用「TextInputRealtimeModel」繞過 Gemini Live 純音訊輸入會 token 累積導致延遲遞增（1s → 30s+）的 bug
+  - 詳見第二週進展：external VAD + STT + EOU + 覆寫 `on_user_turn_completed`
+  - 需 `GOOGLE_API_KEY` + `DEEPGRAM_API_KEY`
 
 **Realtime 模式關鍵設定**：
 
@@ -336,9 +399,13 @@ GOOGLE_REALTIME_VOICE=Charon AGENT_MODE=realtime uv run agent.py console -p car_
 lk agent update-secrets --secrets "AGENT_MODE=realtime" --secrets "GOOGLE_API_KEY=<從 .env 複製>"
 ```
 
-**待辦**：
-- [ ] 延遲 & 品質 A/B 比較（Pipeline vs Realtime）
-- [ ] 決定正式上線採用的模式
+**已完成**：
+- [x] 延遲 & 品質 A/B 比較（Pipeline vs Realtime）— 採用 realtime
+- [x] 決定正式上線模式：realtime + text-input 架構
+- [x] Gemini Live 中文發音（多音字「檢」、「行」）對抗策略 — 走「源頭詞彙去歧義」（完整詞組）
+- [x] car_inspection 發音問題收斂
+
+**架構固定**：mode 不再是 profile-level 設定，固定 worker AGENT_MODE=realtime。詳見 `db/cost.py` 開頭註解與計畫書 4/27 紀錄。
 
 ### 議題 3：SIP 電話介接 🔧 進行中
 
