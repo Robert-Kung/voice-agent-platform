@@ -63,7 +63,7 @@ export default function SessionsPage() {
         <select
           value={profileFilter}
           onChange={(e) => setProfileFilter(e.target.value)}
-          className="border-border rounded-md border bg-transparent px-3 py-1.5 text-sm"
+          className="border-border bg-background text-foreground rounded-md border px-3 py-1.5 text-sm"
         >
           <option value="">All profiles</option>
           {profiles.map((p) => (
@@ -75,7 +75,7 @@ export default function SessionsPage() {
         <select
           value={statusFilter}
           onChange={(e) => setStatusFilter(e.target.value)}
-          className="border-border rounded-md border bg-transparent px-3 py-1.5 text-sm"
+          className="border-border bg-background text-foreground rounded-md border px-3 py-1.5 text-sm"
         >
           <option value="">All statuses</option>
           <option value="running">Running</option>
@@ -87,7 +87,7 @@ export default function SessionsPage() {
           <select
             value={pageSize}
             onChange={(e) => setPageSize(Number(e.target.value))}
-            className="border-border rounded-md border bg-transparent px-2 py-1 text-xs"
+            className="border-border bg-background text-foreground rounded-md border px-2 py-1 text-xs"
           >
             {PAGE_SIZE_OPTIONS.map((n) => (
               <option key={n} value={n}>

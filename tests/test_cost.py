@@ -149,8 +149,26 @@ class TestRealtimeCost:
         assert r["mode"] == "realtime"
         assert r["llm_usd"] == 15.0
         assert r["total_usd"] == 15.0
+        assert r["stt_usd"] is None  # no stt_audio_duration → no STT charge
         assert r["incomplete"] is False
         assert r["tokens"]["audio_in"] == 1_000_000
+
+    def test_realtime_with_deepgram_stt(self):
+        """Realtime architecture uses Deepgram STT — bill it alongside Gemini Live."""
+        r = compute_cost(
+            {
+                "llm_input_text_tokens": 1_000_000,  # text-input pipeline
+                "llm_output_audio_tokens": 1_000_000,
+                "stt_audio_duration": 600,  # 10 min
+            },
+            agent_mode="realtime",
+        )
+        # LLM: 1M × 0.5 + 1M × 12 = $12.5
+        # STT: 10 min × 0.0043 = $0.043
+        assert abs(r["llm_usd"] - 12.5) < 1e-9
+        assert abs(r["stt_usd"] - 0.043) < 1e-9
+        assert abs(r["total_usd"] - 12.543) < 1e-9
+        assert r["stt_provider"] == "deepgram/nova-2"
 
     def test_realtime_mixed_audio_text(self):
         r = compute_cost(

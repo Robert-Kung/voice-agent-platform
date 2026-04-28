@@ -282,7 +282,7 @@ export default function ProfileDetailPage() {
 
   const selectedTools = new Set((known.tools || []).map((t) => t.name));
   const inputClass =
-    'border-border w-full rounded-md border bg-transparent px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40';
+    'border-border bg-background text-foreground w-full rounded-md border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40';
   const textareaClass = `${inputClass} font-sans`;
 
   return (
@@ -352,7 +352,9 @@ export default function ProfileDetailPage() {
                 placeholder="voice-assistant-clinic"
                 className={`${inputClass} font-mono`}
               />
-              <p className="text-foreground/60 mt-1 text-xs">LiveKit WorkerOptions 用</p>
+              <p className="text-foreground/60 mt-1 text-xs">
+                LiveKit worker 識別名稱（agent_name）
+              </p>
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div>
@@ -531,7 +533,7 @@ export default function ProfileDetailPage() {
                 onChange={(e) => setExtraJson(e.target.value)}
                 rows={15}
                 spellCheck={false}
-                className="border-border w-full rounded-md border bg-transparent px-3 py-2 font-mono text-xs"
+                className="border-border bg-background text-foreground w-full rounded-md border px-3 py-2 font-mono text-xs"
               />
               <p className="text-foreground/60 mt-2 text-xs">
                 只放上方表單未涵蓋的欄位（如 <code>services</code>、<code>qa_data</code>
