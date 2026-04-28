@@ -1,10 +1,10 @@
 # Code Review Report — Agent Management Platform MVP
 
-**Scope:** Phase 1–4 (DB / Agent 整合 / Management API / Admin UI)
-**Branch:** `claude/agent-management-platform-23G5e`
-**Test status:** 27/27 passed (`tests/test_db.py`, `tests/test_api.py`)
+**Scope:** Phase 1–5（DB / Agent 整合 / Management API / Admin UI / 維運體驗）
+**Test status:** 53/53 passed（`tests/test_db.py`、`tests/test_api.py`、`tests/test_cost.py`）
 **Review date:** 2026-04-16
 **Round 2 review:** 2026-04-17（整合 Copilot / Codex 審查）
+**Round 3 update:** 2026-04-28（admin auth + sessions/deploy UX + Gemini Live cost）
 
 ---
 
@@ -14,10 +14,11 @@
 |---|---|---|
 | 架構清晰度 | 優 | 三層清楚：`db/` ↔ `api/` ↔ `frontend/app/admin/`，YAML→DB 優雅過渡 |
 | 型別安全 | 優 | SQLAlchemy 2.0 + Pydantic v2 + TS 都有完整 annotation |
-| 測試覆蓋 | 可 | Phase 1-3 unit 測試完整；Phase 2 (agent.py 整合) 未測；`db/cost.py` 未測 |
-| 錯誤處理 | 可 → 良 | Agent 端 bare except 已改 `logger.exception`；API 端 404/409 OK |
-| 安全性 | 需注意 | CORS 已修正；新增 API key 認證（環境變數開關） |
-| 可部署性 | 未完成 | docker-compose 尚未加 api service（Phase 5 待做） |
+| 測試覆蓋 | 良 | DB / API / cost 共 53 unit；`agent.py` entrypoint 仍需 LiveKit mock 略過 |
+| 錯誤處理 | 良 | Agent 端 bare except 改 `logger.exception`；API 端 404/409 + admin auth |
+| 安全性 | 良 | CORS 已修正；admin password-gated auth（`ADMIN_PASSWORD` env） |
+| 可部署性 | 良 | docker-compose 含 agent + api + frontend；data / profiles volume 持久化 |
+| 維運體驗 | 良 | sessions pagination + Gemini Live cost + deploy logs 清楚 |
 
 ---
 
@@ -56,6 +57,20 @@
 | Copilot #4：`profile_stats_endpoint` 全表載入 | ✅ 已用 SQL `GROUP BY` |
 | Copilot #6：engine singleton 非線程安全 | ✅ 實際風險低：`lifespan` 在接受 request 前已 init |
 | Codex #2：API 啟動時不跑 YAML import | ✅ **誤報**，lifespan 已呼叫 `import_yaml_profiles` |
+
+### Round 3（2026-04-28）— Admin 體驗 + Cost 計算
+
+| # | 主題 | 結果 |
+|---|------|------|
+| R3-1 | ADMIN_PASSWORD-gated 驗證 | ✅ 取代「無認證」狀態 — 所有 admin API 需帶 cookie；前端 `/admin/login` 流程 |
+| R3-2 | Connect-mode 本地 agent 管理 | ✅ `testApi.start/stop` + `/api/test/*` — Try 按鈕統一走本機 connect-mode |
+| R3-3 | Sessions 列表分頁 + Mode 欄位 | ✅ X-Total-Count header + 10/25/50 page size + realtime/pipeline badge |
+| R3-4 | Sessions detail 結構化呈現 | ✅ Usage / Cost cards + Conversation/Metrics/Raw tabs（function call 折疊） |
+| R3-5 | Deploy logs 體驗 | ✅ 解釋卡 + 空狀態 + 行級著色 + Open in Cloud |
+| R3-6 | Gemini Live cost 計算 | ✅ realtime 拆 audio_in/out + text_in/out + cached + Deepgram STT |
+| R3-7 | agent_mode 欄位 + 輕量 migration | ✅ Session DB schema 加欄位；舊 row heuristic 推導；不重啟自動補欄位 |
+| R3-8 | Dark mode select 可讀性 | ✅ `bg-transparent` → `bg-background text-foreground` |
+| R3-9 | UIUX_REVIEW 13 項全部完成 | ✅ 詳見 UIUX_REVIEW.md |
 
 ---
 
@@ -121,14 +136,14 @@
 | # | 問題 | 檔案 | 狀態 |
 |---|---|---|---|
 | m1 | 前端 profile 編輯器會顯示 `_db_profile_id` | `frontend/app/admin/profiles/[id]/page.tsx` | ✅ M3 已修根因 |
-| m2 | `/?profile=${profile.name}` 未 URI-encode | 同上 :144 | 待修（前端） |
-| m3 | Dashboard `limit: 10` 但 `.slice(0, 5)` | `frontend/app/admin/dashboard/page.tsx` | 待修（前端） |
-| m4 | Sessions 頁無 pagination UI | `frontend/app/admin/sessions/page.tsx` | 待修（前端） |
-| m5 | `== True` + noqa | `db/profile_store.py:15` | 待修 |
-| m6 | `ProfileCreate.display_name` 預設 `""` | `api/schemas.py` | 待修 |
+| m2 | `/?profile=${profile.name}` 未 URI-encode | 同上 | ✅ R3-2 改成 connect-mode 啟動，已不再用此路徑 |
+| m3 | Dashboard `limit: 10` 但 `.slice(0, 5)` | `frontend/app/admin/dashboard/page.tsx` | ✅ 已修 |
+| m4 | Sessions 頁無 pagination UI | `frontend/app/admin/sessions/page.tsx` | ✅ R3-3 已實作 |
+| m5 | `== True` + noqa | `db/profile_store.py:15` | 待修（不影響行為） |
+| m6 | `ProfileCreate.display_name` 預設 `""` | `api/schemas.py` | 待修（前端 form 已強制非空） |
 | m7 | `daily_stats_endpoint` Python 端聚合 O(N) | `api/routes_stats.py` | MVP 可接受 |
-| m8 | admin 頁 loading flash | `frontend/app/admin/*` | MVP 可接受 |
-| m9 | 原生 `confirm()`/`alert()` 對話框 | MVP | MVP 可接受 |
+| m8 | admin 頁 loading flash | `frontend/app/admin/*` | ✅ skeleton loader 已上 |
+| m9 | 原生 `confirm()`/`alert()` 對話框 | UIUX_REVIEW P0 #3 | ✅ 改用 sonner toast + ConfirmDialog |
 | m10 | livekit-link URL pattern 猜的 | `api/routes_sessions.py` | ✅ R2-2 已加 URL encode |
 | R2-8 | `update_profile` 無欄位白名單 | `db/profile_store.py` | ✅ 已修 |
 
@@ -146,12 +161,12 @@
 
 | 風險 | 目前狀態 | 建議 |
 |---|---|---|
-| 認證 / 授權 | ✅ API key（`X-Admin-Token`） | 環境變數 `ADMIN_API_TOKEN`；未設時跳過（開發用） |
+| 認證 / 授權 | ✅ ADMIN_PASSWORD cookie session（R3-1） | 透過 `ADMIN_PASSWORD` env 開啟；前端 `/admin/login` |
 | CORS | ✅ `*` + credentials=False | 已修正符合 spec |
 | SQL injection | 全走 ORM | OK |
 | JSON deserialize | `json.loads` + `yaml.safe_load` | OK |
 | Rate limit | 無 | 內網 OK；外網需加（FastAPI-limiter） |
-| XSS / CSRF | API 無 cookie + React escape | OK |
+| XSS / CSRF | session cookie 是 `HttpOnly` + SameSite | OK |
 | 密鑰外洩 | 所有 key 經 env | OK |
 | 日誌洩漏 | `log_usage` 印 summary | summary 可能包含 PII；部署時注意 log pipeline |
 
@@ -160,18 +175,18 @@
 ## 7. 測試報告
 
 ```
-tests/test_db.py   — 15 tests  (profile_store, session_store, yaml_import)
-tests/test_api.py  — 12+ tests (health, profiles CRUD, sessions 404, stats empty, admin auth)
-tests/test_cost.py — cost prefix-match 測試
-TOTAL              — 27+ passed
+tests/test_db.py   — 17 tests  (profile_store, session_store, yaml_import)
+tests/test_api.py  — 18 tests  (health, profiles CRUD, sessions 404, stats empty, admin auth)
+tests/test_cost.py — 18 tests  (LLM/STT/TTS pipeline + realtime Gemini Live + Deepgram STT)
+TOTAL              — 53 passed in ~1.0s
 ```
 
 **Coverage gap（已改善）：**
-- ~~`db/cost.py` — 0 tests~~ → ✅ 已有 `test_cost.py`
+- ~~`db/cost.py` — 0 tests~~ → ✅ 18 個測試（含 5 個 realtime case）
 - `agent_factory.load_profile_from_db` — 未驗證 DB↔YAML fallback
 - `agent.py` entrypoint — 需要 LiveKit mock，屬可接受略過
 - `routes_stats` 非空資料聚合 — 目前只測 empty case
-- Frontend — 無 Jest / Playwright；MVP 可接受
+- Frontend — 改用 Playwright 對 production build 做 smoke test（人工觸發，未自動化）
 
 ---
 
@@ -196,11 +211,27 @@ TOTAL              — 27+ passed
 | R2-8 | update_profile 白名單 | `db/profile_store.py` |
 | CX-1 | 停用 profile 不 fallback | `agent_factory.py` |
 
+### Round 3 修復（2026-04-22 ~ 2026-04-28）— Admin UX + Cost
+| # | 改動 | 檔案 |
+|---|---|---|
+| R3-1 | ADMIN_PASSWORD cookie session | `api/deps.py`, `api/routes_auth.py`, `frontend/app/admin/login/page.tsx` |
+| R3-2 | Connect-mode 本地 agent 管理 | `api/routes_test.py`, `frontend/lib/admin-api.ts` |
+| R3-3 | Sessions pagination + Mode 欄位 | `api/routes_sessions.py`, `db/session_store.py`, `frontend/app/admin/sessions/page.tsx` |
+| R3-4 | Sessions detail 結構化 | `frontend/app/admin/sessions/[id]/page.tsx` |
+| R3-5 | Deploy logs UX | `frontend/app/admin/deploy/page.tsx` |
+| R3-6 | Gemini Live + Deepgram cost | `db/cost.py`, `agent.py`, `tests/test_cost.py` |
+| R3-7 | agent_mode column + migration | `db/models.py`, `db/engine.py`, `db/session_store.py` |
+| R3-8 | Dark mode select 修正 | `frontend/app/admin/**` |
+| R3-9 | UIUX_REVIEW 13 項 | 詳見 `UIUX_REVIEW.md` |
+
 ---
 
 ## 9. 結論
 
-經過兩輪 review 和修復，所有 Critical + Major + Moderate 問題均已解決。
+經過三輪 review 和修復，所有 Critical / Major / Moderate 問題均已解決。
 
-剩餘的 Minor 項目（m2-m6）為前端 UI 打磨和 schema 微調，不影響核心功能正確性。
-平台品質已從「可 demo」提升至「可內網生產」等級。上 prod 前需設定 `ADMIN_API_TOKEN` 環境變數並透過網路層（VPN / reverse proxy）限制訪問。
+剩餘 Minor 項目（m5、m6）為微調，不影響功能。平台品質已從「可 demo」提升至「可內網生產 + 維運人員可長期使用」等級。上 prod 必要條件：
+
+1. `ADMIN_PASSWORD` env 必須設定（未設時 admin 路由開放）
+2. 透過網路層（VPN / reverse proxy）限制訪問，因 CORS 還是 `*`
+3. 若 agent 部署在 LiveKit Cloud 而非本機，需設 `AGENT_DB_URL` 共享資料庫（否則 cloud session 不會出現在本機 admin UI）
