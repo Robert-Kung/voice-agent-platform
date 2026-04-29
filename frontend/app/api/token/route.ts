@@ -47,11 +47,14 @@ export async function POST(req: Request) {
       return new NextResponse('Invalid JSON body', { status: 400 });
     }
     // fromJson throws if given undefined/null — guard with an empty object.
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const roomConfig = RoomConfiguration.fromJson(
-      (body?.room_config as any) ?? {},
-      { ignoreUnknownFields: true }
-    );
+    // RoomConfiguration.fromJson expects protobuf JsonValue, which is too
+    // narrow for the unstructured body we accept; cast through unknown.
+    const roomConfigInput = (body?.room_config ?? {}) as Parameters<
+      typeof RoomConfiguration.fromJson
+    >[0];
+    const roomConfig = RoomConfiguration.fromJson(roomConfigInput, {
+      ignoreUnknownFields: true,
+    });
 
     // If a profile is specified, set it as room metadata so the agent can
     // dynamically load the correct YAML profile at runtime.
