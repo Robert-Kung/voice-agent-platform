@@ -1,19 +1,5 @@
 import { NextResponse } from 'next/server';
-
-const SESSION_COOKIE = 'admin_session';
-
-async function makeSessionToken(password: string): Promise<string> {
-  const encoder = new TextEncoder();
-  const key = await crypto.subtle.importKey(
-    'raw',
-    encoder.encode(password),
-    { name: 'HMAC', hash: 'SHA-256' },
-    false,
-    ['sign']
-  );
-  const sig = await crypto.subtle.sign('HMAC', key, encoder.encode('admin-authenticated'));
-  return btoa(String.fromCharCode(...new Uint8Array(sig)));
-}
+import { SESSION_COOKIE, makeSessionToken } from '@/lib/session';
 
 export async function POST(req: Request) {
   const adminPassword = process.env.ADMIN_PASSWORD;

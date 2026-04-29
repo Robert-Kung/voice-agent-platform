@@ -21,10 +21,37 @@ from api.deps import require_admin
 
 logger = logging.getLogger("api.test")
 
+
+def _require_test_routes_enabled() -> None:
+    """Defence-in-depth gate for the subprocess-spawning test surface.
+
+    These endpoints can fork agent.py, so we want it impossible to expose them
+    by accidentally forgetting an env var. Two independent checks are required
+    on top of `require_admin`:
+
+    1. ENABLE_TEST_ROUTES must be explicitly set — otherwise we 404 (the routes
+       look like they don't exist at all, which is what we want in prod).
+    2. ADMIN_API_TOKEN must be configured — otherwise `require_admin` would
+       silently no-op (its dev-mode bypass) and leave us unauthenticated.
+
+    api/main.py also gates `include_router(test_router)` on ENABLE_TEST_ROUTES,
+    so the router shouldn't even be mounted in prod. This is a belt for that
+    suspenders — survives someone editing main.py incorrectly.
+    """
+    if os.environ.get("ENABLE_TEST_ROUTES", "").strip().lower() not in {"1", "true", "yes", "on"}:
+        raise HTTPException(status_code=404, detail="Not found")
+    if not os.environ.get("ADMIN_API_TOKEN", "").strip():
+        raise HTTPException(
+            status_code=503,
+            detail="Test routes require ADMIN_API_TOKEN to be configured",
+        )
+
+
 router = APIRouter(
     prefix="/api/test",
     tags=["test"],
-    dependencies=[Depends(require_admin)],
+    # Order matters: gate first (cheap 404 / 503), then auth.
+    dependencies=[Depends(_require_test_routes_enabled), Depends(require_admin)],
 )
 
 # Whitelist for room names — used both as subprocess arg and log file name.

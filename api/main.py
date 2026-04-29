@@ -153,4 +153,12 @@ app.include_router(sessions_router)
 app.include_router(stats_router)
 app.include_router(tools_router)
 app.include_router(deploy_router)
-app.include_router(test_router)
+
+# Test router can spawn agent subprocesses on the API host. Only mount it when
+# explicitly enabled — never in production. routes_test.py also enforces this
+# at request time as a belt-and-suspenders check.
+if os.environ.get("ENABLE_TEST_ROUTES", "").strip().lower() in {"1", "true", "yes", "on"}:
+    app.include_router(test_router)
+    logger.warning("Test router mounted (ENABLE_TEST_ROUTES is set).")
+else:
+    logger.info("Test router disabled. Set ENABLE_TEST_ROUTES=1 to enable.")

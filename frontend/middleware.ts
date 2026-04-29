@@ -1,34 +1,6 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
-
-const SESSION_COOKIE = 'admin_session';
-
-async function makeSessionToken(password: string): Promise<string> {
-  const encoder = new TextEncoder();
-  const key = await crypto.subtle.importKey(
-    'raw',
-    encoder.encode(password),
-    { name: 'HMAC', hash: 'SHA-256' },
-    false,
-    ['sign']
-  );
-  const sig = await crypto.subtle.sign('HMAC', key, encoder.encode('admin-authenticated'));
-  return btoa(String.fromCharCode(...new Uint8Array(sig)));
-}
-
-// Constant-time string comparison. The Edge runtime doesn't expose
-// crypto.subtle.timingSafeEqual, so we do a manual constant-time loop.
-function timingSafeEqual(a: string, b: string): boolean {
-  // Compare a fixed number of bytes to avoid leaking length differences.
-  const len = Math.max(a.length, b.length);
-  let mismatch = a.length ^ b.length;
-  for (let i = 0; i < len; i++) {
-    const ca = i < a.length ? a.charCodeAt(i) : 0;
-    const cb = i < b.length ? b.charCodeAt(i) : 0;
-    mismatch |= ca ^ cb;
-  }
-  return mismatch === 0;
-}
+import { SESSION_COOKIE, makeSessionToken, timingSafeEqual } from '@/lib/session';
 
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
