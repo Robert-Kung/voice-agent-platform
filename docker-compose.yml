@@ -50,8 +50,10 @@ services:
 
   # ── Frontend (Next.js) ──────────────────────────────────────
   # Voice 測試頁 (`/`) + Admin UI (`/admin/*`)。
-  # NEXT_PUBLIC_ADMIN_API_URL 預設 http://localhost:8080；
-  # 若部署到非本機環境，請改為對外可存取的 API URL 並以 build arg 傳入。
+  #
+  # Browser → Next.js middleware (ADMIN_PASSWORD cookie) → /api/admin-proxy/*
+  # → FastAPI at $ADMIN_API_URL (X-Admin-Token injected server-side).
+  # ADMIN_API_TOKEN is read from .env at runtime; never baked into the bundle.
   frontend:
     build:
       context: ./frontend
@@ -62,11 +64,15 @@ services:
         LIVEKIT_API_KEY: ${LIVEKIT_API_KEY}
         LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET}
         AGENT_NAME: ${AGENT_NAME:-}
-        NEXT_PUBLIC_ADMIN_API_URL: ${NEXT_PUBLIC_ADMIN_API_URL:-http://localhost:8083}
     ports:
       - "3004:3000"
     env_file:
       - .env
+    environment:
+      # Inside the docker-compose network, FastAPI is reached by service name.
+      # Overrides whatever ADMIN_API_URL is set to in .env (which is tuned for
+      # local non-docker dev: http://localhost:8083).
+      - ADMIN_API_URL=http://api:8083
     depends_on:
       - api
     restart: unless-stopped

@@ -20,8 +20,11 @@ export async function middleware(request: NextRequest) {
     return NextResponse.next();
   }
 
-  // Login page is always accessible
-  if (pathname === '/admin/login') return NextResponse.next();
+  // Login endpoints are always accessible — the page itself, and the API
+  // route the form posts to. Everything else under /api/admin/* is gated.
+  if (pathname === '/admin/login' || pathname === '/api/admin/login') {
+    return NextResponse.next();
+  }
 
   const cookie = request.cookies.get(SESSION_COOKIE)?.value ?? '';
   const expected = await makeSessionToken(adminPassword);
@@ -39,5 +42,13 @@ export async function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ['/admin/:path*', '/api/token'],
+  matcher: [
+    '/admin/:path*',
+    '/api/token',
+    // Auth-management endpoints — login is bypassed inside the handler.
+    '/api/admin/:path*',
+    // Server-side proxy to the FastAPI admin API. Without this gate, the
+    // proxy would forward unauthenticated browser calls to the backend.
+    '/api/admin-proxy/:path*',
+  ],
 };

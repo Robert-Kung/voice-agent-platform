@@ -168,6 +168,7 @@ export default function ProfilesPage() {
                           ))}
                           {!expanded && overflow > 0 && (
                             <button
+                              type="button"
                               onClick={() =>
                                 setExpandedTools((prev) => ({ ...prev, [p.id]: true }))
                               }
@@ -227,6 +228,7 @@ export default function ProfilesPage() {
                         </Link>
                         {p.is_active && (
                           <button
+                            type="button"
                             onClick={() => handleTry(p)}
                             className="border-border hover:bg-foreground/10 rounded border px-2 py-1 text-xs"
                             title="啟動本機 connect-mode agent 並開啟測試頁"
@@ -236,6 +238,7 @@ export default function ProfilesPage() {
                         )}
                         {p.is_active ? (
                           <button
+                            type="button"
                             onClick={() => setPendingDeactivate(p)}
                             className="rounded border border-red-500/40 px-2 py-1 text-xs text-red-600 hover:bg-red-500/10 dark:text-red-400"
                           >
@@ -243,6 +246,7 @@ export default function ProfilesPage() {
                           </button>
                         ) : (
                           <button
+                            type="button"
                             onClick={() => handleReactivate(p)}
                             className="rounded border border-green-500/40 px-2 py-1 text-xs text-green-700 hover:bg-green-500/10 dark:text-green-400"
                           >

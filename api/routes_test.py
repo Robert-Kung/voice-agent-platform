@@ -54,8 +54,24 @@ router = APIRouter(
     dependencies=[Depends(_require_test_routes_enabled), Depends(require_admin)],
 )
 
-# Whitelist for room names — used both as subprocess arg and log file name.
+# Whitelist for room names. Rooms become log filenames and LiveKit grant
+# values, so they have to be strictly path/grant-safe.
 _ROOM_NAME_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+
+# Profiles are passed as argv to a subprocess (no shell), looked up by exact
+# DB match, and may fall back to `PROFILES_DIR/<name>.yaml`. The only real
+# attack here is path traversal in the YAML fallback, so we forbid path
+# separators and `..` but allow Chinese / spaces / dots / etc. so the same
+# names that work in the admin UI keep working.
+_PROFILE_FORBIDDEN = ("/", "\\", "..", "\x00")
+_PROFILE_MAX_LEN = 100
+
+
+def _validate_profile_name(profile: str) -> None:
+    if not profile or len(profile) > _PROFILE_MAX_LEN:
+        raise HTTPException(status_code=400, detail="Profile name empty or too long")
+    if any(token in profile for token in _PROFILE_FORBIDDEN):
+        raise HTTPException(status_code=400, detail="Invalid characters in profile name")
 
 # room_name → (Process, log_file_handle)
 _running: dict[str, tuple[asyncio.subprocess.Process, object]] = {}
@@ -89,14 +105,12 @@ class StartResponse(BaseModel):
 @router.post("/start", response_model=StartResponse)
 async def start_test_agent(body: StartRequest):
     profile = body.profile.strip()
-    if not profile:
-        raise HTTPException(status_code=400, detail="profile is required")
-    # Profile names must also be safe — they're passed as a CLI argument and
-    # used to derive the room name below.
-    if not _ROOM_NAME_RE.match(profile):
-        raise HTTPException(status_code=400, detail="Invalid profile name")
+    _validate_profile_name(profile)
 
-    room = body.room or f"test-{profile}-{uuid.uuid4().hex[:8]}"
+    # Default room uses pure UUID so the auto-generated value never carries
+    # the profile name into a place that requires the strict regex (room is
+    # used as a log filename and LiveKit grant — cleaner without user input).
+    room = body.room or f"test-{uuid.uuid4().hex}"
     if not _ROOM_NAME_RE.match(room):
         raise HTTPException(status_code=400, detail="Invalid room name")
 

@@ -46,9 +46,16 @@ export default function LoginPage() {
     <div className="flex min-h-screen items-center justify-center">
       <form onSubmit={handleSubmit} className="flex w-80 flex-col gap-4">
         <h1 className="font-mono text-lg font-bold">Agent Admin</h1>
+        <label htmlFor="admin-password" className="sr-only">
+          Admin password
+        </label>
         <input
+          id="admin-password"
+          name="password"
           type="password"
+          autoComplete="current-password"
           placeholder="Admin password"
+          aria-label="Admin password"
           value={password}
           onChange={(e) => setPassword(e.target.value)}
           className="border-border bg-background rounded-md border px-3 py-2 text-sm outline-none focus:ring-2"
