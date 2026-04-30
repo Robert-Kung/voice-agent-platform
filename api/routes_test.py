@@ -73,8 +73,13 @@ def _validate_profile_name(profile: str) -> None:
     if any(token in profile for token in _PROFILE_FORBIDDEN):
         raise HTTPException(status_code=400, detail="Invalid characters in profile name")
 
-# room_name → (Process, log_file_handle)
+# room_name → (Process, log_file_handle).
+# All reads/writes go through `_running_lock` to serialize the start/stop/watch
+# critical sections — without it, two concurrent /start calls for the same room
+# would both pop the stale entry, both spawn, and the second `_running[room] =`
+# would overwrite the first, leaking the first process and its log handle.
 _running: dict[str, tuple[asyncio.subprocess.Process, object]] = {}
+_running_lock = asyncio.Lock()
 
 # Project root (one level up from this file)
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -114,22 +119,6 @@ async def start_test_agent(body: StartRequest):
     if not _ROOM_NAME_RE.match(room):
         raise HTTPException(status_code=400, detail="Invalid room name")
 
-    # Kill stale process for same room if still alive
-    if room in _running:
-        old_proc, old_log = _running.pop(room)
-        try:
-            old_proc.kill()
-        except ProcessLookupError:
-            pass
-        try:
-            await asyncio.wait_for(old_proc.wait(), timeout=5.0)
-        except (asyncio.TimeoutError, ProcessLookupError):
-            pass
-        try:
-            old_log.close()
-        except Exception:
-            pass
-
     os.makedirs(_LOG_DIR, exist_ok=True)
     log_path = os.path.join(_LOG_DIR, f"{room}.log")
     log_file = open(log_path, "w", buffering=1)  # line-buffered
@@ -143,23 +132,46 @@ async def start_test_agent(body: StartRequest):
     # Cloud agent never sees this var → stays on inference.STT.
     child_env = {**os.environ, "AGENT_STT_PROVIDER": "deepgram"}
 
-    try:
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            cwd=_PROJECT_ROOT,
-            env=child_env,
-            stdout=log_file,
-            stderr=asyncio.subprocess.STDOUT,
-        )
-    except Exception as exc:
-        try:
-            log_file.close()
-        except Exception:
-            pass
-        logger.exception("Failed to spawn test agent for room=%s", room)
-        raise HTTPException(status_code=500, detail=f"Failed to spawn test agent: {exc}") from exc
+    # Hold the lock across the full pop-old → spawn-new → record sequence so
+    # two concurrent /start calls for the same room can't both spawn (and
+    # leak one of the resulting processes).
+    async with _running_lock:
+        old_entry = _running.pop(room, None)
+        if old_entry is not None:
+            old_proc, old_log = old_entry
+            try:
+                old_proc.kill()
+            except ProcessLookupError:
+                pass
+            try:
+                await asyncio.wait_for(old_proc.wait(), timeout=5.0)
+            except (asyncio.TimeoutError, ProcessLookupError):
+                pass
+            try:
+                old_log.close()
+            except Exception:
+                pass
 
-    _running[room] = (proc, log_file)
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                cwd=_PROJECT_ROOT,
+                env=child_env,
+                stdout=log_file,
+                stderr=asyncio.subprocess.STDOUT,
+            )
+        except Exception as exc:
+            try:
+                log_file.close()
+            except Exception:
+                pass
+            logger.exception("Failed to spawn test agent for room=%s", room)
+            raise HTTPException(
+                status_code=500, detail=f"Failed to spawn test agent: {exc}"
+            ) from exc
+
+        _running[room] = (proc, log_file)
+
     logger.info("Test agent started: room=%s profile=%s pid=%d", room, profile, proc.pid)
 
     asyncio.ensure_future(_watch(room, proc, log_file))
@@ -171,7 +183,10 @@ async def start_test_agent(body: StartRequest):
 async def stop_test_agent(room: str):
     if not _ROOM_NAME_RE.match(room):
         raise HTTPException(status_code=400, detail="Invalid room name")
-    entry = _running.pop(room, None)
+    # Take the entry under the lock; do the actual kill/reap outside so a
+    # wedged process can't block other start/stop operations.
+    async with _running_lock:
+        entry = _running.pop(room, None)
     if entry is None:
         raise HTTPException(status_code=404, detail="No running test agent for this room")
     proc, log_file = entry
@@ -195,7 +210,9 @@ async def stop_test_agent(room: str):
 
 @router.get("/running")
 def list_running():
-    alive = {r: p.pid for r, (p, _f) in _running.items() if p.returncode is None}
+    # Sync endpoint — snapshot via list() so a concurrent mutation by a watcher
+    # doesn't raise RuntimeError("dictionary changed size during iteration").
+    alive = {r: p.pid for r, (p, _f) in list(_running.items()) if p.returncode is None}
     return {"running": alive}
 
 
@@ -203,9 +220,10 @@ async def _watch(room: str, proc: asyncio.subprocess.Process, log_file):
     await proc.wait()
     # Only evict if the tracked entry is still *our* process. A rapid restart
     # can replace _running[room] with a fresh process before this watcher fires.
-    current = _running.get(room)
-    if current is not None and current[0] is proc:
-        _running.pop(room, None)
+    async with _running_lock:
+        current = _running.get(room)
+        if current is not None and current[0] is proc:
+            _running.pop(room, None)
     try:
         log_file.close()
     except Exception:

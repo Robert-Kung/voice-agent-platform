@@ -88,16 +88,24 @@ def _maybe_patch_connect_mode_token() -> None:
     if not argv or argv[0] != "connect":
         return
 
+    # The patch was written against livekit-agents 1.5.x — specifically the
+    # simulate_job signature in that minor. Allow only that range; future
+    # minors (1.6+, 2.x) skip the patch with a warning so a routine upgrade
+    # surfaces "Try button stopped working" instead of silently misbehaving.
+    _PATCH_MIN = "1.5.0"
+    _PATCH_MAX_EXCLUSIVE = "1.6.0"
+
     try:
         from importlib.metadata import version as _pkg_version
         from packaging.version import Version
 
         agents_version = Version(_pkg_version("livekit-agents"))
-        if agents_version >= Version("2.0"):
+        if not (Version(_PATCH_MIN) <= agents_version < Version(_PATCH_MAX_EXCLUSIVE)):
             logger.warning(
-                "Skipping connect-mode token patch: livekit-agents %s "
-                "may have changed simulate_job(); review before re-enabling.",
-                agents_version,
+                "Skipping connect-mode token patch: livekit-agents %s is outside "
+                "the validated range [%s, %s). Re-test simulate_job() before "
+                "extending this gate.",
+                agents_version, _PATCH_MIN, _PATCH_MAX_EXCLUSIVE,
             )
             return
     except Exception:

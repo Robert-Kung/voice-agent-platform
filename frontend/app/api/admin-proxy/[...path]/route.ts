@@ -32,6 +32,10 @@ const STRIP_REQUEST_HEADERS = new Set([
   'transfer-encoding',
   // Don't trust browser-supplied tokens — we set it ourselves.
   'x-admin-token',
+  // Drop the browser session cookie (admin_session, an HMAC of ADMIN_PASSWORD).
+  // FastAPI doesn't read it; forwarding would just leak the secret into upstream
+  // access logs and any monitoring on the FastAPI side.
+  'cookie',
 ]);
 
 // Headers from the upstream response we don't want to forward back.

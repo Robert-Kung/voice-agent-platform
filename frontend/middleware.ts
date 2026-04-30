@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
-import { SESSION_COOKIE, makeSessionToken, timingSafeEqual } from '@/lib/session';
+import { SESSION_COOKIE, getExpectedSessionToken, timingSafeEqual } from '@/lib/session';
 
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
@@ -27,7 +27,7 @@ export async function middleware(request: NextRequest) {
   }
 
   const cookie = request.cookies.get(SESSION_COOKIE)?.value ?? '';
-  const expected = await makeSessionToken(adminPassword);
+  const expected = await getExpectedSessionToken(adminPassword);
 
   if (!timingSafeEqual(cookie, expected)) {
     if (pathname.startsWith('/api/')) {

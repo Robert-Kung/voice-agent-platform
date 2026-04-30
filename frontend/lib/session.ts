@@ -25,6 +25,19 @@ export async function makeSessionToken(password: string): Promise<string> {
   return btoa(String.fromCharCode(...new Uint8Array(sig)));
 }
 
+// Memoised wrapper for the hot path: middleware runs on every matched request
+// and ADMIN_PASSWORD doesn't change at runtime, so re-running HMAC each time
+// is wasted CPU. Cache is invalidated automatically if the password value ever
+// differs (e.g. password rotation followed by an in-place env reload).
+let _expectedTokenCache: { password: string; promise: Promise<string> } | null = null;
+
+export function getExpectedSessionToken(password: string): Promise<string> {
+  if (_expectedTokenCache?.password !== password) {
+    _expectedTokenCache = { password, promise: makeSessionToken(password) };
+  }
+  return _expectedTokenCache.promise;
+}
+
 // Constant-time string comparison. The Edge runtime doesn't expose
 // crypto.subtle.timingSafeEqual, so we do a manual constant-time loop.
 export function timingSafeEqual(a: string, b: string): boolean {
