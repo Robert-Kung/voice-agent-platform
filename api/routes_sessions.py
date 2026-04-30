@@ -99,7 +99,10 @@ def get_livekit_link_endpoint(
     session_id: str,
     db: Session = Depends(get_db),
 ):
-    """Generate a LiveKit Cloud dashboard URL for this session's room recording."""
+    """Return a LiveKit Cloud Agents dashboard URL the operator can open to find
+    this session by room name. With LIVEKIT_CLOUD_PROJECT set, the URL deep-links
+    into that project's Agents page; otherwise it points at the global Agents
+    page and the response includes a note nudging the caller to set the env var."""
     sess = session_store.get_session(db, session_id)
     if sess is None:
         logger.warning("livekit-link 404: id=%s", session_id)

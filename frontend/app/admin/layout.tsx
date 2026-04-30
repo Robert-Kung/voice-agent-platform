@@ -37,6 +37,7 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
             ))}
           </div>
           <button
+            type="button"
             onClick={handleLogout}
             className="text-foreground/50 hover:text-foreground ml-auto text-sm transition-colors"
           >

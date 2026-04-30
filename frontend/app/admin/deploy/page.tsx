@@ -121,6 +121,7 @@ export default function DeployPage() {
         </div>
         <div className="flex items-center gap-2">
           <button
+            type="button"
             onClick={() => {
               loadAll();
               loadLogs();
@@ -261,6 +262,7 @@ export default function DeployPage() {
               </span>
             )}
             <button
+              type="button"
               onClick={() => setConfirmOpen(true)}
               disabled={action.disabled || deploying}
               className="bg-primary text-primary-foreground rounded-md px-4 py-2 text-sm font-medium transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
@@ -336,6 +338,7 @@ export default function DeployPage() {
               {LOG_TYPES.map((t) => (
                 <button
                   key={t}
+                  type="button"
                   onClick={() => setLogType(t)}
                   className={`px-2 py-1 ${
                     logType === t ? 'bg-foreground/10 font-medium' : 'hover:bg-foreground/5'
@@ -346,6 +349,7 @@ export default function DeployPage() {
               ))}
             </div>
             <button
+              type="button"
               onClick={loadLogs}
               disabled={logsLoading}
               aria-label="Refresh logs"

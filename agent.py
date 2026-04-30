@@ -100,16 +100,22 @@ def _maybe_patch_connect_mode_token() -> None:
         from packaging.version import Version
 
         agents_version = Version(_pkg_version("livekit-agents"))
-        if not (Version(_PATCH_MIN) <= agents_version < Version(_PATCH_MAX_EXCLUSIVE)):
-            logger.warning(
-                "Skipping connect-mode token patch: livekit-agents %s is outside "
-                "the validated range [%s, %s). Re-test simulate_job() before "
-                "extending this gate.",
-                agents_version, _PATCH_MIN, _PATCH_MAX_EXCLUSIVE,
-            )
-            return
     except Exception:
-        logger.exception("connect-mode patch version check failed; applying anyway")
+        # If we can't even read the version (e.g. importlib/packaging broken),
+        # treat that as "unknown version" and skip — applying a 1.5.x-shaped
+        # patch to an unknown version is exactly the silent-break we're trying
+        # to avoid. Try-button breaking loudly is the better failure mode.
+        logger.exception("connect-mode patch version check failed; skipping patch")
+        return
+
+    if not (Version(_PATCH_MIN) <= agents_version < Version(_PATCH_MAX_EXCLUSIVE)):
+        logger.warning(
+            "Skipping connect-mode token patch: livekit-agents %s is outside "
+            "the validated range [%s, %s). Re-test simulate_job() before "
+            "extending this gate.",
+            agents_version, _PATCH_MIN, _PATCH_MAX_EXCLUSIVE,
+        )
+        return
 
     _patch_connect_mode_token()
 

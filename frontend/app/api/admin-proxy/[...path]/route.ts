@@ -59,6 +59,17 @@ async function forward(req: NextRequest, pathSegments: string[]): Promise<Respon
     );
   }
 
+  const adminToken = process.env.ADMIN_API_TOKEN;
+  // Prod must always have ADMIN_API_TOKEN set, otherwise we'd silently forward
+  // unauthenticated calls and FastAPI's `require_admin` would dev-bypass them
+  // — leaving the entire admin API open. Fail loud instead.
+  if (!adminToken && process.env.NODE_ENV === 'production') {
+    return NextResponse.json(
+      { error: 'ADMIN_API_TOKEN is not configured on the server' },
+      { status: 503 }
+    );
+  }
+
   const incoming = new URL(req.url);
   const target = `${apiUrl.replace(/\/+$/, '')}/${pathSegments.join('/')}${incoming.search}`;
 
@@ -69,7 +80,6 @@ async function forward(req: NextRequest, pathSegments: string[]): Promise<Respon
     }
   });
 
-  const adminToken = process.env.ADMIN_API_TOKEN;
   if (adminToken) {
     outboundHeaders.set('X-Admin-Token', adminToken);
   }

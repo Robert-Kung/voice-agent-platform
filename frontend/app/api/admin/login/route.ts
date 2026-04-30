@@ -16,8 +16,15 @@ export async function POST(req: Request) {
     return new NextResponse('ADMIN_PASSWORD not configured', { status: 500 });
   }
 
-  const body = await req.json().catch(() => ({}));
-  if (!body?.password || body.password !== adminPassword) {
+  // Distinguish "client sent garbage" (400) from "wrong password" (401).
+  // Folding both into 401 made client-side bugs masquerade as auth failures.
+  let body: { password?: unknown };
+  try {
+    body = (await req.json()) as { password?: unknown };
+  } catch {
+    return new NextResponse('Invalid JSON body', { status: 400 });
+  }
+  if (typeof body?.password !== 'string' || body.password !== adminPassword) {
     return new NextResponse('Invalid password', { status: 401 });
   }
 
