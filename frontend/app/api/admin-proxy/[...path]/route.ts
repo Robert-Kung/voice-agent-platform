@@ -121,9 +121,21 @@ async function forward(req: NextRequest, pathSegments: string[]): Promise<Respon
 
 type RouteContext = { params: Promise<{ path: string[] }> };
 
+// Path-traversal hardening on the segments before we splice them into the
+// upstream URL. fetch + Next.js routing already normalise most of this, but
+// rejecting explicitly is cheaper to audit than reasoning about layered
+// behaviour, and it surfaces as a clean 400 instead of a strange upstream 404.
+function isUnsafeSegment(seg: string): boolean {
+  return seg === '' || seg === '.' || seg === '..';
+}
+
 async function handler(req: NextRequest, ctx: RouteContext): Promise<Response> {
   const { path } = await ctx.params;
-  return forward(req, path ?? []);
+  const segments = path ?? [];
+  if (segments.some(isUnsafeSegment)) {
+    return NextResponse.json({ error: 'Invalid path' }, { status: 400 });
+  }
+  return forward(req, segments);
 }
 
 export { handler as GET, handler as POST, handler as PUT, handler as PATCH, handler as DELETE };
