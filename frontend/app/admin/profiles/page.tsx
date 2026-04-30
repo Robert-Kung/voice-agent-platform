@@ -62,10 +62,25 @@ export default function ProfilesPage() {
   };
 
   const handleTry = async (profile: Profile) => {
+    // Open the new tab synchronously inside the click handler so popup blockers
+    // count it as a user-initiated navigation. window.open() called *after* an
+    // await is treated as a programmatic popup and gets blocked in default
+    // Chrome/Firefox/Safari settings — the user would click Try and see nothing
+    // happen. We point the placeholder tab at the final URL once the API
+    // returns, or close it on error.
+    const tab = window.open('', '_blank');
     try {
       const { room } = await testApi.start(profile.name);
-      window.open(`/?room=${encodeURIComponent(room)}`, '_blank');
+      const url = `/?room=${encodeURIComponent(room)}`;
+      if (tab && !tab.closed) {
+        tab.location.href = url;
+      } else {
+        // User had popups blocked despite the synchronous open — fall back to
+        // same-tab navigation so they still get the test session.
+        window.location.href = url;
+      }
     } catch (e) {
+      tab?.close();
       toast.error(`無法啟動測試 agent: ${(e as Error).message}`);
     }
   };

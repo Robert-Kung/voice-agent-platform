@@ -66,9 +66,10 @@ export async function POST(req: Request) {
     // Generate participant token
     const participantName = 'user';
     const participantIdentity = `voice_assistant_user_${Math.floor(Math.random() * 10_000)}`;
-    // Allow ?room= override for connect-mode local testing (agent already in that room).
-    // Validate against a whitelist so callers can't smuggle arbitrary strings into
-    // the LiveKit grant.
+    // Allow `body.room` override (POST JSON, not a query param) for connect-mode
+    // local testing — the agent is already in that room and the browser tab opened
+    // by Try needs to join the same one. Validate against a whitelist so callers
+    // can't smuggle arbitrary strings into the LiveKit grant.
     let roomName: string;
     if (body?.room && typeof body.room === 'string') {
       if (!ROOM_NAME_RE.test(body.room)) {

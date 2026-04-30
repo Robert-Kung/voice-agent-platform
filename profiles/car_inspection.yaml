@@ -159,6 +159,11 @@ name: 汽車代檢中心
 agent_name: voice-assistant-car
 language: zh
 timezone: Asia/Taipei
+# NOTE: "代簡中心" below is intentional, NOT a typo. The TTS engine reads "代檢"
+# literally as "dài-jiàn" (代建), which doesn't match the spoken business name.
+# Substituting the homophone "代簡" (jiǎn) coaxes the TTS to produce the correct
+# "代檢 (jiǎn) 中心" pronunciation. Same trick is documented in the agent's
+# instructions block below ("【發音與用詞規則】"). Do not "fix" this.
 welcome_message: '您好，歡迎致電汽車代簡中心。本站提供三項服務：汽車代檢、洗車與加油，請問有什麼可以為您服務的？
 
   '

@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { SESSION_COOKIE, makeSessionToken } from '@/lib/session';
+import { SESSION_COOKIE, makeSessionToken, timingSafeEqual } from '@/lib/session';
 
 // True when the inbound request reached us over HTTPS — either directly or
 // through a TLS-terminating reverse proxy that set X-Forwarded-Proto. We tie
@@ -24,7 +24,11 @@ export async function POST(req: Request) {
   } catch {
     return new NextResponse('Invalid JSON body', { status: 400 });
   }
-  if (typeof body?.password !== 'string' || body.password !== adminPassword) {
+  // Use the same timing-safe compare we use for the cookie — partly defence
+  // in depth (network jitter usually masks the timing leak on a per-request
+  // RTT, but this is free and matches the middleware's pattern), partly
+  // checkbox compliance for security audits.
+  if (typeof body?.password !== 'string' || !timingSafeEqual(body.password, adminPassword)) {
     return new NextResponse('Invalid password', { status: 401 });
   }
 
