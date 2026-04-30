@@ -28,18 +28,38 @@ export default function LoginPage() {
     setLoading(true);
     setError('');
 
-    const res = await fetch('/api/admin/login', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ password }),
-    });
+    let res: Response;
+    try {
+      res = await fetch('/api/admin/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password }),
+      });
+    } catch {
+      // fetch only rejects on network errors / CORS / aborts — show a
+      // distinct message so admins don't waste time retyping the password
+      // when the API container is just down.
+      setError('無法連線，請確認網路或伺服器狀態');
+      setLoading(false);
+      return;
+    }
 
     if (res.ok) {
       router.replace(from);
-    } else {
-      setError('密碼錯誤');
-      setLoading(false);
+      return;
     }
+
+    // Differentiate the failure modes: 401 means bad password (the common
+    // case), 5xx means the server is misconfigured (e.g. ADMIN_PASSWORD
+    // env var missing) — those two need very different operator action.
+    if (res.status === 401) {
+      setError('密碼錯誤');
+    } else if (res.status >= 500) {
+      setError(`伺服器錯誤（${res.status}），請確認 ADMIN_PASSWORD 等環境變數設定`);
+    } else {
+      setError(`登入失敗（${res.status}）`);
+    }
+    setLoading(false);
   }
 
   return (

@@ -216,3 +216,112 @@ class TestAdminAuth:
         """GET (read) endpoints should work without a token."""
         r = secured_client.get("/api/profiles")
         assert r.status_code == 200
+
+
+class TestTestRoutesGates:
+    """Verify the layered safety gates on /api/test/* — these endpoints fork
+    `agent.py connect`, so a regression here is a remote-process-spawning
+    surface. We test the gates only, never actually spawn a subprocess.
+
+    api/main.py mounts the router conditionally on ENABLE_TEST_ROUTES (so on
+    the default app the routes don't even exist), but we test the
+    *router itself* so the dependency wiring is exercised directly. To do
+    that we build a fresh FastAPI instance per fixture and include only the
+    test_router on it.
+    """
+
+    @pytest.fixture()
+    def gated_client(self, monkeypatch):
+        """Fresh app with only routes_test mounted and env vars under test
+        control. monkeypatch resets env on teardown so other tests aren't
+        affected."""
+        from fastapi import FastAPI
+        from api.routes_test import router as test_router
+
+        # Default to "fully closed" — individual tests opt into looser config.
+        monkeypatch.delenv("ENABLE_TEST_ROUTES", raising=False)
+        monkeypatch.delenv("ADMIN_API_TOKEN", raising=False)
+
+        app_under_test = FastAPI()
+        app_under_test.include_router(test_router)
+        with TestClient(app_under_test) as c:
+            yield c
+
+    def test_404_when_enable_flag_unset(self, gated_client):
+        # ENABLE_TEST_ROUTES not set → _require_test_routes_enabled raises 404.
+        r = gated_client.post("/api/test/start", json={"profile": "x"})
+        assert r.status_code == 404
+
+    def test_503_when_token_missing_even_if_enabled(self, gated_client, monkeypatch):
+        # ENABLE_TEST_ROUTES set but ADMIN_API_TOKEN unset → 503 (refuses to
+        # rely on require_admin's dev-bypass for a process-spawning route).
+        monkeypatch.setenv("ENABLE_TEST_ROUTES", "1")
+        r = gated_client.post("/api/test/start", json={"profile": "x"})
+        assert r.status_code == 503
+
+    def test_401_when_token_wrong(self, gated_client, monkeypatch):
+        monkeypatch.setenv("ENABLE_TEST_ROUTES", "1")
+        monkeypatch.setenv("ADMIN_API_TOKEN", "secret")
+        r = gated_client.post(
+            "/api/test/start",
+            json={"profile": "x"},
+            headers={"X-Admin-Token": "wrong"},
+        )
+        assert r.status_code == 401
+
+    def test_400_for_invalid_profile_name(self, gated_client, monkeypatch):
+        # Path-traversal characters in profile must be rejected before the
+        # subprocess is even considered. Auth all OK; only validation fires.
+        monkeypatch.setenv("ENABLE_TEST_ROUTES", "1")
+        monkeypatch.setenv("ADMIN_API_TOKEN", "secret")
+        r = gated_client.post(
+            "/api/test/start",
+            json={"profile": "../etc/passwd"},
+            headers={"X-Admin-Token": "secret"},
+        )
+        assert r.status_code == 400
+
+    def test_400_for_empty_profile_name(self, gated_client, monkeypatch):
+        monkeypatch.setenv("ENABLE_TEST_ROUTES", "1")
+        monkeypatch.setenv("ADMIN_API_TOKEN", "secret")
+        r = gated_client.post(
+            "/api/test/start",
+            json={"profile": ""},
+            headers={"X-Admin-Token": "secret"},
+        )
+        assert r.status_code == 400
+
+    def test_400_for_too_long_profile_name(self, gated_client, monkeypatch):
+        monkeypatch.setenv("ENABLE_TEST_ROUTES", "1")
+        monkeypatch.setenv("ADMIN_API_TOKEN", "secret")
+        r = gated_client.post(
+            "/api/test/start",
+            json={"profile": "x" * 200},
+            headers={"X-Admin-Token": "secret"},
+        )
+        assert r.status_code == 400
+
+    def test_400_for_invalid_room_name_on_stop(self, gated_client, monkeypatch):
+        # /stop validates room separately (path param). Auth all OK; only
+        # the room-shape validator fires.
+        monkeypatch.setenv("ENABLE_TEST_ROUTES", "1")
+        monkeypatch.setenv("ADMIN_API_TOKEN", "secret")
+        # Path-traversal-shaped room → 400, never reaches the kill logic.
+        r = gated_client.delete(
+            "/api/test/stop/has.dots.and.slashes",
+            headers={"X-Admin-Token": "secret"},
+        )
+        assert r.status_code == 400
+
+    def test_running_endpoint_passes_gates_and_returns_empty(
+        self, gated_client, monkeypatch
+    ):
+        # Smoke check that GET /api/test/running fires through both gates
+        # and returns the expected shape on a clean process table.
+        monkeypatch.setenv("ENABLE_TEST_ROUTES", "1")
+        monkeypatch.setenv("ADMIN_API_TOKEN", "secret")
+        r = gated_client.get(
+            "/api/test/running", headers={"X-Admin-Token": "secret"}
+        )
+        assert r.status_code == 200
+        assert r.json() == {"running": {}}
