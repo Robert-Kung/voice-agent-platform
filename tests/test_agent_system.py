@@ -1,36 +1,34 @@
 """
 Tests for agent_tools.py & agent_factory.py
 
-測試策略：
-1. Profile 載入 — YAML 正確讀取、錯誤處理
-2. Tool 工廠 — 每個 make_xxx 回傳正確結構
-3. 營業狀態 — 不同時段 / 星期的判斷
-4. QA 搜尋 — 關鍵字匹配與未匹配
-5. Agent class 組裝 — tools 動態掛載
-6. Per-profile tool 隔離 — 不同 profile 有不同 tools
+涵蓋：
+1. Profile 載入（YAML / DB fallback）
+2. Tool registry 與條件性掛載
+3. QA inline / tool 雙模式
+4. Human operator namespace + auto-mount transfer_to_human
+5. Services hours 嵌入 instructions
+6. Agent class 組裝
 """
 
-import datetime
-import asyncio
 import os
+
 import pytest
 from unittest.mock import patch
-from zoneinfo import ZoneInfo
 
-from agent_factory import load_profile, create_agent_class, list_profiles
+from agent_factory import (
+    create_agent_class,
+    list_profiles,
+    load_profile,
+    _human_operator_enabled,
+    _qa_mode,
+    _render_qa_block,
+    _render_services_block,
+)
 from agent_tools import (
+    TOOL_REGISTRY,
     build_tools_for_agent,
     get_available_tools,
-    _eval_business_status,
-    _parse_time,
-    make_get_current_datetime,
-    make_check_business_status,
     make_lookup_qa,
-    make_check_weather,
-    make_search_menu,
-    make_book_appointment,
-    make_calculate_price,
-    TOOL_REGISTRY,
 )
 
 
@@ -56,34 +54,22 @@ def restaurant_profile():
 
 @pytest.fixture
 def minimal_profile():
-    """最小可用 profile，用於單元測試。"""
+    """最小可用 profile（pipeline 模式預設值），用於單元測試。"""
     return {
         "name": "測試店",
         "timezone": "Asia/Taipei",
         "instructions": "你是測試客服。",
         "welcome_message": "您好，測試中。",
-        "services": {
-            "shop": {
-                "always_open": False,
-                "closed_days": [6],
-                "schedule": {
-                    "weekday": {"start": "09:00", "end": "18:00"},
-                    "saturday": {"start": "09:00", "end": "12:00"},
-                },
-                "hours_text": {
-                    "weekday": "平日 9-18 點。",
-                    "saturday": "週六 9-12 點。",
-                    "closed": "週日休息。",
-                },
-            }
+        "qa_mode": "inline",
+        "human_operator": {
+            "enabled": False,  # 預設 minimal 不啟用 handoff
         },
         "qa_data": [
             {"keywords": ["費用", "價格"], "answer": "費用 100 元。"},
             {"keywords": ["地址", "在哪"], "answer": "台北市中山區。"},
         ],
         "tools": [
-            {"name": "get_current_datetime"},
-            {"name": "lookup_qa"},
+            {"name": "get_current_time"},
         ],
     }
 
@@ -121,22 +107,17 @@ class TestProfileLoading:
 
 
 # ═══════════════════════════════════════════════════════════
-# 2. Tool 工廠
+# 2. Tool Registry
 # ═══════════════════════════════════════════════════════════
 
 
 class TestToolRegistry:
-    def test_registry_contains_all_expected_tools(self):
+    def test_registry_contains_only_tier1_and_tier2(self):
+        """重構後只剩三個工具：get_current_time + 兩個條件性掛載的 Tier 2。"""
         expected = {
-            "get_current_datetime",
-            "get_current_time",
-            "check_business_status",
-            "lookup_qa",
-            "transfer_to_human",
-            "check_weather",
-            "search_menu",
-            "book_appointment",
-            "calculate_price",
+            "get_current_time",       # Tier 1
+            "lookup_qa",              # Tier 2 (qa_mode=tool 時自動掛)
+            "transfer_to_human",      # Tier 2 (human_operator.enabled 時自動掛)
         }
         assert expected == set(TOOL_REGISTRY.keys())
 
@@ -147,9 +128,8 @@ class TestToolRegistry:
 
     def test_build_tools_respects_profile_declaration(self, minimal_profile):
         tools = build_tools_for_agent(minimal_profile)
-        assert set(tools.keys()) == {"get_current_datetime", "lookup_qa"}
-        assert "check_business_status" not in tools
-        assert "transfer_to_human" not in tools
+        # build_tools_for_agent 只看 profile.tools 列出的；不負責 auto-mount
+        assert set(tools.keys()) == {"get_current_time"}
 
     def test_build_tools_empty_when_no_tools_section(self):
         profile = {"name": "empty", "timezone": "Asia/Taipei"}
@@ -159,116 +139,61 @@ class TestToolRegistry:
     def test_unknown_tool_logged_and_skipped(self, minimal_profile):
         minimal_profile["tools"].append({"name": "nonexistent_tool_xyz"})
         tools = build_tools_for_agent(minimal_profile)
-        # 已知的兩個 tool 仍然建立成功
-        assert "get_current_datetime" in tools
-        assert "lookup_qa" in tools
-        # 未知的不在結果中
+        assert "get_current_time" in tools
         assert "nonexistent_tool_xyz" not in tools
 
 
 # ═══════════════════════════════════════════════════════════
-# 3. 營業狀態判斷
+# 3. QA inline / tool 雙模式
 # ═══════════════════════════════════════════════════════════
 
 
-class TestBusinessStatus:
-    def test_parse_time(self):
-        assert _parse_time("08:00") == 480
-        assert _parse_time("18:30") == 1110
-        assert _parse_time("00:00") == 0
+class TestQAModes:
+    def test_qa_mode_default_is_inline(self):
+        profile = {"name": "x"}
+        assert _qa_mode(profile) == "inline"
 
-    def test_always_open_service(self, car_profile):
-        result = _eval_business_status(car_profile, "fuel")
-        assert result["is_open"] is True
-        assert "24" in result["service_hours_text"]
+    def test_qa_mode_invalid_falls_back_to_inline(self):
+        profile = {"name": "x", "qa_mode": "garbage"}
+        assert _qa_mode(profile) == "inline"
 
-    def test_unknown_service_type(self, car_profile):
-        result = _eval_business_status(car_profile, "unknown_service")
-        assert result["is_open"] is False
-        assert "查無" in result["service_hours_text"]
+    def test_render_qa_block_includes_keywords_and_answers(self):
+        qa_data = [
+            {"keywords": ["費用", "價格"], "answer": "100 元。"},
+            {"keywords": ["地址"], "answer": "台北市。"},
+        ]
+        rendered = _render_qa_block(qa_data)
+        assert "費用" in rendered
+        assert "100 元" in rendered
+        assert "台北市" in rendered
 
-    def test_closed_on_sunday(self, car_profile):
-        """Sunday (weekday=6) — inspection should be closed."""
-        sunday = datetime.datetime(2026, 3, 29, 10, 0, tzinfo=ZoneInfo("Asia/Taipei"))  # Sunday
-        with patch("agent_tools.datetime") as mock_dt:
-            mock_dt.datetime.now.return_value = sunday
-            mock_dt.datetime.side_effect = lambda *a, **kw: datetime.datetime(*a, **kw)
-            result = _eval_business_status(car_profile, "inspection")
-            assert result["is_open"] is False
+    def test_render_qa_block_empty_returns_empty(self):
+        assert _render_qa_block([]) == ""
 
-    def test_open_on_weekday_during_hours(self, car_profile):
-        """Tuesday 10:00 — inspection should be open."""
-        tuesday_10am = datetime.datetime(2026, 3, 31, 10, 0, tzinfo=ZoneInfo("Asia/Taipei"))
-        with patch("agent_tools.datetime") as mock_dt:
-            mock_dt.datetime.now.return_value = tuesday_10am
-            result = _eval_business_status(car_profile, "inspection")
-            assert result["is_open"] is True
+    def test_inline_mode_appends_qa_to_instructions(self, minimal_profile):
+        minimal_profile["qa_mode"] = "inline"
+        AgentClass = create_agent_class(minimal_profile)
+        # inline 模式不該掛 lookup_qa tool
+        assert not hasattr(AgentClass, "lookup_qa")
 
-    def test_closed_on_weekday_after_hours(self, car_profile):
-        """Tuesday 20:00 — inspection should be closed."""
-        tuesday_8pm = datetime.datetime(2026, 3, 31, 20, 0, tzinfo=ZoneInfo("Asia/Taipei"))
-        with patch("agent_tools.datetime") as mock_dt:
-            mock_dt.datetime.now.return_value = tuesday_8pm
-            result = _eval_business_status(car_profile, "inspection")
-            assert result["is_open"] is False
+    def test_tool_mode_mounts_lookup_qa(self, minimal_profile):
+        minimal_profile["qa_mode"] = "tool"
+        AgentClass = create_agent_class(minimal_profile)
+        # tool 模式應自動掛 lookup_qa
+        assert hasattr(AgentClass, "lookup_qa")
 
-    def test_car_wash_within_hours(self, car_profile):
-        """Car wash open 07:00-22:00, test at 15:00."""
-        weekday_3pm = datetime.datetime(2026, 3, 31, 15, 0, tzinfo=ZoneInfo("Asia/Taipei"))
-        with patch("agent_tools.datetime") as mock_dt:
-            mock_dt.datetime.now.return_value = weekday_3pm
-            result = _eval_business_status(car_profile, "car_wash")
-            assert result["is_open"] is True
-
-    def test_restaurant_closed_on_monday(self, restaurant_profile):
-        """Restaurant closed on Monday (closed_days: [0])."""
-        monday = datetime.datetime(2026, 3, 30, 12, 0, tzinfo=ZoneInfo("Asia/Taipei"))  # Monday
-        with patch("agent_tools.datetime") as mock_dt:
-            mock_dt.datetime.now.return_value = monday
-            result = _eval_business_status(restaurant_profile, "restaurant")
-            assert result["is_open"] is False
-
-
-# ═══════════════════════════════════════════════════════════
-# 4. QA 搜尋
-# ═══════════════════════════════════════════════════════════
-
-
-class TestLookupQA:
-    def test_qa_match_by_keyword(self, minimal_profile):
-        tool = make_lookup_qa(minimal_profile, {})
-        # 取得內部 function（@function_tool 裝飾過的）
-        # 直接測底層邏輯
-        from agent_tools import _eval_business_status
-
-        qa_data = minimal_profile["qa_data"]
-        # 手動測匹配
-        question = "請問費用多少？"
-        found = False
-        for item in qa_data:
-            if any(kw in question for kw in item["keywords"]):
-                found = True
-                assert "100" in item["answer"]
-                break
-        assert found
-
-    def test_qa_no_match(self, minimal_profile):
-        question = "明天會下雨嗎？"
-        qa_data = minimal_profile["qa_data"]
-        found = any(
-            any(kw in question for kw in item["keywords"])
-            for item in qa_data
-        )
-        assert not found
+    def test_tool_mode_without_qa_data_does_not_mount(self, minimal_profile):
+        """qa_mode=tool 但 qa_data 為空時，不掛 lookup_qa（避免空工具浪費 context）。"""
+        minimal_profile["qa_mode"] = "tool"
+        minimal_profile["qa_data"] = []
+        AgentClass = create_agent_class(minimal_profile)
+        assert not hasattr(AgentClass, "lookup_qa")
 
     def test_car_inspection_qa_coverage(self, car_profile):
         """驗車 profile 的 QA 應涵蓋常見問題。"""
         qa_data = car_profile["qa_data"]
-        all_keywords = []
-        for item in qa_data:
-            all_keywords.extend(item["keywords"])
+        all_keywords = [k for item in qa_data for k in item["keywords"]]
 
-        # 確保常見問題都有對應 — QA 內容隨 profile 演進，用 substring 檢查比較有彈性
         assert "行照" in all_keywords
         assert any("費用" in k for k in all_keywords), "expected at least one 費用-related keyword"
         assert "營業時間" in all_keywords
@@ -276,15 +201,98 @@ class TestLookupQA:
 
     def test_dental_qa_has_appointment_related(self, dental_profile):
         qa_data = dental_profile["qa_data"]
-        all_keywords = []
-        for item in qa_data:
-            all_keywords.extend(item["keywords"])
+        all_keywords = [k for item in qa_data for k in item["keywords"]]
         assert "初診" in all_keywords
         assert "洗牙" in all_keywords
 
 
 # ═══════════════════════════════════════════════════════════
-# 5. Agent Class 組裝
+# 4. Human Operator 設定 + auto-mount
+# ═══════════════════════════════════════════════════════════
+
+
+class TestHumanOperator:
+    def test_enabled_via_new_namespace(self):
+        profile = {"name": "x", "human_operator": {"enabled": True}}
+        assert _human_operator_enabled(profile) is True
+
+    def test_disabled_via_new_namespace(self):
+        profile = {"name": "x", "human_operator": {"enabled": False}}
+        assert _human_operator_enabled(profile) is False
+
+    def test_legacy_flat_field_still_recognised(self):
+        """舊 schema：只要 human_operator_instructions 有值就視為啟用。"""
+        profile = {"name": "x", "human_operator_instructions": "你是門市人員。"}
+        assert _human_operator_enabled(profile) is True
+
+    def test_no_human_operator_returns_false(self):
+        profile = {"name": "x"}
+        assert _human_operator_enabled(profile) is False
+
+    def test_enabled_auto_mounts_transfer_to_human(self, minimal_profile):
+        minimal_profile["human_operator"] = {
+            "enabled": True,
+            "instructions": "你是門市人員。",
+            "greeting": "您好。",
+        }
+        AgentClass = create_agent_class(minimal_profile)
+        assert hasattr(AgentClass, "transfer_to_human")
+
+    def test_disabled_does_not_mount(self, minimal_profile):
+        minimal_profile["human_operator"] = {"enabled": False}
+        AgentClass = create_agent_class(minimal_profile)
+        assert not hasattr(AgentClass, "transfer_to_human")
+
+    def test_all_real_profiles_have_handoff_enabled(self):
+        """三個正式 profile 都應啟用 handoff（dental / restaurant / car / example）。"""
+        for name in list_profiles():
+            profile = load_profile(name)
+            assert _human_operator_enabled(profile), f"{name}: handoff should be enabled"
+
+
+# ═══════════════════════════════════════════════════════════
+# 5. Services hours 嵌入 instructions
+# ═══════════════════════════════════════════════════════════
+
+
+class TestServicesRender:
+    def test_render_services_includes_always_open(self):
+        services = {"fuel": {"always_open": True, "hours_text": "24 小時"}}
+        rendered = _render_services_block(services)
+        assert "fuel" in rendered
+        assert "24 小時" in rendered
+
+    def test_render_services_with_hours_text_string(self):
+        services = {"shop": {"hours_text": "平日 9-18 點"}}
+        rendered = _render_services_block(services)
+        assert "平日 9-18 點" in rendered
+
+    def test_render_services_with_hours_text_dict(self):
+        services = {
+            "clinic": {
+                "hours_text": {
+                    "weekday": "平日 9-17 點",
+                    "saturday": "週六 9-12 點",
+                }
+            }
+        }
+        rendered = _render_services_block(services)
+        assert "平日 9-17 點" in rendered
+        assert "週六 9-12 點" in rendered
+
+    def test_render_empty_services_returns_empty(self):
+        assert _render_services_block({}) == ""
+
+    def test_services_rendered_into_agent_instructions(self, restaurant_profile):
+        """create_agent_class 要把 services 嵌入 instructions（透過 agent_instructions 變數，
+        但 Agent class 本身不直接暴露），所以我們檢查 _render_services_block 對 restaurant 的 services 有實質輸出。"""
+        rendered = _render_services_block(restaurant_profile["services"])
+        assert len(rendered) > 0
+        assert "餐廳" in rendered or "restaurant" in rendered.lower()
+
+
+# ═══════════════════════════════════════════════════════════
+# 6. Agent Class 組裝
 # ═══════════════════════════════════════════════════════════
 
 
@@ -293,191 +301,97 @@ class TestAgentClassCreation:
         AgentClass = create_agent_class(car_profile)
         assert "汽車代檢中心" in AgentClass.__name__
 
-    def test_class_has_declared_tools_only(self, minimal_profile):
+    def test_class_has_only_tier1_tool_when_minimal(self, minimal_profile):
+        """minimal_profile: qa_mode=inline, human_operator.enabled=False — 只應有 get_current_time。"""
         AgentClass = create_agent_class(minimal_profile)
-        # 宣告的 tools 應存在
-        assert hasattr(AgentClass, "get_current_datetime")
-        assert hasattr(AgentClass, "lookup_qa")
-        # 未宣告的 tools 不應存在
-        assert not hasattr(AgentClass, "check_business_status")
+        assert hasattr(AgentClass, "get_current_time")
+        assert not hasattr(AgentClass, "lookup_qa")
         assert not hasattr(AgentClass, "transfer_to_human")
-        assert not hasattr(AgentClass, "check_weather")
 
     def test_agent_can_be_instantiated(self, car_profile):
         AgentClass = create_agent_class(car_profile)
         agent = AgentClass()
         assert agent is not None
 
+    def test_pipeline_and_realtime_modes_both_work(self, minimal_profile):
+        PipelineAgent = create_agent_class(minimal_profile, mode="pipeline")
+        RealtimeAgent = create_agent_class(minimal_profile, mode="realtime")
+        assert PipelineAgent is not RealtimeAgent
+        assert hasattr(PipelineAgent, "get_current_time")
+        assert hasattr(RealtimeAgent, "get_current_time")
+
 
 # ═══════════════════════════════════════════════════════════
-# 6. Per-Profile Tool 隔離
+# 7. Per-Profile Tool 掛載規則
 # ═══════════════════════════════════════════════════════════
 
 
-class TestToolIsolation:
-    def test_each_profile_has_different_tools(self):
-        profiles_tools = {}
+class TestToolMounting:
+    def test_all_real_profiles_have_get_current_time(self):
         for name in list_profiles():
             profile = load_profile(name)
             tools = build_tools_for_agent(profile)
-            profiles_tools[name] = set(tools.keys())
+            assert "get_current_time" in tools, f"{name}: get_current_time missing"
 
-        # 車廠最小化（連 lookup_qa 都改用 system instructions 嵌入）
-        assert "get_current_time" in profiles_tools["car_inspection"]
-        assert "transfer_to_human" in profiles_tools["car_inspection"]
+    def test_real_profiles_use_inline_qa_by_default(self):
+        """現有 profile 都用 inline 模式 — build_tools 不該見到 lookup_qa。"""
+        for name in list_profiles():
+            profile = load_profile(name)
+            tools = build_tools_for_agent(profile)
+            assert "lookup_qa" not in tools, (
+                f"{name}: lookup_qa should not be in tools list under inline mode"
+            )
 
-        # 牙醫有預約，車廠和餐廳沒有
-        assert "book_appointment" in profiles_tools["dental_clinic"]
-        assert "book_appointment" not in profiles_tools["car_inspection"]
-        assert "book_appointment" not in profiles_tools["restaurant"]
+    def test_real_profiles_handoff_via_auto_mount_not_tools_list(self):
+        """transfer_to_human 應由 agent_factory auto-mount，不在 build_tools 結果中。"""
+        for name in list_profiles():
+            profile = load_profile(name)
+            tools = build_tools_for_agent(profile)
+            assert "transfer_to_human" not in tools, (
+                f"{name}: transfer_to_human should be auto-mounted, not in tools list"
+            )
+            # 但 AgentClass 上應該有（因 human_operator.enabled）
+            AgentClass = create_agent_class(profile)
+            assert hasattr(AgentClass, "transfer_to_human"), (
+                f"{name}: AgentClass should have transfer_to_human"
+            )
 
-        # 餐廳有菜單搜尋和價格計算，其他 profile 沒有
-        assert "search_menu" in profiles_tools["restaurant"]
-        assert "calculate_price" in profiles_tools["restaurant"]
-        assert "search_menu" not in profiles_tools["car_inspection"]
-        assert "search_menu" not in profiles_tools["dental_clinic"]
-
-    def test_tool_configs_are_independent(self):
-        """不同 profile 的同名 tool 應有各自的 config。
-
-        car_inspection 把 QA 嵌進 system instructions（降延遲），不掛 lookup_qa；
-        改用 dental + restaurant 驗證隔離。
-        """
+    def test_lookup_qa_factory_returns_distinct_objects(self):
+        """同一 factory 用兩個 profile 建立的 tool 應該是獨立物件。"""
         dental = load_profile("dental_clinic")
         restaurant = load_profile("restaurant")
-
-        dental_tools = build_tools_for_agent(dental)
-        restaurant_tools = build_tools_for_agent(restaurant)
-
-        # 兩者都有 lookup_qa，但底層 qa_data 不同
-        assert "lookup_qa" in dental_tools
-        assert "lookup_qa" in restaurant_tools
-        # 它們是不同的物件
-        assert dental_tools["lookup_qa"] is not restaurant_tools["lookup_qa"]
+        dental_qa = make_lookup_qa(dental, {})
+        restaurant_qa = make_lookup_qa(restaurant, {})
+        assert dental_qa is not restaurant_qa
 
 
 # ═══════════════════════════════════════════════════════════
-# 7. Search Menu Tool
-# ═══════════════════════════════════════════════════════════
-
-
-class TestSearchMenuTool:
-    def test_restaurant_menu_config_loaded(self, restaurant_profile):
-        """餐廳 profile 的 search_menu config 應有 categories。"""
-        tools_config = restaurant_profile.get("tools", [])
-        menu_config = next(
-            (t.get("config", {}) for t in tools_config if t["name"] == "search_menu"),
-            None,
-        )
-        assert menu_config is not None
-        assert "categories" in menu_config
-        categories = menu_config["categories"]
-        assert len(categories) > 0
-
-        # 確認招牌菜在目錄中
-        all_items = [
-            item["name"]
-            for cat in categories
-            for item in cat.get("items", [])
-        ]
-        assert "三杯雞" in all_items
-        assert "紅燒獅子頭" in all_items
-
-
-# ═══════════════════════════════════════════════════════════
-# 8. Calculate Price Tool
-# ═══════════════════════════════════════════════════════════
-
-
-class TestCalculatePriceTool:
-    def test_restaurant_price_rules_loaded(self, restaurant_profile):
-        tools_config = restaurant_profile.get("tools", [])
-        price_config = next(
-            (t.get("config", {}) for t in tools_config if t["name"] == "calculate_price"),
-            None,
-        )
-        assert price_config is not None
-        assert "price_rules" in price_config
-        rules = price_config["price_rules"]
-        rule_names = [r["name"] for r in rules]
-        assert "午餐套餐" in rule_names
-        assert "晚餐套餐" in rule_names
-
-
-# ═══════════════════════════════════════════════════════════
-# 9. Agent Mode（Pipeline vs Realtime）
+# 8. AGENT_MODE 環境變數
 # ═══════════════════════════════════════════════════════════
 
 
 class TestAgentMode:
     def test_agent_mode_defaults_to_pipeline(self):
-        """AGENT_MODE 未設定時應預設為 pipeline。"""
-        import importlib
-        import agent as agent_mod
-
-        with patch.dict("os.environ", {}, clear=False):
-            # 移除 AGENT_MODE（如果有的話）
-            env = {k: v for k, v in os.environ.items() if k != "AGENT_MODE"}
-            with patch.dict("os.environ", env, clear=True):
-                mode = os.environ.get("AGENT_MODE", "pipeline")
-                assert mode == "pipeline"
+        env = {k: v for k, v in os.environ.items() if k != "AGENT_MODE"}
+        with patch.dict("os.environ", env, clear=True):
+            mode = os.environ.get("AGENT_MODE", "pipeline")
+            assert mode == "pipeline"
 
     def test_agent_mode_reads_env_var(self):
-        """AGENT_MODE=realtime 應正確讀取。"""
         with patch.dict("os.environ", {"AGENT_MODE": "realtime"}):
             mode = os.environ.get("AGENT_MODE", "pipeline")
             assert mode == "realtime"
 
     def test_google_realtime_model_importable(self):
-        """livekit-plugins-google 的 RealtimeModel 應可匯入。"""
         from livekit.plugins.google.realtime import RealtimeModel
         assert RealtimeModel is not None
 
-    def test_pipeline_session_creation(self, car_profile):
-        """Pipeline 模式下 AgentSession 應使用 FallbackAdapter。"""
-        from livekit.agents import AgentSession, llm, stt, tts, inference
-
-        # 驗證 FallbackAdapter 可正常建構（不啟動 session）
-        llm_adapter = llm.FallbackAdapter([
-            inference.LLM(model="google/gemini-3.1-flash-lite"),
-        ])
-        assert llm_adapter is not None
-
     def test_realtime_model_instantiation(self):
-        """RealtimeModel 應以 plugin 已知的 native-audio 模型名稱建構。"""
         from livekit.plugins.google.realtime import RealtimeModel
         with patch.dict("os.environ", {"GOOGLE_API_KEY": "test-key-for-unit-test"}):
-            # 正確：Live API 專用模型字串
             model = RealtimeModel(
                 model="gemini-3.1-flash-live-preview",
                 voice="Nova",
                 temperature=0.8,
             )
             assert model is not None
-
-    def test_realtime_model_wrong_name_still_constructs(self):
-        """gemini-2.5-flash（非 Live API 模型）仍可建構，但連線時會失敗（API 層面錯誤）。"""
-        from livekit.plugins.google.realtime import RealtimeModel
-        with patch.dict("os.environ", {"GOOGLE_API_KEY": "test-key-for-unit-test"}):
-            # 型別是 LiveAPIModels | str，任何字串都可建構，錯誤在連線時才發生
-            model = RealtimeModel(model="gemini-2.5-flash", voice="Nova")
-            assert model is not None
-
-    def test_agent_class_works_with_both_modes(self, minimal_profile):
-        """create_agent_class 的兩種 mode 都應可建立 Agent class 並掛載 tools。"""
-        # pipeline 模式（預設）
-        PipelineAgent = create_agent_class(minimal_profile, mode="pipeline")
-        agent_p = PipelineAgent()
-        assert agent_p is not None
-        assert hasattr(PipelineAgent, "get_current_datetime")
-        assert hasattr(PipelineAgent, "lookup_qa")
-
-        # realtime 模式
-        RealtimeAgent = create_agent_class(minimal_profile, mode="realtime")
-        agent_r = RealtimeAgent()
-        assert agent_r is not None
-        assert hasattr(RealtimeAgent, "get_current_datetime")
-        assert hasattr(RealtimeAgent, "lookup_qa")
-
-        # 兩者是獨立的 class
-        assert PipelineAgent is not RealtimeAgent

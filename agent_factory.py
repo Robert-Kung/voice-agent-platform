@@ -2,20 +2,16 @@
 Agent Factory — 從 DB 或 YAML profile 動態建立 LiveKit Voice Agent
 
 用法：
-    from agent_factory import load_profile, create_agent_class
-
     profile = load_profile("car_inspection")       # 先查 DB，fallback 到 YAML
-    PhoneAgent = create_agent_class(profile)        # 動態建立 Agent class（包含 profile 指定的 tools）
+    PhoneAgent = create_agent_class(profile)
 
-YAML profile 的 tools 區塊示例：
-    tools:
-      - name: get_current_datetime
-      - name: check_business_status
-      - name: lookup_qa
-      - name: transfer_to_human
-      - name: check_weather
-        config:
-          location: "台北市"
+工具掛載規則（見 CLAUDE.md 的三層架構）：
+- Tier 1（get_current_time）：YAML tools 區塊宣告才掛
+- Tier 2 自動掛載：
+    lookup_qa：profile.qa_mode == "tool" 且 qa_data 存在 → 自動掛
+    transfer_to_human：profile.human_operator.enabled == true → 自動掛
+  否則資料嵌入 instructions（lookup_qa inline mode、services hours）
+- Tier 3（HTTP tool）：YAML tools 區塊宣告（待實作）
 """
 
 import json
@@ -25,11 +21,69 @@ import pathlib
 import yaml
 
 from livekit.agents import Agent, StopResponse
-from agent_tools import build_tools_for_agent, get_available_tools
+from agent_tools import TOOL_REGISTRY, build_tools_for_agent, get_available_tools
 
 logger = logging.getLogger("agent-factory")
 
 PROFILES_DIR = pathlib.Path(__file__).parent / "profiles"
+
+# Default 為 inline — QA 在 session 開始時一次嵌入 instructions，零延遲。
+# 切到 "tool" 適合 QA 量大會撐爆 context 的場域。
+_DEFAULT_QA_MODE = "inline"
+
+
+# ── Render helpers (Tier 2 data → instructions) ────────────
+
+
+def _render_qa_block(qa_data: list[dict]) -> str:
+    """把 qa_data 渲染成 instructions 附加段落。"""
+    if not qa_data:
+        return ""
+    lines = ["\n\n[常見問題知識庫] 以下問題直接用於回答，不需呼叫任何工具："]
+    for item in qa_data:
+        kw = "、".join(item.get("keywords", [])[:3])
+        lines.append(f"▸ 關鍵字：{kw}")
+        lines.append(f"  回答：{item.get('answer', '')}")
+    return "\n".join(lines)
+
+
+def _render_services_block(services: dict) -> str:
+    """把 services 營業時間渲染成 instructions 附加段落。
+
+    LLM 配合 get_current_time tool 自行判斷 is_open / closes_at，
+    取代過去 check_business_status tool 的 runtime 計算。
+    """
+    if not services:
+        return ""
+    lines = ["\n\n[營業時間] 呼叫 get_current_time 取得當下時間後，依下列規則判斷服務是否營業："]
+    for svc_name, svc in services.items():
+        if svc.get("always_open"):
+            lines.append(f"▸ {svc_name}：24 小時全天營業")
+            continue
+        hours_text = svc.get("hours_text", "")
+        if isinstance(hours_text, dict):
+            for slot_name, text in hours_text.items():
+                lines.append(f"▸ {svc_name}（{slot_name}）：{text}")
+        elif hours_text:
+            lines.append(f"▸ {svc_name}：{hours_text}")
+    return "\n".join(lines)
+
+
+def _human_operator_enabled(profile: dict) -> bool:
+    """支援新 namespace 與舊散落欄位的 backward-compat 檢查。"""
+    ho = profile.get("human_operator")
+    if isinstance(ho, dict):
+        return bool(ho.get("enabled", False))
+    # 舊 schema：只要有 human_operator_instructions 就視為啟用
+    return bool(profile.get("human_operator_instructions"))
+
+
+def _qa_mode(profile: dict) -> str:
+    mode = profile.get("qa_mode", _DEFAULT_QA_MODE)
+    if mode not in ("inline", "tool"):
+        logger.warning("invalid qa_mode '%s', falling back to '%s'", mode, _DEFAULT_QA_MODE)
+        return _DEFAULT_QA_MODE
+    return mode
 
 
 # ── Profile loading ────────────────────────────────────────
@@ -134,20 +188,33 @@ def create_agent_class(profile: dict, mode: str = "pipeline"):
         "向來電者打招呼，簡短介紹自己並詢問需要什麼協助。"
     )
 
-    # 自動將 qa_data 嵌入 system instructions（取代 lookup_qa tool）
-    # 好處：零額外 tool call 延遲，tokens 在 session 開始時一次載入，後續每輪不增加
+    # ── Tier 2 資料 → instructions ────────────────────────
+    qa_mode = _qa_mode(profile)
     qa_data = profile.get("qa_data", [])
-    if qa_data:
-        qa_lines = ["\n\n[常見問題知識庫]以下問驗直接用於回答，不需呼叫任何工具："]
-        for item in qa_data:
-            kw = "、".join(item["keywords"][:3])
-            qa_lines.append(f"▸ 關鍵字：{kw}")
-            qa_lines.append(f"  回答：{item['answer']}")
-        agent_instructions = agent_instructions + "\n".join(qa_lines)
-        logger.info("將 %d 筆 QA 嵌入 system instructions（%d chars）", len(qa_data), len(agent_instructions))
+    if qa_mode == "inline" and qa_data:
+        agent_instructions += _render_qa_block(qa_data)
+        logger.info("QA inline mode: 嵌入 %d 筆 QA（總 %d chars）", len(qa_data), len(agent_instructions))
 
-    # 根據 profile 的 tools 宣告建立 tool 方法
+    services = profile.get("services", {})
+    if services:
+        agent_instructions += _render_services_block(services)
+        logger.info("Services 嵌入 instructions: %d 個服務項目", len(services))
+
+    # ── Tool 建立 ──────────────────────────────────────────
+    # 1. profile.tools 宣告的 user-side tools（Tier 1 + 未來的 Tier 3 HTTP tools）
     tool_methods = build_tools_for_agent(profile)
+
+    # 2. 自動掛載 Tier 2 條件性 tools
+    if qa_mode == "tool" and qa_data and "lookup_qa" not in tool_methods:
+        lookup_qa_factory = TOOL_REGISTRY["lookup_qa"]
+        tool_methods["lookup_qa"] = lookup_qa_factory(profile, {})
+        logger.info("QA tool mode: auto-mounted lookup_qa")
+
+    if _human_operator_enabled(profile) and "transfer_to_human" not in tool_methods:
+        ho_config = profile.get("human_operator", {}) if isinstance(profile.get("human_operator"), dict) else {}
+        transfer_factory = TOOL_REGISTRY["transfer_to_human"]
+        tool_methods["transfer_to_human"] = transfer_factory(profile, ho_config)
+        logger.info("Human operator enabled: auto-mounted transfer_to_human")
 
     class DynamicPhoneAgent(Agent):
         def __init__(self) -> None:

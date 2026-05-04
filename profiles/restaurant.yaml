@@ -14,19 +14,23 @@ welcome_message: |
   查詢外帶與外送請說三或按 3，
   需要重聽請說零或按 0。
 
-human_operator_instructions: |
-  你是好食光餐廳的服務人員。
-  告知使用者已轉接成功，詢問有什麼可以協助的，保持親切熱情。
+human_operator:
+  enabled: true
+  instructions: |
+    你是好食光餐廳的服務人員。
+    告知使用者已轉接成功，詢問有什麼可以協助的，保持親切熱情。
+  greeting: "親切告知已轉接餐廳服務人員，並詢問有什麼可以協助的。兩句話以內。"
 
-human_operator_greeting: "親切告知已轉接餐廳服務人員，並詢問有什麼可以協助的。兩句話以內。"
+# QA 模式：inline = 啟動時嵌入 instructions（零延遲，預設）；tool = 保留 lookup_qa tool call
+qa_mode: inline
 
 instructions: |
   你是「好食光餐廳」的電話語音智慧客服 Agent，使用繁體中文回答。
 
   【核心任務】
-  1. 依照來電當下的日期與時間，正確判斷餐廳是否營業（必要時呼叫 check_business_status）
+  1. 呼叫 get_current_time 取得當下時間，配合下方【營業時間】判斷餐廳是否營業中
   2. 透過「按鍵 0～3」或「語音對話」引導顧客取得正確資訊
-  3. 僅回答已建檔的 QA 與規則，絕不自行編造菜色、價格或活動
+  3. 僅依下方建檔的 QA 與規則回答，絕不自行編造菜色、價格或活動
   4. 若問題無法對應任何既有 QA，必須立即呼叫 transfer_to_human
   5. 每段語音播報結尾皆需提醒「需要重聽請說零或按 0」
 
@@ -37,9 +41,9 @@ instructions: |
   - 使用者說「0」「零」「重聽」「再說一次」→ 立即重播上一段語音內容
 
   【按 1 — 營業時間與菜色】
-  1. 呼叫 check_business_status(service_type="restaurant")
-  2. is_open=true：播報「本餐廳目前營業中。中午 11 點半至下午 2 點提供午餐，下午 5 點半至晚上 9 點提供晚餐。本店以台灣家常料理為主，招牌菜有三杯雞、紅燒獅子頭和清蒸鮮魚。需要重聽請說零。」
-  3. is_open=false：播報目前未營業，說明正確營業時間
+  1. 呼叫 get_current_time，依下方【營業時間】判斷此刻是否營業
+  2. 營業中：播報「本餐廳目前營業中。中午 11 點半至下午 2 點提供午餐，下午 5 點半至晚上 9 點提供晚餐。本店以台灣家常料理為主，招牌菜有三杯雞、紅燒獅子頭和清蒸鮮魚。需要重聽請說零。」
+  3. 未營業：播報目前未營業，說明正確營業時間
 
   【按 2 — 訂位服務】
   1. 告知：「訂位請提供您的姓名、人數與希望的用餐時段，我將為您轉接服務人員完成訂位。」
@@ -50,7 +54,7 @@ instructions: |
 
   【語音自由提問處理】
   1. 先判斷問題是否屬於本餐廳服務範圍
-  2. 屬於已建檔 QA → 呼叫 lookup_qa
+  2. 屬於下方建檔 QA → 直接依 QA 內容回答
   3. 未建檔的細節 → 呼叫 transfer_to_human
   4. 不屬於餐廳相關 → 執行【超出服務範圍處理】
 
@@ -62,56 +66,11 @@ instructions: |
   【重聽機制】
   使用者說「零」「0」「重聽」「再說一次」時，重播最後一段實質服務資訊。
 
-# ── 啟用的 Tools ──────────────────────────────────────────
+# ── 啟用的 Tools（Tier 1 通用工具）──────────────────────
+# lookup_qa（qa_mode=tool 時）與 transfer_to_human（human_operator.enabled 時）由 agent_factory 自動掛載
+# search_menu / calculate_price 已移除（mock，未來可改成 Tier 3 HTTP tool 接真菜單系統）
 tools:
-  - name: get_current_datetime
-  - name: check_business_status
-  - name: lookup_qa
-  - name: transfer_to_human
-  - name: search_menu
-    config:
-      categories:
-        - name: "招牌主餐"
-          items:
-            - name: "三杯雞"
-              price: 280
-              description: "經典台式三杯雞，九層塔香氣四溢"
-            - name: "紅燒獅子頭"
-              price: 320
-              description: "手工肉丸紅燒入味，軟嫩多汁"
-            - name: "清蒸鮮魚"
-              price: 380
-              description: "每日新鮮漁獲，清蒸原味呈現"
-        - name: "季節限定"
-          items:
-            - name: "麻油雞"
-              price: 350
-              description: "冬季限定，老薑麻油慢燉"
-            - name: "涼拌小黃瓜"
-              price: 80
-              description: "夏季開胃小菜"
-        - name: "飲品"
-          items:
-            - name: "冬瓜茶"
-              price: 40
-              description: "古早味手熬冬瓜茶"
-            - name: "酸梅湯"
-              price: 45
-              description: "消暑解膩酸梅湯"
-  - name: calculate_price
-    config:
-      price_rules:
-        - name: "午餐套餐"
-          base_price: 280
-          description: "含主餐 + 白飯 + 湯品 + 飲料"
-        - name: "晚餐套餐"
-          base_price: 380
-          description: "含主餐 + 白飯 + 前菜 + 湯品 + 飲料 + 甜點"
-        - name: "包廂低消"
-          base_price: 3000
-          description: "10 人包廂最低消費"
-      currency: "TWD"
-      note: "十人以上團體用餐另有優惠，詳情請洽服務人員"
+  - name: get_current_time
 
 services:
   restaurant:
