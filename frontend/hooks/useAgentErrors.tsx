@@ -29,8 +29,22 @@ export function useAgentErrors() {
   const { isConnected, end } = useSessionContext();
 
   useEffect(() => {
+    // Diagnostic: capture agent.state transitions + attribute visibility.
+    // Dev-only — leaks participant identity, so don't ship to production.
+    if (process.env.NODE_ENV !== 'production') {
+      const agentParticipant = agent.internal?.agentParticipant;
+      console.log('[agent]', agent.state, {
+        agentStateAttr: agentParticipant?.attributes?.['lk.agent.state'] ?? null,
+        agentIdentity: agentParticipant?.identity ?? null,
+        failureReasons: agent.failureReasons,
+      });
+    }
+
     if (isConnected && agent.state === 'failed') {
       const reasons = agent.failureReasons;
+      if (process.env.NODE_ENV !== 'production') {
+        console.error('[agent] → failed, calling session.end()', { reasons });
+      }
 
       toastAlert({
         title: 'Session ended',

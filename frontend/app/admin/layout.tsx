@@ -1,8 +1,18 @@
+'use client';
+
 import type { ReactNode } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { Toaster } from '@/components/ui/sonner';
 
 export default function AdminLayout({ children }: { children: ReactNode }) {
+  const router = useRouter();
+
+  async function handleLogout() {
+    await fetch('/api/admin/logout', { method: 'POST' });
+    router.replace('/admin/login');
+  }
+
   const navItems = [
     { href: '/admin/dashboard', label: 'Dashboard' },
     { href: '/admin/profiles', label: 'Profiles' },
@@ -26,6 +36,13 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
               </Link>
             ))}
           </div>
+          <button
+            type="button"
+            onClick={handleLogout}
+            className="text-foreground/50 hover:text-foreground ml-auto text-sm transition-colors"
+          >
+            登出
+          </button>
         </div>
       </nav>
       <main className="mx-auto w-full max-w-7xl flex-1 px-6 py-8">{children}</main>

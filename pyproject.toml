@@ -10,6 +10,11 @@ dependencies = [
     "httpx>=0.28.1",
     "livekit-agents[deepgram,google,mcp,openai,silero,turn-detector]>=1.5",
     "livekit-plugins-noise-cancellation~=0.2",
+    # Used by agent.py's connect-mode patch version gate. We only relied on it
+    # transitively (livekit-agents pulls it via packaging-aware deps). Declared
+    # directly so a future livekit-agents release that drops the transitive
+    # dep doesn't surface as a confusing ModuleNotFoundError at import time.
+    "packaging>=23.0",
     "pydub>=0.25.1",
     "python-dotenv>=1.1.1",
     "pyyaml>=6.0.3",

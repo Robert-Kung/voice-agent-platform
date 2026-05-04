@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { toast } from 'sonner';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
-import { profilesApi } from '@/lib/admin-api';
+import { profilesApi, testApi } from '@/lib/admin-api';
 import type { Profile } from '@/lib/admin-api';
 
 const TOOL_CHIP_LIMIT = 3;
@@ -58,6 +58,30 @@ export default function ProfilesPage() {
       load();
     } catch (e) {
       toast.error(`啟用失敗: ${(e as Error).message}`);
+    }
+  };
+
+  const handleTry = async (profile: Profile) => {
+    // Open the new tab synchronously inside the click handler so popup blockers
+    // count it as a user-initiated navigation. window.open() called *after* an
+    // await is treated as a programmatic popup and gets blocked in default
+    // Chrome/Firefox/Safari settings — the user would click Try and see nothing
+    // happen. We point the placeholder tab at the final URL once the API
+    // returns, or close it on error.
+    const tab = window.open('', '_blank');
+    try {
+      const { room } = await testApi.start(profile.name);
+      const url = `/?room=${encodeURIComponent(room)}`;
+      if (tab && !tab.closed) {
+        tab.location.href = url;
+      } else {
+        // User had popups blocked despite the synchronous open — fall back to
+        // same-tab navigation so they still get the test session.
+        window.location.href = url;
+      }
+    } catch (e) {
+      tab?.close();
+      toast.error(`無法啟動測試 agent: ${(e as Error).message}`);
     }
   };
 
@@ -159,6 +183,7 @@ export default function ProfilesPage() {
                           ))}
                           {!expanded && overflow > 0 && (
                             <button
+                              type="button"
                               onClick={() =>
                                 setExpandedTools((prev) => ({ ...prev, [p.id]: true }))
                               }
@@ -217,16 +242,18 @@ export default function ProfilesPage() {
                           Edit
                         </Link>
                         {p.is_active && (
-                          <Link
-                            href={`/?profile=${p.name}`}
+                          <button
+                            type="button"
+                            onClick={() => handleTry(p)}
                             className="border-border hover:bg-foreground/10 rounded border px-2 py-1 text-xs"
-                            title="開啟 voice 測試頁"
+                            title="啟動本機 connect-mode agent 並開啟測試頁"
                           >
                             Try
-                          </Link>
+                          </button>
                         )}
                         {p.is_active ? (
                           <button
+                            type="button"
                             onClick={() => setPendingDeactivate(p)}
                             className="rounded border border-red-500/40 px-2 py-1 text-xs text-red-600 hover:bg-red-500/10 dark:text-red-400"
                           >
@@ -234,6 +261,7 @@ export default function ProfilesPage() {
                           </button>
                         ) : (
                           <button
+                            type="button"
                             onClick={() => handleReactivate(p)}
                             className="rounded border border-green-500/40 px-2 py-1 text-xs text-green-700 hover:bg-green-500/10 dark:text-green-400"
                           >

@@ -171,6 +171,28 @@ API / agent 首次啟動時會自動：
 1. 建立 `data/agent_platform.db`
 2. 若 `profiles` table 為空，從 `profiles/*.yaml` 匯入為 DB profile
 
+### Cloud 與本機共用 Sessions（重要）
+
+預設使用本機 SQLite（`AGENT_DB_PATH`），因此：
+
+- 本機 `api` 看到的是本機 `./data/agent_platform.db`
+- 若 agent 部署在 LiveKit Cloud，Cloud 端不會自動寫回你本機 SQLite
+
+若要讓 Cloud agent 與本機 API 共用同一份 sessions，請設定：
+
+```bash
+AGENT_DB_URL=<shared database url>
+```
+
+例如共享 Postgres。`AGENT_DB_URL` 會優先於 `AGENT_DB_PATH`。
+
+### LiveKit 測試環境建議
+
+依 LiveKit 文件（Self-hosted deployments）建議，development / staging / production 應使用不同 LiveKit project，避免本機測試 worker 意外接到正式流量。實務上：
+
+- 要測試 Cloud deploy 的 `Try` 流程：使用專用 Cloud project（不要讓本機 worker 連到同一 project）
+- 要測本機 agent：使用另一個 dev project（或本機 server）
+
 也可手動跑：
 
 ```bash

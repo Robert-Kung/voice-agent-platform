@@ -1,7 +1,14 @@
 // Management API client for admin UI.
-// Base URL is configurable via NEXT_PUBLIC_ADMIN_API_URL (defaults to localhost:8080).
+//
+// All requests go through the same-origin Next.js proxy at /api/admin-proxy.
+// The proxy injects X-Admin-Token from server-side env (ADMIN_API_TOKEN) and
+// is gated by middleware.ts on the ADMIN_PASSWORD session cookie. The token
+// never reaches the browser bundle.
+//
+// Backend FastAPI URL is configured server-side via ADMIN_API_URL — see
+// frontend/app/api/admin-proxy/[...path]/route.ts.
 
-const API_BASE = process.env.NEXT_PUBLIC_ADMIN_API_URL || 'http://localhost:8080';
+const API_BASE = '/api/admin-proxy';
 
 export interface Profile {
   id: string;
@@ -204,4 +211,24 @@ export const statsApi = {
     const suffix = profileId ? `?profile_id=${profileId}` : '';
     return request<DailyStats[]>(`/api/stats/daily${suffix}`);
   },
+};
+
+// ── Local connect-mode test ─────────────────────────────────
+
+export interface TestStartResponse {
+  room: string;
+  pid: number;
+  log_path: string;
+}
+
+export const testApi = {
+  start: (profile: string) =>
+    request<TestStartResponse>('/api/test/start', {
+      method: 'POST',
+      body: JSON.stringify({ profile }),
+    }),
+  stop: (room: string) =>
+    request<{ ok: boolean }>(`/api/test/stop/${encodeURIComponent(room)}`, {
+      method: 'DELETE',
+    }),
 };

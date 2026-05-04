@@ -17,7 +17,7 @@ from livekit.agents import (
     stt,
     tts,
 )
-from livekit.plugins import google, noise_cancellation, silero
+from livekit.plugins import deepgram, google, noise_cancellation, silero
 from livekit.plugins.turn_detector.multilingual import MultilingualModel
 from livekit.agents import metrics, MetricsCollectedEvent, AgentStateChangedEvent
 
@@ -26,6 +26,101 @@ from agent_factory import load_profile_with_id, create_agent_class, list_profile
 from google.genai import types as genai_types
 
 logger = logging.getLogger("agent")
+
+
+# ── connect-mode JWT fix ───────────────────────────────────
+# livekit-agents 1.5.2 Worker.simulate_job() 產的 JWT 沒含 can_update_own_metadata=True，
+# 導致 connect-mode agent 無法 set_attributes() → lk.agent.state 永遠傳不到前端
+# → useAgent() 20s timeout 後 state='failed' → useAgentErrors 觸發 session.end()
+# → CLIENT_INITIATED 斷線。只影響本地 Try button（走 connect subcommand），
+# Cloud dispatch 路徑用 server 發的 token 不受影響。
+def _patch_connect_mode_token() -> None:
+    from livekit import api
+    from livekit.agents.worker import AgentServer
+
+    _orig = AgentServer.simulate_job
+
+    async def _patched(
+        self,
+        room,
+        *,
+        fake_job=False,
+        agent_identity=None,
+        room_info=None,
+        token=None,
+    ):
+        if token is None and agent_identity and not fake_job:
+            token = (
+                api.AccessToken(self._api_key, self._api_secret)
+                .with_identity(agent_identity)
+                .with_kind("agent")
+                .with_grants(
+                    api.VideoGrants(
+                        room_join=True,
+                        room=room,
+                        agent=True,
+                        can_update_own_metadata=True,
+                    )
+                )
+                .to_jwt()
+            )
+        return await _orig(
+            self,
+            room,
+            fake_job=fake_job,
+            agent_identity=agent_identity,
+            room_info=room_info,
+            token=token,
+        )
+
+    AgentServer.simulate_job = _patched
+
+
+def _maybe_patch_connect_mode_token() -> None:
+    """Apply the connect-mode JWT patch only when this process is running the
+    `connect` subcommand. Cloud dispatch (`start`/`dev`) doesn't need it, and
+    leaving the patch off those paths avoids touching internal LiveKit APIs in
+    production. Also gate on a known-good livekit-agents version range so the
+    patch fails loudly on upgrades that change `simulate_job`'s signature
+    instead of silently breaking.
+    """
+    argv = sys.argv[1:]
+    if not argv or argv[0] != "connect":
+        return
+
+    # The patch was written against livekit-agents 1.5.x — specifically the
+    # simulate_job signature in that minor. Allow only that range; future
+    # minors (1.6+, 2.x) skip the patch with a warning so a routine upgrade
+    # surfaces "Try button stopped working" instead of silently misbehaving.
+    _PATCH_MIN = "1.5.0"
+    _PATCH_MAX_EXCLUSIVE = "1.6.0"
+
+    try:
+        from importlib.metadata import version as _pkg_version
+        from packaging.version import Version
+
+        agents_version = Version(_pkg_version("livekit-agents"))
+    except Exception:
+        # If we can't even read the version (e.g. importlib/packaging broken),
+        # treat that as "unknown version" and skip — applying a 1.5.x-shaped
+        # patch to an unknown version is exactly the silent-break we're trying
+        # to avoid. Try-button breaking loudly is the better failure mode.
+        logger.exception("connect-mode patch version check failed; skipping patch")
+        return
+
+    if not (Version(_PATCH_MIN) <= agents_version < Version(_PATCH_MAX_EXCLUSIVE)):
+        logger.warning(
+            "Skipping connect-mode token patch: livekit-agents %s is outside "
+            "the validated range [%s, %s). Re-test simulate_job() before "
+            "extending this gate.",
+            agents_version, _PATCH_MIN, _PATCH_MAX_EXCLUSIVE,
+        )
+        return
+
+    _patch_connect_mode_token()
+
+
+_maybe_patch_connect_mode_token()
 
 # DB integration — graceful fallback if DB layer can't be initialized.
 # Import/init failures must be visible (not silent) so ops can tell why the
@@ -98,6 +193,23 @@ DEFAULT_PROFILE = "car_inspection"
 #   lk agent update-secrets --secrets "AGENT_MODE=realtime"
 # ───────────────────────────────────────────────────────────
 AGENT_MODE = os.environ.get("AGENT_MODE", "realtime")
+
+
+# ── STT provider ──────────────────────────────────────────
+# AGENT_STT_PROVIDER 控制 Deepgram nova-2 STT 從哪裡取得：
+#   "inference" — 透過 LiveKit Inference gateway（預設，Cloud 部署用）
+#   "deepgram"  — 直接用 DEEPGRAM_API_KEY 連 Deepgram（本機 Try button 用，
+#                 避免吃到 free plan 的 STT concurrency quota）
+#
+# routes_test.py spawn local connect subprocess 時會注入
+# AGENT_STT_PROVIDER=deepgram；Cloud secrets 不應設此變數，
+# 以保留原本 LiveKit Inference 的 multi-provider / fallback 彈性。
+# ───────────────────────────────────────────────────────────
+def _build_stt():
+    provider = os.environ.get("AGENT_STT_PROVIDER", "inference").strip().lower()
+    if provider == "deepgram":
+        return deepgram.STT(model="nova-2", language="zh-TW")
+    return inference.STT(model="deepgram/nova-2", language="zh-TW")
 
 
 def _get_cli_profile_name() -> str:
@@ -225,7 +337,7 @@ async def entrypoint(ctx: JobContext):
         # https://docs.livekit.io/agents/models/realtime/plugins/gemini/#turn-detection
         session = AgentSession(
             vad=vad,
-            stt=inference.STT(model="deepgram/nova-2", language="zh-TW"),
+            stt=_build_stt(),
             turn_handling=TurnHandlingOptions(
                 turn_detection=MultilingualModel(),
             ),
@@ -254,7 +366,7 @@ async def entrypoint(ctx: JobContext):
             stt=stt.FallbackAdapter(
                 [
                     inference.STT(model="elevenlabs/scribe_v2_realtime", language="zh"),
-                    inference.STT(model="deepgram/nova-2", language="zh-TW"),
+                    _build_stt(),
                 ]
             ),
             tts=tts.FallbackAdapter(
@@ -380,15 +492,23 @@ async def entrypoint(ctx: JobContext):
 
     await ctx.connect()
 
-    await session.start(
-        agent=PhoneAgent(),
-        room=ctx.room,
-        room_options=room_io.RoomOptions(
-            audio_input=room_io.AudioInputOptions(
-                noise_cancellation=noise_cancellation.BVC(),
+    try:
+        await session.start(
+            agent=PhoneAgent(),
+            room=ctx.room,
+            room_options=room_io.RoomOptions(
+                audio_input=room_io.AudioInputOptions(
+                    noise_cancellation=noise_cancellation.BVC(),
+                ),
             ),
-        ),
-    )
+        )
+    except Exception:
+        logger.exception(
+            "session.start() failed — profile=%s mode=%s room=%s",
+            profile_name, AGENT_MODE,
+            ctx.room.name if ctx.room else "None",
+        )
+        raise
 
 if __name__ == "__main__":
     cli.run_app(WorkerOptions(entrypoint_fnc=entrypoint, agent_name="voice-assistant"))

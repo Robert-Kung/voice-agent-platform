@@ -99,20 +99,30 @@ def get_livekit_link_endpoint(
     session_id: str,
     db: Session = Depends(get_db),
 ):
-    """Generate a LiveKit Cloud dashboard URL for this session's room recording."""
+    """Return a LiveKit Cloud Agents dashboard URL the operator can open to find
+    this session by room name. With LIVEKIT_CLOUD_PROJECT set, the URL deep-links
+    into that project's Agents page; otherwise it points at the global Agents
+    page and the response includes a note nudging the caller to set the env var."""
     sess = session_store.get_session(db, session_id)
     if sess is None:
         logger.warning("livekit-link 404: id=%s", session_id)
         raise HTTPException(status_code=404, detail="Session not found")
 
-    # LiveKit Cloud URL pattern:
-    # https://cloud.livekit.io/projects/{project}/sessions?room={room_name}
     project = os.environ.get("LIVEKIT_CLOUD_PROJECT", "")
     room_encoded = quote(sess.room_name, safe="")
     if project:
-        url = f"https://cloud.livekit.io/projects/{quote(project, safe='')}/sessions?room={room_encoded}"
+        project_encoded = quote(project, safe="")
+        url = f"https://cloud.livekit.io/projects/{project_encoded}/agents"
+        note = (
+            "Opened the project Agents dashboard. "
+            "Use the room name to find the session in Logs/Insights."
+        )
     else:
-        url = f"https://cloud.livekit.io/sessions?room={room_encoded}"
+        url = "https://cloud.livekit.io/agents"
+        note = (
+            "Set LIVEKIT_CLOUD_PROJECT for a direct project dashboard link. "
+            "Then search by room name."
+        )
 
     logger.info(
         "livekit-link: id=%s room=%s project_env=%s",
@@ -124,5 +134,6 @@ def get_livekit_link_endpoint(
         "session_id": session_id,
         "room_name": sess.room_name,
         "url": url,
-        "note": "Set LIVEKIT_CLOUD_PROJECT env var for a direct project link.",
+        "note": note,
+        "room_query": room_encoded,
     }

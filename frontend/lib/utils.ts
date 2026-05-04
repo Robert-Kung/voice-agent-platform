@@ -91,6 +91,39 @@ export function getStyles(appConfig: AppConfig) {
 }
 
 /**
+ * Get a token source for local development (reads ?profile= from URL)
+ * @param appConfig - The app configuration
+ * @returns A token source that POSTs to /api/token with profile in body
+ */
+export function getLocalTokenSource(appConfig: AppConfig) {
+  return TokenSource.custom(async () => {
+    const urlParams = new URLSearchParams(window.location.search);
+    const room = urlParams.get('room') || undefined;
+    const profile = urlParams.get('profile') || appConfig.agentProfile || undefined;
+
+    // In connect mode (?room=xxx), agent is already in the room — skip agent dispatch
+    const roomConfig =
+      !room && appConfig.agentName ? { agents: [{ agent_name: appConfig.agentName }] } : undefined;
+
+    try {
+      const res = await fetch('/api/token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ room_config: roomConfig, profile, room }),
+      });
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(`Token error ${res.status}: ${text}`);
+      }
+      return await res.json();
+    } catch (error) {
+      console.error('Error fetching connection details:', error);
+      throw new Error('Error fetching connection details!');
+    }
+  });
+}
+
+/**
  * Get a token source for a sandboxed LiveKit session
  * @param appConfig - The app configuration
  * @returns A token source for a sandboxed LiveKit session
@@ -121,6 +154,10 @@ export function getSandboxTokenSource(appConfig: AppConfig) {
           profile,
         }),
       });
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(`Token error ${res.status}: ${text}`);
+      }
       return await res.json();
     } catch (error) {
       console.error('Error fetching connection details:', error);

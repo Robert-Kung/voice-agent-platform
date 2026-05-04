@@ -17,13 +17,13 @@ const LIVEKIT_URL = process.env.LIVEKIT_URL;
 // don't cache the results
 export const revalidate = 0;
 
-export async function POST(req: Request) {
-  if (process.env.NODE_ENV !== 'development') {
-    throw new Error(
-      'THIS API ROUTE IS INSECURE. DO NOT USE THIS ROUTE IN PRODUCTION WITHOUT AN AUTHENTICATION LAYER.'
-    );
-  }
+// Same whitelist as the API agent-runner uses for room names (api/routes_test.py).
+// 1–64 chars, alphanumerics plus _ and -.
+const ROOM_NAME_RE = /^[A-Za-z0-9_-]{1,64}$/;
 
+export async function POST(req: Request) {
+  // Auth is enforced by middleware.ts (ADMIN_PASSWORD + session cookie).
+  // If ADMIN_PASSWORD is unset the middleware passes all requests through (local dev).
   try {
     if (LIVEKIT_URL === undefined) {
       throw new Error('LIVEKIT_URL is not defined');
@@ -35,10 +35,26 @@ export async function POST(req: Request) {
       throw new Error('LIVEKIT_API_SECRET is not defined');
     }
 
-    // Parse room config from request body.
-    const body = await req.json();
-    // Recreate the RoomConfiguration object from JSON object.
-    const roomConfig = RoomConfiguration.fromJson(body?.room_config, { ignoreUnknownFields: true });
+    // Parse JSON body. Surface parse errors as 400 instead of silently
+    // treating the request as `{}` — this makes client bugs debuggable.
+    let body: Record<string, unknown> = {};
+    try {
+      const raw = await req.text();
+      if (raw.trim().length > 0) {
+        body = JSON.parse(raw);
+      }
+    } catch {
+      return new NextResponse('Invalid JSON body', { status: 400 });
+    }
+    // fromJson throws if given undefined/null — guard with an empty object.
+    // RoomConfiguration.fromJson expects protobuf JsonValue, which is too
+    // narrow for the unstructured body we accept; cast through unknown.
+    const roomConfigInput = (body?.room_config ?? {}) as Parameters<
+      typeof RoomConfiguration.fromJson
+    >[0];
+    const roomConfig = RoomConfiguration.fromJson(roomConfigInput, {
+      ignoreUnknownFields: true,
+    });
 
     // If a profile is specified, set it as room metadata so the agent can
     // dynamically load the correct YAML profile at runtime.
@@ -50,7 +66,19 @@ export async function POST(req: Request) {
     // Generate participant token
     const participantName = 'user';
     const participantIdentity = `voice_assistant_user_${Math.floor(Math.random() * 10_000)}`;
-    const roomName = `voice_assistant_room_${Math.floor(Math.random() * 10_000)}`;
+    // Allow `body.room` override (POST JSON, not a query param) for connect-mode
+    // local testing — the agent is already in that room and the browser tab opened
+    // by Try needs to join the same one. Validate against a whitelist so callers
+    // can't smuggle arbitrary strings into the LiveKit grant.
+    let roomName: string;
+    if (body?.room && typeof body.room === 'string') {
+      if (!ROOM_NAME_RE.test(body.room)) {
+        return new NextResponse('Invalid room name', { status: 400 });
+      }
+      roomName = body.room;
+    } else {
+      roomName = `voice_assistant_room_${Math.floor(Math.random() * 10_000)}`;
+    }
 
     const participantToken = await createParticipantToken(
       { identity: participantIdentity, name: participantName },

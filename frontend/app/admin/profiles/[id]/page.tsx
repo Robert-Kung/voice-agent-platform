@@ -508,6 +508,7 @@ export default function ProfileDetailPage() {
 
         <div className="flex items-center gap-3">
           <button
+            type="button"
             onClick={handleSave}
             disabled={saving || (!isDirty && !isNew)}
             className="bg-primary text-primary-foreground rounded-md px-4 py-2 text-sm font-medium transition-opacity hover:opacity-90 disabled:opacity-50"
@@ -516,7 +517,7 @@ export default function ProfileDetailPage() {
           </button>
           {!isNew && (
             <Link
-              href={`/?profile=${profile.name}`}
+              href={`/?profile=${encodeURIComponent(profile.name)}`}
               className="border-border hover:bg-foreground/5 rounded-md border px-4 py-2 text-sm"
             >
               Try this profile →
