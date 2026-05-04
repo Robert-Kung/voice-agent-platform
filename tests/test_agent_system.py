@@ -101,7 +101,7 @@ class TestProfileLoading:
         assert "restaurant" in profiles
 
     def test_load_valid_profile(self, car_profile):
-        assert car_profile["name"] == "車容坊加油站"
+        assert car_profile["name"] == "汽車代檢中心"
         assert "instructions" in car_profile
         assert "services" in car_profile
         assert "qa_data" in car_profile
@@ -129,6 +129,7 @@ class TestToolRegistry:
     def test_registry_contains_all_expected_tools(self):
         expected = {
             "get_current_datetime",
+            "get_current_time",
             "check_business_status",
             "lookup_qa",
             "transfer_to_human",
@@ -267,9 +268,9 @@ class TestLookupQA:
         for item in qa_data:
             all_keywords.extend(item["keywords"])
 
-        # 確保常見問題都有對應
+        # 確保常見問題都有對應 — QA 內容隨 profile 演進，用 substring 檢查比較有彈性
         assert "行照" in all_keywords
-        assert "費用" in all_keywords
+        assert any("費用" in k for k in all_keywords), "expected at least one 費用-related keyword"
         assert "營業時間" in all_keywords
         assert "流程" in all_keywords
 
@@ -290,7 +291,7 @@ class TestLookupQA:
 class TestAgentClassCreation:
     def test_creates_class_with_correct_name(self, car_profile):
         AgentClass = create_agent_class(car_profile)
-        assert "車容坊" in AgentClass.__name__
+        assert "汽車代檢中心" in AgentClass.__name__
 
     def test_class_has_declared_tools_only(self, minimal_profile):
         AgentClass = create_agent_class(minimal_profile)
@@ -321,32 +322,38 @@ class TestToolIsolation:
             tools = build_tools_for_agent(profile)
             profiles_tools[name] = set(tools.keys())
 
-        # 車廠有天氣，牙醫沒有
-        assert "check_weather" in profiles_tools["car_inspection"]
-        assert "check_weather" not in profiles_tools["dental_clinic"]
+        # 車廠最小化（連 lookup_qa 都改用 system instructions 嵌入）
+        assert "get_current_time" in profiles_tools["car_inspection"]
+        assert "transfer_to_human" in profiles_tools["car_inspection"]
 
         # 牙醫有預約，車廠和餐廳沒有
         assert "book_appointment" in profiles_tools["dental_clinic"]
         assert "book_appointment" not in profiles_tools["car_inspection"]
+        assert "book_appointment" not in profiles_tools["restaurant"]
 
-        # 餐廳有菜單搜尋和價格計算
+        # 餐廳有菜單搜尋和價格計算，其他 profile 沒有
         assert "search_menu" in profiles_tools["restaurant"]
         assert "calculate_price" in profiles_tools["restaurant"]
         assert "search_menu" not in profiles_tools["car_inspection"]
+        assert "search_menu" not in profiles_tools["dental_clinic"]
 
     def test_tool_configs_are_independent(self):
-        """不同 profile 的同名 tool 應有各自的 config。"""
-        car = load_profile("car_inspection")
-        dental = load_profile("dental_clinic")
+        """不同 profile 的同名 tool 應有各自的 config。
 
-        car_tools = build_tools_for_agent(car)
+        car_inspection 把 QA 嵌進 system instructions（降延遲），不掛 lookup_qa；
+        改用 dental + restaurant 驗證隔離。
+        """
+        dental = load_profile("dental_clinic")
+        restaurant = load_profile("restaurant")
+
         dental_tools = build_tools_for_agent(dental)
+        restaurant_tools = build_tools_for_agent(restaurant)
 
         # 兩者都有 lookup_qa，但底層 qa_data 不同
-        assert "lookup_qa" in car_tools
         assert "lookup_qa" in dental_tools
+        assert "lookup_qa" in restaurant_tools
         # 它們是不同的物件
-        assert car_tools["lookup_qa"] is not dental_tools["lookup_qa"]
+        assert dental_tools["lookup_qa"] is not restaurant_tools["lookup_qa"]
 
 
 # ═══════════════════════════════════════════════════════════

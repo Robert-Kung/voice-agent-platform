@@ -15,8 +15,14 @@ from db.models import Base
 
 
 @pytest.fixture()
-def client():
-    """Create a TestClient with an in-memory DB override (StaticPool shares connection)."""
+def client(monkeypatch):
+    """Create a TestClient with an in-memory DB override (StaticPool shares connection).
+
+    ADMIN_API_TOKEN is cleared so write endpoints run in dev-mode (no auth).
+    Auth-enforcement tests use the `secured_client` fixture below instead.
+    """
+    monkeypatch.delenv("ADMIN_API_TOKEN", raising=False)
+
     engine = create_engine(
         "sqlite:///:memory:",
         connect_args={"check_same_thread": False},
