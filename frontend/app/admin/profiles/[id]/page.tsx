@@ -36,7 +36,31 @@ const TIMEZONES = [
   'UTC',
 ];
 
-type ToolEntry = { name: string; config?: unknown };
+type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
+type ParamType = 'string' | 'number' | 'integer' | 'boolean';
+
+type HttpToolParam = {
+  name: string;
+  type: ParamType;
+  required?: boolean;
+  description?: string;
+};
+
+// Built-in tools have just { name, config? }; Tier 3 HTTP tools also carry
+// endpoint/method/auth/parameters. Backend distinguishes by `endpoint` presence.
+type ToolEntry = {
+  name: string;
+  config?: unknown;
+  description?: string;
+  endpoint?: string;
+  method?: HttpMethod;
+  auth_header?: string;
+  timeout_seconds?: number;
+  parameters?: HttpToolParam[];
+};
+
+const HTTP_METHODS: HttpMethod[] = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'];
+const PARAM_TYPES: ParamType[] = ['string', 'number', 'integer', 'boolean'];
 
 interface KnownConfig {
   name?: string;
@@ -192,6 +216,69 @@ export default function ProfileDetailPage() {
     });
   };
 
+  // ── Tier 3 HTTP tool CRUD ────────────────────────────────
+  const addHttpTool = () => {
+    setKnown((prev) => {
+      const tools = prev.tools || [];
+      const placeholder: ToolEntry = {
+        name: `http_tool_${tools.filter((t) => !!t.endpoint).length + 1}`,
+        description: '',
+        endpoint: 'https://',
+        method: 'POST',
+        parameters: [],
+      };
+      return { ...prev, tools: [...tools, placeholder] };
+    });
+  };
+
+  const updateHttpTool = (idx: number, patch: Partial<ToolEntry>) => {
+    setKnown((prev) => {
+      const tools = [...(prev.tools || [])];
+      tools[idx] = { ...tools[idx], ...patch };
+      return { ...prev, tools };
+    });
+  };
+
+  const removeHttpTool = (idx: number) => {
+    setKnown((prev) => ({
+      ...prev,
+      tools: (prev.tools || []).filter((_, i) => i !== idx),
+    }));
+  };
+
+  const updateHttpToolParam = (
+    toolIdx: number,
+    paramIdx: number,
+    patch: Partial<HttpToolParam>
+  ) => {
+    setKnown((prev) => {
+      const tools = [...(prev.tools || [])];
+      const params = [...(tools[toolIdx].parameters || [])];
+      params[paramIdx] = { ...params[paramIdx], ...patch };
+      tools[toolIdx] = { ...tools[toolIdx], parameters: params };
+      return { ...prev, tools };
+    });
+  };
+
+  const addHttpToolParam = (toolIdx: number) => {
+    setKnown((prev) => {
+      const tools = [...(prev.tools || [])];
+      const params = [...(tools[toolIdx].parameters || [])];
+      params.push({ name: '', type: 'string' });
+      tools[toolIdx] = { ...tools[toolIdx], parameters: params };
+      return { ...prev, tools };
+    });
+  };
+
+  const removeHttpToolParam = (toolIdx: number, paramIdx: number) => {
+    setKnown((prev) => {
+      const tools = [...(prev.tools || [])];
+      const params = (tools[toolIdx].parameters || []).filter((_, i) => i !== paramIdx);
+      tools[toolIdx] = { ...tools[toolIdx], parameters: params };
+      return { ...prev, tools };
+    });
+  };
+
   const handleTry = async () => {
     if (!profile || isNew) return;
     if (isDirty) {
@@ -280,7 +367,14 @@ export default function ProfileDetailPage() {
   if (error) return <div className="text-red-500">Error: {error}</div>;
   if (!profile) return <div>Profile not found.</div>;
 
-  const selectedTools = new Set((known.tools || []).map((t) => t.name));
+  // Built-in tools = entries without `endpoint`; Tier 3 HTTP tools = entries with `endpoint`
+  const builtinSelected = new Set(
+    (known.tools || []).filter((t) => !t.endpoint).map((t) => t.name)
+  );
+  const httpTools = (known.tools || []).filter((t) => !!t.endpoint);
+  const httpToolIndices = (known.tools || [])
+    .map((t, i) => (t.endpoint ? i : -1))
+    .filter((i) => i >= 0);
   const inputClass =
     'border-border bg-background text-foreground w-full rounded-md border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40';
   const textareaClass = `${inputClass} font-sans`;
@@ -462,53 +556,233 @@ export default function ProfileDetailPage() {
           </div>
         </section>
 
-        {/* Tools */}
+        {/* Built-in Tools (Tier 1) */}
         <section className="border-border space-y-3 rounded-md border p-4">
           <div className="flex items-center justify-between">
             <h3 className="text-foreground/70 text-sm font-semibold tracking-wide uppercase">
-              Tools
+              Built-in Tools
             </h3>
             <span className="text-foreground/60 text-xs">
-              {selectedTools.size} / {availableTools.length} 啟用
+              {builtinSelected.size} / {availableTools.length} 啟用
             </span>
           </div>
+          <p className="text-foreground/60 text-xs">
+            內建通用工具。<code>lookup_qa</code> 與 <code>transfer_to_human</code> 由 QA / Handoff
+            設定自動啟用，不在這裡勾選。
+          </p>
           {availableTools.length === 0 ? (
             <p className="text-foreground/60 text-sm">無法載入工具清單</p>
           ) : (
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
-              {availableTools.map((toolName) => {
-                const checked = selectedTools.has(toolName);
-                const customConfig = (known.tools || []).find(
-                  (t) => t.name === toolName && t.config !== undefined
-                );
-                return (
-                  <label
-                    key={toolName}
-                    className={`flex cursor-pointer items-start gap-2 rounded-md border px-3 py-2 text-sm transition-colors ${
-                      checked
-                        ? 'border-primary/50 bg-primary/5'
-                        : 'border-border hover:bg-foreground/5'
-                    }`}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={checked}
-                      onChange={() => toggleTool(toolName)}
-                      className="mt-0.5"
-                    />
-                    <span className="flex-1">
-                      <span className="font-mono text-xs">{toolName}</span>
-                      {customConfig && (
-                        <span className="ml-1 text-xs text-amber-600 dark:text-amber-400">
-                          (custom config)
-                        </span>
-                      )}
-                    </span>
-                  </label>
-                );
-              })}
+              {availableTools
+                .filter((n) => n !== 'lookup_qa' && n !== 'transfer_to_human')
+                .map((toolName) => {
+                  const checked = builtinSelected.has(toolName);
+                  return (
+                    <label
+                      key={toolName}
+                      className={`flex cursor-pointer items-start gap-2 rounded-md border px-3 py-2 text-sm transition-colors ${
+                        checked
+                          ? 'border-primary/50 bg-primary/5'
+                          : 'border-border hover:bg-foreground/5'
+                      }`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={() => toggleTool(toolName)}
+                        className="mt-0.5"
+                      />
+                      <span className="flex-1">
+                        <span className="font-mono text-xs">{toolName}</span>
+                      </span>
+                    </label>
+                  );
+                })}
             </div>
           )}
+        </section>
+
+        {/* Custom HTTP Tools (Tier 3) */}
+        <section className="border-border space-y-3 rounded-md border p-4">
+          <div className="flex items-center justify-between">
+            <h3 className="text-foreground/70 text-sm font-semibold tracking-wide uppercase">
+              Custom HTTP Tools
+            </h3>
+            <button
+              type="button"
+              onClick={addHttpTool}
+              className="border-border hover:bg-foreground/5 rounded border px-2 py-1 text-xs"
+            >
+              + Add HTTP Tool
+            </button>
+          </div>
+          <p className="text-foreground/60 text-xs">
+            把對話結果送到外部 API（例：通報故障、開單、查 CRM）。Endpoint 必須是公網 HTTPS；secret
+            用 <code>{'${ENV_VAR}'}</code> 從環境變數取得。
+          </p>
+          {httpTools.length === 0 && (
+            <p className="text-foreground/60 rounded-md border border-dashed py-4 text-center text-sm">
+              尚未設定自定義 HTTP 工具
+            </p>
+          )}
+          {httpTools.map((tool, htIdx) => {
+            const realIdx = httpToolIndices[htIdx];
+            return (
+              <div
+                key={realIdx}
+                className="border-border bg-foreground/5 space-y-3 rounded-md border p-3"
+              >
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    placeholder="tool_name (lowercase, snake_case)"
+                    value={tool.name}
+                    onChange={(e) => updateHttpTool(realIdx, { name: e.target.value })}
+                    className={inputClass}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => removeHttpTool(realIdx)}
+                    className="border-border hover:bg-foreground/10 shrink-0 rounded border px-2 py-1 text-xs text-red-600 dark:text-red-400"
+                  >
+                    Remove
+                  </button>
+                </div>
+
+                <div>
+                  <label className="text-foreground/70 mb-1 block text-xs">
+                    Description (給 LLM 看)
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="例：通報電梯故障給維修人員"
+                    value={tool.description || ''}
+                    onChange={(e) => updateHttpTool(realIdx, { description: e.target.value })}
+                    className={inputClass}
+                  />
+                </div>
+
+                <div className="grid grid-cols-1 gap-2 md:grid-cols-[1fr_120px]">
+                  <div>
+                    <label className="text-foreground/70 mb-1 block text-xs">Endpoint URL</label>
+                    <input
+                      type="text"
+                      placeholder="https://api.example.com/path"
+                      value={tool.endpoint || ''}
+                      onChange={(e) => updateHttpTool(realIdx, { endpoint: e.target.value })}
+                      className={inputClass}
+                    />
+                  </div>
+                  <div>
+                    <label className="text-foreground/70 mb-1 block text-xs">Method</label>
+                    <select
+                      value={tool.method || 'POST'}
+                      onChange={(e) =>
+                        updateHttpTool(realIdx, { method: e.target.value as HttpMethod })
+                      }
+                      className={inputClass}
+                    >
+                      {HTTP_METHODS.map((m) => (
+                        <option key={m} value={m}>
+                          {m}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="text-foreground/70 mb-1 block text-xs">
+                    Auth Header (optional, 支援 <code>{'${ENV_VAR}'}</code>)
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="Bearer ${MY_API_KEY}"
+                    value={tool.auth_header || ''}
+                    onChange={(e) => updateHttpTool(realIdx, { auth_header: e.target.value })}
+                    className={inputClass + ' font-mono text-xs'}
+                  />
+                </div>
+
+                <div>
+                  <div className="mb-1 flex items-center justify-between">
+                    <label className="text-foreground/70 block text-xs">Parameters</label>
+                    <button
+                      type="button"
+                      onClick={() => addHttpToolParam(realIdx)}
+                      className="border-border hover:bg-foreground/5 rounded border px-2 py-0.5 text-xs"
+                    >
+                      + Param
+                    </button>
+                  </div>
+                  {(tool.parameters || []).length === 0 && (
+                    <p className="text-foreground/50 text-xs">尚無參數</p>
+                  )}
+                  <div className="space-y-2">
+                    {(tool.parameters || []).map((param, pIdx) => (
+                      <div
+                        key={pIdx}
+                        className="border-border grid grid-cols-1 gap-2 rounded-md border p-2 text-xs md:grid-cols-[1fr_100px_1fr_70px_auto]"
+                      >
+                        <input
+                          type="text"
+                          placeholder="param_name"
+                          value={param.name}
+                          onChange={(e) =>
+                            updateHttpToolParam(realIdx, pIdx, { name: e.target.value })
+                          }
+                          className="border-border bg-background text-foreground rounded border px-2 py-1 font-mono text-xs"
+                        />
+                        <select
+                          value={param.type}
+                          onChange={(e) =>
+                            updateHttpToolParam(realIdx, pIdx, {
+                              type: e.target.value as ParamType,
+                            })
+                          }
+                          className="border-border bg-background text-foreground rounded border px-2 py-1 text-xs"
+                        >
+                          {PARAM_TYPES.map((t) => (
+                            <option key={t} value={t}>
+                              {t}
+                            </option>
+                          ))}
+                        </select>
+                        <input
+                          type="text"
+                          placeholder="description（給 LLM 提示）"
+                          value={param.description || ''}
+                          onChange={(e) =>
+                            updateHttpToolParam(realIdx, pIdx, { description: e.target.value })
+                          }
+                          className="border-border bg-background text-foreground rounded border px-2 py-1 text-xs"
+                        />
+                        <label className="flex items-center justify-center gap-1">
+                          <input
+                            type="checkbox"
+                            checked={!!param.required}
+                            onChange={(e) =>
+                              updateHttpToolParam(realIdx, pIdx, { required: e.target.checked })
+                            }
+                          />
+                          required
+                        </label>
+                        <button
+                          type="button"
+                          onClick={() => removeHttpToolParam(realIdx, pIdx)}
+                          className="text-foreground/60 px-1 hover:text-red-600"
+                          title="刪除參數"
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            );
+          })}
         </section>
 
         {/* Advanced JSON */}
