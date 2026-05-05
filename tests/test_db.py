@@ -220,7 +220,35 @@ class TestYamlImport:
             assert isinstance(data, dict)
             assert "instructions" in data
 
-    def test_import_skips_nonempty_db(self, db):
-        profile_store.create_profile(db, name="existing", display_name="Existing")
+    def test_import_does_not_overwrite_existing(self, db):
+        """Existing rows are never replaced; only missing YAMLs get imported."""
+        # Pre-create a row with the same name as a YAML profile — it must be left alone.
+        profile_store.create_profile(
+            db, name="car_inspection", display_name="Custom Override"
+        )
+        existing_before = (
+            db.query(profile_store.Profile)
+            .filter(profile_store.Profile.name == "car_inspection")
+            .one()
+        )
+        original_display = existing_before.display_name
+
         count = import_yaml_profiles(db)
-        assert count == 0
+
+        # Other YAMLs (dental, restaurant, elevator) get imported; car_inspection skipped.
+        assert count >= 1, "expected at least one YAML to be imported"
+        existing_after = (
+            db.query(profile_store.Profile)
+            .filter(profile_store.Profile.name == "car_inspection")
+            .one()
+        )
+        assert existing_after.display_name == original_display, (
+            "existing row was overwritten — DB should always win"
+        )
+
+    def test_import_only_missing(self, db):
+        """Calling twice should be idempotent — second call imports nothing new."""
+        first = import_yaml_profiles(db)
+        second = import_yaml_profiles(db)
+        assert first > 0
+        assert second == 0

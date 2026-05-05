@@ -36,34 +36,38 @@ def _yaml_to_profile(yaml_path: pathlib.Path) -> dict:
 
 
 def import_yaml_profiles(db_session: Session) -> int:
-    """Import all YAML profiles into DB if profiles table is empty.
+    """Import any YAML profiles missing from DB.
+
+    Existing rows are NOT overwritten (DB is source of truth once an admin
+    has edited a profile). Only new YAML files (not yet in DB by name) get
+    imported. This way dropping a new YAML into profiles/ + restarting the
+    API auto-syncs it without disturbing edited rows.
 
     Returns the number of profiles imported.
     """
-    existing_count = db_session.query(Profile).count()
-    if existing_count > 0:
-        logger.info("Profiles table has %d rows, skipping YAML import.", existing_count)
-        return 0
-
     yaml_files = sorted(PROFILES_DIR.glob("*.yaml"))
     if not yaml_files:
         logger.warning("No YAML profiles found in %s", PROFILES_DIR)
         return 0
 
+    existing_names = {p.name for p in db_session.query(Profile).all()}
+
     imported = 0
     for yaml_path in yaml_files:
         if yaml_path.stem == "example":
             continue  # skip example profile
+        if yaml_path.stem in existing_names:
+            continue  # DB already has it — never overwrite
         try:
             kwargs = _yaml_to_profile(yaml_path)
             db_session.add(Profile(**kwargs))
             imported += 1
-            logger.info("Imported profile: %s (%s)", kwargs["name"], kwargs["display_name"])
+            logger.info("Imported new YAML profile: %s (%s)", kwargs["name"], kwargs["display_name"])
         except Exception:
             logger.exception("Failed to import %s", yaml_path)
 
-    db_session.commit()
-    logger.info("Imported %d profiles from YAML.", imported)
+    if imported:
+        db_session.commit()
     return imported
 
 
