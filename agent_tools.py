@@ -4,15 +4,22 @@ Agent Tools Registry — 模組化 Tool 工廠
 工具分三層（見 CLAUDE.md）：
   - Tier 1（內建原語）：get_current_time
   - Tier 2（profile 設定）：lookup_qa（qa_mode=tool 時掛）、transfer_to_human（human_operator.enabled 時掛）
-  - Tier 3（自定義 HTTP）：見 make_http_tool（待實作）
+  - Tier 3（自定義 HTTP）：make_http_tool — 由 profile.tools 宣告 endpoint 即可
 
 新增 Tier 1 工具的條件極嚴格：必須是「每個 agent 都可能需要」的通用功能。
-新增業務功能請走 Tier 3（HTTP tool），不要進這檔。
+新增業務功能請走 Tier 3，不要進這檔。
 """
 
+import asyncio
 import datetime
+import ipaddress
 import logging
+import os
+import re
+from urllib.parse import urlparse
 from zoneinfo import ZoneInfo
+
+import aiohttp
 
 from livekit.agents.llm import function_tool
 
@@ -207,6 +214,178 @@ def make_transfer_to_human(profile: dict, config: dict):
     return transfer_to_human
 
 
+# ═══════════════════════════════════════════════════════════
+# Tier 3 — Generic HTTP Tool
+# ═══════════════════════════════════════════════════════════
+
+# 工具/參數名稱必須是合法的 Python identifier，且符合 LLM function-call schema
+_VALID_TOOL_NAME = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
+_VALID_PARAM_NAME = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
+# ${VAR_NAME} 替換 — 大寫 + 數字 + 底線
+_ENV_VAR_PATTERN = re.compile(r"\$\{([A-Z][A-Z0-9_]*)\}")
+_ALLOWED_HTTP_METHODS = {"GET", "POST", "PUT", "PATCH", "DELETE"}
+_ALLOWED_PARAM_TYPES = {"string", "number", "integer", "boolean"}
+_DEFAULT_HTTP_TIMEOUT_S = 10.0
+_BLOCKED_HOSTNAMES = frozenset({
+    "localhost",
+    "metadata.google.internal",      # GCE metadata
+    "metadata",
+    "169.254.169.254",                # AWS / GCP metadata IP literal
+})
+
+
+def _substitute_env(text: str) -> str:
+    """把 '${ENV_NAME}' 替換成環境變數值；找不到的 var 替換為空字串。"""
+    def repl(m: re.Match) -> str:
+        var = m.group(1)
+        val = os.environ.get(var, "")
+        if not val:
+            logger.warning("env var '%s' is empty/unset (referenced in HTTP tool config)", var)
+        return val
+    return _ENV_VAR_PATTERN.sub(repl, text)
+
+
+def _validate_endpoint(url: str) -> None:
+    """阻擋 SSRF：scheme 必須 http/https；hostname 不能是 localhost / 私網 IP / metadata。
+
+    純 IP 立刻檢查；hostname 由 caller 或 runtime DNS 處理（不在 load 時做 DNS lookup
+    以免拖慢 profile 載入；如有需要可日後加 runtime resolve 檢查）。
+    """
+    if not url:
+        raise ValueError("endpoint is required")
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        raise ValueError(f"endpoint scheme must be http/https, got '{parsed.scheme}'")
+    host = (parsed.hostname or "").lower()
+    if not host:
+        raise ValueError("endpoint must have a hostname")
+    if host in _BLOCKED_HOSTNAMES:
+        raise ValueError(f"endpoint hostname '{host}' is blocked")
+    # IP literal — 立刻擋私網 / loopback / link-local / multicast
+    try:
+        ip = ipaddress.ip_address(host)
+        if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_multicast or ip.is_reserved:
+            raise ValueError(f"endpoint resolves to non-public IP literal: {ip}")
+    except ValueError as e:
+        # 不是 IP literal — 是 hostname，pass
+        if "non-public IP" in str(e):
+            raise
+
+
+def make_http_tool(profile: dict, config: dict):
+    """
+    Tier 3 通用 HTTP tool。Admin UI 直接設定，不需寫 Python。
+
+    YAML 範例：
+        - name: report_elevator_failure
+          description: 當住戶回報電梯故障時呼叫此工具
+          endpoint: https://api.example.com/elevator/report
+          method: POST                 # 預設 POST
+          auth_header: "Bearer ${ELEVATOR_API_KEY}"
+          timeout_seconds: 10
+          parameters:
+            - name: building
+              type: string
+              required: true
+              description: 棟別（A 棟、B 棟...）
+            - name: symptom
+              type: string
+              description: 故障狀況描述
+
+    回傳格式（給 LLM）：
+        成功：{"success": true, ...api 回傳內容}
+        失敗：{"success": false, "error": "...", "status": 5xx?}
+    """
+    name = (config.get("name") or "").strip()
+    if not _VALID_TOOL_NAME.match(name):
+        raise ValueError(f"invalid HTTP tool name '{name}' (must match {_VALID_TOOL_NAME.pattern})")
+
+    description = config.get("description") or f"呼叫 {name} API"
+    endpoint = (config.get("endpoint") or "").strip()
+    _validate_endpoint(endpoint)
+
+    method = config.get("method", "POST").upper()
+    if method not in _ALLOWED_HTTP_METHODS:
+        raise ValueError(f"invalid method '{method}' (allowed: {_ALLOWED_HTTP_METHODS})")
+
+    timeout = float(config.get("timeout_seconds") or _DEFAULT_HTTP_TIMEOUT_S)
+    if timeout <= 0 or timeout > 60:
+        raise ValueError(f"timeout_seconds must be in (0, 60], got {timeout}")
+
+    auth_header_raw = config.get("auth_header") or ""
+    auth_header_resolved = _substitute_env(auth_header_raw) if auth_header_raw else ""
+
+    # JSON schema for LLM
+    properties: dict = {}
+    required: list[str] = []
+    for p in config.get("parameters", []) or []:
+        pname = (p.get("name") or "").strip()
+        if not _VALID_PARAM_NAME.match(pname):
+            raise ValueError(f"invalid parameter name '{pname}' for tool '{name}'")
+        ptype = p.get("type", "string")
+        if ptype not in _ALLOWED_PARAM_TYPES:
+            raise ValueError(f"invalid parameter type '{ptype}' for '{pname}' (allowed: {_ALLOWED_PARAM_TYPES})")
+        prop_schema: dict = {"type": ptype}
+        if p.get("description"):
+            prop_schema["description"] = p["description"]
+        properties[pname] = prop_schema
+        if p.get("required"):
+            required.append(pname)
+
+    parameters_schema = {
+        "type": "object",
+        "properties": properties,
+        "required": required,
+        "additionalProperties": False,
+    }
+
+    async def _parse_response(resp: aiohttp.ClientResponse) -> dict:
+        if resp.status >= 400:
+            text = await resp.text()
+            return {"success": False, "status": resp.status, "error": text[:500]}
+        try:
+            data = await resp.json()
+            if isinstance(data, dict):
+                return {"success": True, **data}
+            return {"success": True, "data": data}
+        except (ValueError, aiohttp.ContentTypeError):
+            text = await resp.text()
+            return {"success": True, "text": text[:500]}
+
+    async def _handler(self, **kwargs) -> dict:
+        """LLM 呼叫此工具時，kwargs 是 LLM 從 schema 推導的參數。"""
+        headers = {"Content-Type": "application/json"}
+        if auth_header_resolved:
+            headers["Authorization"] = auth_header_resolved
+
+        logger.info("http_tool '%s' → %s %s (params=%s)", name, method, endpoint, list(kwargs.keys()))
+        try:
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=timeout)) as session:
+                kwargs_clean = {k: v for k, v in kwargs.items() if v is not None}
+                if method == "GET":
+                    async with session.request(method, endpoint, headers=headers, params=kwargs_clean) as resp:
+                        return await _parse_response(resp)
+                else:
+                    async with session.request(method, endpoint, headers=headers, json=kwargs_clean) as resp:
+                        return await _parse_response(resp)
+        except asyncio.TimeoutError:
+            logger.warning("http_tool '%s' timed out after %ss", name, timeout)
+            return {"success": False, "error": f"請求逾時（{timeout}s）"}
+        except aiohttp.ClientError as e:
+            logger.warning("http_tool '%s' client error: %s", name, e)
+            return {"success": False, "error": f"連線錯誤：{type(e).__name__}"}
+        except Exception as e:
+            logger.exception("http_tool '%s' unexpected error", name)
+            return {"success": False, "error": f"工具呼叫失敗：{type(e).__name__}"}
+
+    return function_tool(
+        _handler,
+        raw_schema={
+            "name": name,
+            "description": description,
+            "parameters": parameters_schema,
+        },
+    )
 
 
 # ═══════════════════════════════════════════════════════════
@@ -229,8 +408,11 @@ def build_tools_for_agent(profile: dict) -> dict[str, object]:
     """
     根據 profile 的 tools 宣告，建立對應的 @function_tool 方法。
 
-    回傳 dict: tool_name → decorated method
+    路由規則：
+    - tool_def 有 'endpoint' 欄位 → Tier 3：交給 make_http_tool（不需在 TOOL_REGISTRY 註冊）
+    - 否則 → 用 TOOL_REGISTRY 內建 factory
 
+    回傳 dict: tool_name → decorated method
     若 profile 沒有 tools 區塊，回傳空 dict（由 agent_factory 決定預設行為）。
     """
     tools_config = profile.get("tools", [])
@@ -239,14 +421,28 @@ def build_tools_for_agent(profile: dict) -> dict[str, object]:
 
     built = {}
     for tool_def in tools_config:
-        name = tool_def["name"]
-        config = tool_def.get("config", {})
+        name = tool_def.get("name", "")
 
+        # Tier 3：HTTP tool — 整個 tool_def 當 config 傳入
+        if "endpoint" in tool_def:
+            try:
+                built[name] = make_http_tool(profile, tool_def)
+                logger.info("Built Tier 3 HTTP tool: %s → %s", name, tool_def["endpoint"])
+            except ValueError as e:
+                logger.warning(
+                    "Skipping invalid HTTP tool '%s' in profile '%s': %s",
+                    name, profile.get("name", "?"), e,
+                )
+            continue
+
+        # Tier 1 / Tier 2：用內建 registry
+        config = tool_def.get("config", {})
         factory = TOOL_REGISTRY.get(name)
         if not factory:
             available = ", ".join(TOOL_REGISTRY.keys())
             logger.warning(
-                "Unknown tool '%s' in profile '%s'. Available: %s",
+                "Unknown tool '%s' in profile '%s'. Available built-ins: %s. "
+                "(Tier 3 HTTP tools must include an 'endpoint' field.)",
                 name, profile.get("name", "?"), available,
             )
             continue
