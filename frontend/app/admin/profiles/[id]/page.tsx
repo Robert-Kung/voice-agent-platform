@@ -14,6 +14,11 @@ const KNOWN_KEYS = [
   'timezone',
   'welcome_message',
   'welcome_instructions',
+  'human_operator',
+  'qa_mode',
+  'qa_data',
+  'services',
+  // Legacy flat fields kept for backward-compat with un-migrated profiles
   'human_operator_instructions',
   'human_operator_greeting',
   'instructions',
@@ -38,6 +43,30 @@ const TIMEZONES = [
 
 type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
 type ParamType = 'string' | 'number' | 'integer' | 'boolean';
+type QaMode = 'inline' | 'tool';
+
+type HumanOperatorConfig = {
+  enabled?: boolean;
+  greeting?: string;
+  instructions?: string;
+  voice?: string;
+  transfer_message?: string;
+};
+
+type QaEntry = {
+  keywords: string[];
+  answer: string;
+};
+
+// Services schema is loose because every business has different shapes.
+// We expose the most common fields structurally; the rest stays as-is in
+// the underlying object and shows in Advanced JSON.
+type ServiceConfig = {
+  always_open?: boolean;
+  hours_text?: string | Record<string, string>;
+  closed_days?: number[];
+  schedule?: Record<string, { start: string; end: string }>;
+};
 
 type HttpToolParam = {
   name: string;
@@ -69,6 +98,11 @@ interface KnownConfig {
   timezone?: string;
   welcome_message?: string;
   welcome_instructions?: string;
+  human_operator?: HumanOperatorConfig;
+  qa_mode?: QaMode;
+  qa_data?: QaEntry[];
+  services?: Record<string, ServiceConfig>;
+  // Legacy
   human_operator_instructions?: string;
   human_operator_greeting?: string;
   instructions?: string;
@@ -91,6 +125,29 @@ function splitConfig(config: Record<string, unknown>): {
     }
   }
   return { known, extra };
+}
+
+/** Migrate legacy flat human_operator_* fields into the namespace block.
+ *  YAML on disk may still have the old shape; we normalise on read so the UI
+ *  always sees one consistent structure. The flat keys are dropped from `known`
+ *  so they don't get re-saved alongside the namespace.
+ */
+function migrateLegacyHumanOperator(known: KnownConfig): KnownConfig {
+  const hasLegacy =
+    known.human_operator_instructions !== undefined || known.human_operator_greeting !== undefined;
+  if (!hasLegacy) return known;
+  const ho: HumanOperatorConfig = { ...(known.human_operator || {}) };
+  if (ho.enabled === undefined) ho.enabled = true; // legacy schema implied enabled
+  if (ho.instructions === undefined && known.human_operator_instructions) {
+    ho.instructions = known.human_operator_instructions;
+  }
+  if (ho.greeting === undefined && known.human_operator_greeting) {
+    ho.greeting = known.human_operator_greeting;
+  }
+  const out = { ...known, human_operator: ho };
+  delete out.human_operator_instructions;
+  delete out.human_operator_greeting;
+  return out;
 }
 
 function buildConfig(known: KnownConfig, extra: Record<string, unknown>): Record<string, unknown> {
@@ -174,7 +231,8 @@ export default function ProfileDetailPage() {
     profilesApi
       .get(id)
       .then((p) => {
-        const { known: k, extra } = splitConfig(p.config || {});
+        const { known: raw, extra } = splitConfig(p.config || {});
+        const k = migrateLegacyHumanOperator(raw);
         if (!k.tools) k.tools = [];
         const ej = Object.keys(extra).length ? JSON.stringify(extra, null, 2) : '{}';
         setProfile(p);
@@ -279,6 +337,83 @@ export default function ProfileDetailPage() {
     });
   };
 
+  // ── Handoff (human_operator namespace) ────────────────────
+  const updateHandoff = <K extends keyof HumanOperatorConfig>(
+    key: K,
+    value: HumanOperatorConfig[K]
+  ) => {
+    setKnown((prev) => ({
+      ...prev,
+      human_operator: { ...(prev.human_operator || {}), [key]: value },
+    }));
+  };
+
+  // ── QA Database CRUD ──────────────────────────────────────
+  const setQaMode = (mode: QaMode) => {
+    setKnown((prev) => ({ ...prev, qa_mode: mode }));
+  };
+
+  const addQaEntry = () => {
+    setKnown((prev) => ({
+      ...prev,
+      qa_data: [...(prev.qa_data || []), { keywords: [], answer: '' }],
+    }));
+  };
+
+  const updateQaEntry = (idx: number, patch: Partial<QaEntry>) => {
+    setKnown((prev) => {
+      const list = [...(prev.qa_data || [])];
+      list[idx] = { ...list[idx], ...patch };
+      return { ...prev, qa_data: list };
+    });
+  };
+
+  const removeQaEntry = (idx: number) => {
+    setKnown((prev) => ({
+      ...prev,
+      qa_data: (prev.qa_data || []).filter((_, i) => i !== idx),
+    }));
+  };
+
+  // ── Services CRUD ─────────────────────────────────────────
+  const addService = () => {
+    setKnown((prev) => {
+      const services = { ...(prev.services || {}) };
+      // Find first available service_N name
+      let i = 1;
+      while (services[`service_${i}`]) i += 1;
+      services[`service_${i}`] = { always_open: false, hours_text: '' };
+      return { ...prev, services };
+    });
+  };
+
+  const renameService = (oldKey: string, newKey: string) => {
+    if (!newKey || oldKey === newKey) return;
+    setKnown((prev) => {
+      const services = { ...(prev.services || {}) };
+      if (services[newKey]) return prev; // refuse collision
+      services[newKey] = services[oldKey];
+      delete services[oldKey];
+      return { ...prev, services };
+    });
+  };
+
+  const updateService = (key: string, patch: Partial<ServiceConfig>) => {
+    setKnown((prev) => {
+      const services = { ...(prev.services || {}) };
+      services[key] = { ...services[key], ...patch };
+      return { ...prev, services };
+    });
+  };
+
+  const removeService = (key: string) => {
+    setKnown((prev) => {
+      const services = { ...(prev.services || {}) };
+      delete services[key];
+      return { ...prev, services };
+    });
+  };
+
   const handleTry = async () => {
     if (!profile || isNew) return;
     if (isDirty) {
@@ -341,7 +476,8 @@ export default function ProfileDetailPage() {
           config: finalConfig,
         });
         setProfile(updated);
-        const { known: k, extra } = splitConfig(updated.config || {});
+        const { known: raw, extra } = splitConfig(updated.config || {});
+        const k = migrateLegacyHumanOperator(raw);
         if (!k.tools) k.tools = [];
         const ej = Object.keys(extra).length ? JSON.stringify(extra, null, 2) : '{}';
         setKnown(k);
@@ -529,30 +665,258 @@ export default function ProfileDetailPage() {
           </div>
         </section>
 
-        {/* Human Operator */}
-        <section className="border-border space-y-4 rounded-md border p-4">
-          <h3 className="text-foreground/70 text-sm font-semibold tracking-wide uppercase">
-            Human Operator
-          </h3>
-          <div>
-            <label className="mb-1 block text-sm font-medium">Operator Greeting</label>
-            <input
-              type="text"
-              value={known.human_operator_greeting ?? ''}
-              onChange={(e) => updateKnown('human_operator_greeting', e.target.value)}
-              placeholder="親切告知已轉接櫃檯人員。兩句話以內。"
-              className={inputClass}
-            />
+        {/* Handoff (Human Operator) */}
+        <section className="border-border space-y-3 rounded-md border p-4">
+          <div className="flex items-center justify-between">
+            <h3 className="text-foreground/70 text-sm font-semibold tracking-wide uppercase">
+              Handoff to Human
+            </h3>
+            <label className="flex cursor-pointer items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={!!known.human_operator?.enabled}
+                onChange={(e) => updateHandoff('enabled', e.target.checked)}
+              />
+              啟用真人轉接
+            </label>
           </div>
-          <div>
-            <label className="mb-1 block text-sm font-medium">Operator Instructions</label>
-            <textarea
-              value={known.human_operator_instructions ?? ''}
-              onChange={(e) => updateKnown('human_operator_instructions', e.target.value)}
-              rows={4}
-              placeholder="轉人工後 Agent 的 system instructions…"
-              className={textareaClass}
-            />
+          <p className="text-foreground/60 text-xs">
+            開啟後 agent 會掛上 <code>transfer_to_human</code> 工具。LLM 在無法回答 /
+            使用者要求轉接時會切換到人工 persona（不同聲音 + 你寫的 instructions）。
+          </p>
+
+          {known.human_operator?.enabled && (
+            <div className="space-y-3 pt-1">
+              <div>
+                <label className="mb-1 block text-sm font-medium">Greeting (轉接後第一句)</label>
+                <input
+                  type="text"
+                  value={known.human_operator?.greeting ?? ''}
+                  onChange={(e) => updateHandoff('greeting', e.target.value)}
+                  placeholder="親切告知已轉接門市人員，並詢問有什麼可以協助的。兩句話以內。"
+                  className={inputClass}
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-sm font-medium">
+                  Instructions (人工 persona 的 system prompt)
+                </label>
+                <textarea
+                  value={known.human_operator?.instructions ?? ''}
+                  onChange={(e) => updateHandoff('instructions', e.target.value)}
+                  rows={3}
+                  placeholder="你是 XX 的門市人員。告知使用者已轉接成功…"
+                  className={textareaClass}
+                />
+              </div>
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                <div>
+                  <label className="mb-1 block text-sm font-medium">Voice (realtime)</label>
+                  <input
+                    type="text"
+                    value={known.human_operator?.voice ?? ''}
+                    onChange={(e) => updateHandoff('voice', e.target.value)}
+                    placeholder="Puck"
+                    className={inputClass}
+                  />
+                  <p className="text-foreground/60 mt-1 text-xs">
+                    Gemini Live 聲音名稱（如 Puck / Kore / Charon）。預設 Puck，與主 agent Kore
+                    區分讓使用者聽到切換。
+                  </p>
+                </div>
+                <div>
+                  <label className="mb-1 block text-sm font-medium">Transfer Message</label>
+                  <input
+                    type="text"
+                    value={known.human_operator?.transfer_message ?? ''}
+                    onChange={(e) => updateHandoff('transfer_message', e.target.value)}
+                    placeholder="正在為您轉接服務人員，請稍候。"
+                    className={inputClass}
+                  />
+                </div>
+              </div>
+            </div>
+          )}
+        </section>
+
+        {/* QA Database */}
+        <section className="border-border space-y-3 rounded-md border p-4">
+          <div className="flex items-center justify-between">
+            <h3 className="text-foreground/70 text-sm font-semibold tracking-wide uppercase">
+              QA Database
+            </h3>
+            <div className="flex items-center gap-3">
+              <span className="text-foreground/60 text-xs">{(known.qa_data || []).length} 條</span>
+              <div className="border-border inline-flex overflow-hidden rounded border text-xs">
+                {(['inline', 'tool'] as QaMode[]).map((m) => {
+                  const active = (known.qa_mode ?? 'inline') === m;
+                  return (
+                    <button
+                      key={m}
+                      type="button"
+                      onClick={() => setQaMode(m)}
+                      className={`px-2 py-1 ${
+                        active ? 'bg-foreground/10 font-medium' : 'hover:bg-foreground/5'
+                      }`}
+                      title={
+                        m === 'inline'
+                          ? 'QA 啟動時嵌入 instructions（零延遲、適合 ≤30 條）'
+                          : 'LLM 透過 lookup_qa tool 查詢（QA 量大時用）'
+                      }
+                    >
+                      {m === 'inline' ? 'Inline (推薦)' : 'Tool call'}
+                    </button>
+                  );
+                })}
+              </div>
+              <button
+                type="button"
+                onClick={addQaEntry}
+                className="border-border hover:bg-foreground/5 rounded border px-2 py-1 text-xs"
+              >
+                + Add QA
+              </button>
+            </div>
+          </div>
+          <p className="text-foreground/60 text-xs">
+            <strong>Inline</strong>：啟動時把 QA 拼進 system instructions，零延遲（推薦）。
+            <strong className="ml-2">Tool call</strong>：QA 量大塞不進 context 時改成 LLM 主動呼叫
+            lookup_qa tool。
+          </p>
+
+          {(known.qa_data || []).length === 0 && (
+            <p className="text-foreground/60 rounded-md border border-dashed py-4 text-center text-sm">
+              尚無 QA 條目
+            </p>
+          )}
+          <div className="space-y-2">
+            {(known.qa_data || []).map((qa, idx) => (
+              <div
+                key={idx}
+                className="border-border bg-foreground/5 space-y-2 rounded-md border p-3"
+              >
+                <div className="flex items-start gap-2">
+                  <div className="flex-1">
+                    <label className="text-foreground/70 mb-1 block text-xs">
+                      Keywords（逗號或頓號分隔；substring 比對 → 越具體越精準）
+                    </label>
+                    <input
+                      type="text"
+                      value={(qa.keywords || []).join('、')}
+                      onChange={(e) =>
+                        updateQaEntry(idx, {
+                          keywords: e.target.value
+                            .split(/[,，、]/)
+                            .map((k) => k.trim())
+                            .filter(Boolean),
+                        })
+                      }
+                      placeholder="費用、價格、多少錢"
+                      className={inputClass}
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => removeQaEntry(idx)}
+                    className="border-border hover:bg-foreground/10 mt-5 shrink-0 rounded border px-2 py-1 text-xs text-red-600 dark:text-red-400"
+                  >
+                    Remove
+                  </button>
+                </div>
+                <div>
+                  <label className="text-foreground/70 mb-1 block text-xs">Answer</label>
+                  <textarea
+                    value={qa.answer ?? ''}
+                    onChange={(e) => updateQaEntry(idx, { answer: e.target.value })}
+                    rows={2}
+                    placeholder="代檢費用為 600 元，含證照費。"
+                    className={textareaClass}
+                  />
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        {/* Service Hours */}
+        <section className="border-border space-y-3 rounded-md border p-4">
+          <div className="flex items-center justify-between">
+            <h3 className="text-foreground/70 text-sm font-semibold tracking-wide uppercase">
+              Service Hours
+            </h3>
+            <button
+              type="button"
+              onClick={addService}
+              className="border-border hover:bg-foreground/5 rounded border px-2 py-1 text-xs"
+            >
+              + Add Service
+            </button>
+          </div>
+          <p className="text-foreground/60 text-xs">
+            營業時間會自動嵌入 instructions，搭配 <code>get_current_time</code> 工具讓 LLM
+            自行判斷是否營業。 進階排程（schedule / closed_days）可在 Advanced JSON 編輯。
+          </p>
+
+          {Object.keys(known.services || {}).length === 0 && (
+            <p className="text-foreground/60 rounded-md border border-dashed py-4 text-center text-sm">
+              尚未設定營業時間
+            </p>
+          )}
+          <div className="space-y-2">
+            {Object.entries(known.services || {}).map(([key, svc]) => (
+              <div
+                key={key}
+                className="border-border bg-foreground/5 space-y-2 rounded-md border p-3"
+              >
+                <div className="flex items-start gap-2">
+                  <div className="flex-1">
+                    <label className="text-foreground/70 mb-1 block text-xs">
+                      Service Key (英數 + 底線)
+                    </label>
+                    <input
+                      type="text"
+                      defaultValue={key}
+                      onBlur={(e) => renameService(key, e.target.value.trim())}
+                      placeholder="inspection / restaurant / fuel"
+                      className={inputClass + ' font-mono text-xs'}
+                    />
+                  </div>
+                  <label className="mt-5 flex shrink-0 items-center gap-1 text-xs">
+                    <input
+                      type="checkbox"
+                      checked={!!svc.always_open}
+                      onChange={(e) => updateService(key, { always_open: e.target.checked })}
+                    />
+                    24h
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => removeService(key)}
+                    className="border-border hover:bg-foreground/10 mt-5 shrink-0 rounded border px-2 py-1 text-xs text-red-600 dark:text-red-400"
+                  >
+                    Remove
+                  </button>
+                </div>
+                <div>
+                  <label className="text-foreground/70 mb-1 block text-xs">
+                    Hours Text（口語化描述，自由格式）
+                  </label>
+                  <input
+                    type="text"
+                    value={typeof svc.hours_text === 'string' ? svc.hours_text : ''}
+                    onChange={(e) => updateService(key, { hours_text: e.target.value })}
+                    placeholder="平日上午 8 點至下午 6 點，週六上午 8 點至中午，週日休息"
+                    disabled={typeof svc.hours_text === 'object'}
+                    className={inputClass}
+                  />
+                  {typeof svc.hours_text === 'object' && (
+                    <p className="text-foreground/60 mt-1 text-xs">
+                      此服務使用結構化 hours_text（多時段），請在 Advanced JSON 編輯。
+                    </p>
+                  )}
+                </div>
+              </div>
+            ))}
           </div>
         </section>
 
@@ -795,7 +1159,7 @@ export default function ProfileDetailPage() {
             <span className="text-foreground/70 text-sm font-semibold tracking-wide uppercase">
               Advanced JSON
               <span className="text-foreground/50 ml-2 text-xs normal-case">
-                (services / qa_data / 其他自訂欄位)
+                (進階排程 / 其他自訂欄位)
               </span>
             </span>
             <span className="text-foreground/60">{showAdvanced ? '▾' : '▸'}</span>
@@ -810,8 +1174,8 @@ export default function ProfileDetailPage() {
                 className="border-border bg-background text-foreground w-full rounded-md border px-3 py-2 font-mono text-xs"
               />
               <p className="text-foreground/60 mt-2 text-xs">
-                只放上方表單未涵蓋的欄位（如 <code>services</code>、<code>qa_data</code>
-                ）。儲存時會與表單欄位合併。
+                只放上方表單未涵蓋的欄位（如 services 內的 schedule / closed_days、其他客製欄位）。
+                儲存時會與表單欄位合併。
               </p>
             </div>
           )}
