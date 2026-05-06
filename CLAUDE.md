@@ -56,32 +56,40 @@ tools:
 
 ---
 
-## 重構計畫（按順序執行）
+## 重構計畫進度
 
-### 階段 1：工具清理（半天，最先做）
-1. **1.1** 刪 `get_current_datetime`（與 `get_current_time` 重複）— 全 profile 改用後者
-2. **1.2** 刪 `example.yaml` 引用的不存在 tool `replay_last_prompt`
-3. **1.3** 刪 `check_weather`（假資料工具，後續若需要走 Tier 3 接真 API）
-4. **1.4** 刪 `book_appointment` / `search_menu` / `calculate_price`（都是 mock 示範，無真後端）
-5. **1.5** `lookup_qa` 維持為 tool factory，但 profile 多一個欄位選擇 `qa_mode: inline | tool`（preset 為 `inline`，render 時若是 inline 就把 QA 拼進 instructions、不掛 tool）
-6. **1.6** `check_business_status` 拿掉，改在 agent_factory render 階段把 services 資料拼進 instructions
-7. **1.7** `human_operator_*` 散落欄位收成 `human_operator:` namespace 區塊
+> 圖例：✅ 已 land / 🟡 進行中（卡在外部依賴）/ ⬜ 未開工
+
+### ✅ 階段 1：工具清理（完成 2026-05-04）
+1. ✅ 1.1 刪 `get_current_datetime`（與 `get_current_time` 重複）— 全 profile 改用後者
+2. ✅ 1.2 刪 `example.yaml` 引用的不存在 tool `replay_last_prompt`
+3. ✅ 1.3 刪 `check_weather`（假資料工具，需要時走 Tier 3 接真 API）
+4. ✅ 1.4 刪 `book_appointment` / `search_menu` / `calculate_price`（mock 示範，無真後端）
+5. ✅ 1.5 `qa_mode: inline | tool` 切換實作於 `agent_factory.py`（preset `inline`，render 時拼進 instructions）
+6. ✅ 1.6 `check_business_status` 移除，services 資料於 render 階段拼進 instructions
+7. ✅ 1.7 `human_operator:` namespace 區塊收斂（`agent_tools.py` 含 legacy fallback）
 
 清理後 tool registry 只剩：`get_current_time`、`lookup_qa`、`transfer_to_human`（後兩者依設定條件性掛載）。
 
-### 階段 2：HTTP Tool（電梯 POC，~3 天）
-1. **2.1** `agent_tools.py` 新增 `make_http_tool` factory（讀 endpoint/method/auth/params）
-2. **2.2** YAML schema 擴充：tools 區塊支援 endpoint / parameters 宣告
-3. **2.3** Secret 管理：`${ENV_NAME}` 替換 + URL 白名單（防 SSRF：擋 localhost、私網、metadata IP）
-4. **2.4** Admin UI 的 tools 區塊改可動態新增/編輯（名稱 / 描述 / endpoint / 參數欄位）
-5. **2.5** 業主側：寫一支電梯報修 API endpoint（送 LINE push）
-6. **2.6** Admin UI 建立 elevator_repair profile + 三端測試（Console / WebRTC / SIP）
+### ✅ 階段 2：HTTP Tool（電梯 POC，完成 2026-05-05）
+1. ✅ 2.1 `agent_tools.py` 新增 `make_http_tool` factory（讀 endpoint/method/auth/params）
+2. ✅ 2.2 YAML schema 擴充：tools 區塊支援 endpoint / parameters 宣告
+3. ✅ 2.3 Secret 管理：`${ENV_NAME}` 替換 + URL 白名單（SSRF 擋 localhost、RFC1918、link-local、metadata；43 個專屬測試）
+4. ✅ 2.4 Admin UI tools 區塊可動態新增/編輯（Built-in vs Custom HTTP 雙列表）
+5. 🟡 2.5 業主側：寫電梯報修 API endpoint（送 LINE push）— **卡業主端**
+6. 🟡 2.6 Admin UI 建立 elevator_repair profile + 三端測試（Console / WebRTC / SIP）— **卡 2.5**
 
-### 階段 3：Admin UI 結構化設定（1-2 天）
-1. **3.1** Profile 編輯頁新增 **Handoff** 區塊（取代 transfer_to_human checkbox）
-2. **3.2** 新增 **QA Database** 區塊：CRUD QA 條目 + `qa_mode` 切換 inline/tool
-3. **3.3** 新增 **Service Hours** 區塊：結構化編輯營業時間
-4. **3.4** Tools 區塊改為純 Tier 3 自定義工具列表
+> elevator_repair YAML 已建立（`profiles/elevator_repair.yaml`），endpoint 為 placeholder `https://CHANGE_ME.example.com/elevator/report`，部署前需設 `ELEVATOR_API_KEY` env。
+
+### ✅ 階段 3：Admin UI 結構化設定（完成 2026-05-05）
+1. ✅ 3.1 Profile 編輯頁 **Handoff to Human** 區塊（取代 transfer_to_human checkbox）
+2. ✅ 3.2 **QA Database** 區塊：CRUD QA 條目 + `qa_mode` 切換 inline/tool
+3. ✅ 3.3 **Service Hours** 區塊：結構化每服務編輯（多時段 dict 仍走 Advanced JSON）
+4. ✅ 3.4 Tools 區塊拆 Built-in / Custom HTTP 雙區塊
+
+### ⬜ 後續可選
+- Service Hours 多時段 dict（`hours_text` / `schedule`）的結構化編輯器
+- Tier 3 webhook tool 之外的觸發機制（schedule、event）— 視業主需求
 
 ---
 
