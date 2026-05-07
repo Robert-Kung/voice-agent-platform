@@ -158,32 +158,56 @@ function migrateLegacyHumanOperator(known: KnownConfig): KnownConfig {
   return out;
 }
 
-/** Tool names removed during the Stage 1 cleanup (2026-05-04). They may still
- *  exist in old profile rows; we drop them on read so the UI reflects the
- *  current registry. Also drops auto-mounted tools (`lookup_qa`,
- *  `transfer_to_human`) which are now managed by qa_mode / human_operator
- *  config — keeping them in the tools array would render duplicate UI.
+/** Stage 1 (2026-05-04) renamed get_current_datetime → get_current_time.
+ *  Profiles read from old DB rows or imported YAML may still carry the old
+ *  name; rename in form-state so the UI matches the current registry. Mirrors
+ *  the backend logic in db/migrate.clean_legacy_tools.
  */
-const LEGACY_TOOL_NAMES = new Set([
-  'get_current_datetime',
-  'check_business_status',
+const RENAMED_TOOLS: Record<string, string> = {
+  get_current_datetime: 'get_current_time',
+};
+const DELETED_TOOL_NAMES = new Set([
+  'check_business_status', // replaced by services rendered into instructions
   'check_weather',
   'book_appointment',
   'search_menu',
   'calculate_price',
   'replay_last_prompt',
 ]);
+// Auto-mounted by qa_mode / human_operator config — should not appear as
+// user-selected built-in tools.
 const AUTO_MOUNTED_TOOLS = new Set(['lookup_qa', 'transfer_to_human']);
 
 function cleanLegacyTools(known: KnownConfig): KnownConfig {
   const tools = known.tools || [];
-  const cleaned = tools.filter((t) => {
-    if (t.endpoint) return true; // keep all Tier 3 HTTP tools
-    if (LEGACY_TOOL_NAMES.has(t.name)) return false;
-    if (AUTO_MOUNTED_TOOLS.has(t.name)) return false;
-    return true;
-  });
-  if (cleaned.length === tools.length) return known;
+  const seen = new Set<string>();
+  const cleaned: ToolEntry[] = [];
+  let changed = false;
+  for (const t of tools) {
+    if (t.endpoint) {
+      cleaned.push(t);
+      continue;
+    }
+    const renamed = RENAMED_TOOLS[t.name];
+    if (renamed) {
+      changed = true;
+      if (seen.has(renamed)) continue;
+      cleaned.push({ ...t, name: renamed });
+      seen.add(renamed);
+      continue;
+    }
+    if (DELETED_TOOL_NAMES.has(t.name) || AUTO_MOUNTED_TOOLS.has(t.name)) {
+      changed = true;
+      continue;
+    }
+    if (seen.has(t.name)) {
+      changed = true;
+      continue;
+    }
+    cleaned.push(t);
+    seen.add(t.name);
+  }
+  if (!changed) return known;
   return { ...known, tools: cleaned };
 }
 

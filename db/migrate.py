@@ -71,6 +71,81 @@ def import_yaml_profiles(db_session: Session) -> int:
     return imported
 
 
+# Stage 1 (2026-05-04) renamed get_current_datetime → get_current_time. Old
+# profile rows referencing the old name should be migrated, not dropped.
+RENAMED_TOOLS = {
+    "get_current_datetime": "get_current_time",
+}
+# Stage 1 deleted these mock-data tools entirely.
+DELETED_TOOL_NAMES = {
+    "check_business_status",  # replaced by services rendered into instructions
+    "check_weather",
+    "book_appointment",
+    "search_menu",
+    "calculate_price",
+    "replay_last_prompt",
+}
+# Now auto-mounted by qa_mode / human_operator config — should not be listed
+# as user-selected built-in tools.
+AUTO_MOUNTED_TOOLS = {"lookup_qa", "transfer_to_human"}
+
+
+def clean_legacy_tools(db_session: Session) -> int:
+    """Migrate existing profile rows so config.tools matches the current
+    registry: rename old names, drop deleted ones, drop auto-mounted ones.
+    Tier 3 HTTP tools (entries with `endpoint`) are preserved untouched.
+
+    Returns the number of profile rows mutated.
+    """
+    profiles = db_session.query(Profile).all()
+    mutated = 0
+    for p in profiles:
+        try:
+            cfg = json.loads(p.config_json) if p.config_json else {}
+        except json.JSONDecodeError:
+            logger.warning("Skipping %s: invalid config_json", p.name)
+            continue
+        tools = cfg.get("tools") or []
+        if not isinstance(tools, list):
+            continue
+        cleaned: list = []
+        seen_names: set[str] = set()
+        changes: list[str] = []
+        for t in tools:
+            if not isinstance(t, dict):
+                cleaned.append(t)
+                continue
+            if t.get("endpoint"):
+                cleaned.append(t)  # Tier 3, keep
+                continue
+            name = t.get("name")
+            if name in RENAMED_TOOLS:
+                new_name = RENAMED_TOOLS[name]
+                changes.append(f"{name}→{new_name}")
+                if new_name in seen_names:
+                    continue  # avoid duplicate after rename
+                cleaned.append({**t, "name": new_name})
+                seen_names.add(new_name)
+                continue
+            if name in DELETED_TOOL_NAMES or name in AUTO_MOUNTED_TOOLS:
+                changes.append(f"-{name}")
+                continue
+            if name in seen_names:
+                continue  # dedupe
+            cleaned.append(t)
+            if isinstance(name, str):
+                seen_names.add(name)
+        if not changes:
+            continue
+        cfg["tools"] = cleaned
+        p.config_json = json.dumps(cfg, ensure_ascii=False)
+        mutated += 1
+        logger.info("Cleaned %s: %s", p.name, ", ".join(changes))
+    if mutated:
+        db_session.commit()
+    return mutated
+
+
 def run_migration() -> None:
     """Full migration: create tables + import YAML profiles."""
     engine = get_engine()
@@ -83,5 +158,13 @@ def run_migration() -> None:
 
 
 if __name__ == "__main__":
+    import sys
+
     logging.basicConfig(level=logging.INFO)
-    run_migration()
+    if len(sys.argv) > 1 and sys.argv[1] == "clean-legacy-tools":
+        engine = get_engine()
+        with get_session_factory(engine)() as db:
+            n = clean_legacy_tools(db)
+            logger.info("clean-legacy-tools: %d profile(s) updated", n)
+    else:
+        run_migration()
