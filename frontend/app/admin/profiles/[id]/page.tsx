@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { toast } from 'sonner';
 import { profilesApi, testApi, toolsApi } from '@/lib/admin-api';
 import type { Profile } from '@/lib/admin-api';
@@ -44,6 +44,14 @@ const TIMEZONES = [
 type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
 type ParamType = 'string' | 'number' | 'integer' | 'boolean';
 type QaMode = 'inline' | 'tool';
+type TabKey = 'basics' | 'conversation' | 'tools' | 'advanced';
+
+const TABS: { key: TabKey; label: string }[] = [
+  { key: 'basics', label: 'Basics' },
+  { key: 'conversation', label: 'Conversation' },
+  { key: 'tools', label: 'Tools' },
+  { key: 'advanced', label: 'Advanced' },
+];
 
 type HumanOperatorConfig = {
   enabled?: boolean;
@@ -163,6 +171,7 @@ function buildConfig(known: KnownConfig, extra: Record<string, unknown>): Record
 export default function ProfileDetailPage() {
   const params = useParams();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const id = params.id as string;
   const isNew = id === 'new';
 
@@ -175,12 +184,52 @@ export default function ProfileDetailPage() {
   const [displayName, setDisplayName] = useState('');
   const [known, setKnown] = useState<KnownConfig>({ tools: [] });
   const [extraJson, setExtraJson] = useState('{}');
-  const [showAdvanced, setShowAdvanced] = useState(false);
 
   const [availableTools, setAvailableTools] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
   const [trying, setTrying] = useState(false);
   const [initialSnapshot, setInitialSnapshot] = useState<string>('');
+
+  // Tab state — initial value from URL, sync via window.history on change
+  const initialTab = ((): TabKey => {
+    const t = searchParams.get('tab');
+    return (TABS.find((tab) => tab.key === t)?.key ?? 'basics') as TabKey;
+  })();
+  const [activeTab, setActiveTab] = useState<TabKey>(initialTab);
+
+  const goToTab = (tab: TabKey) => {
+    setActiveTab(tab);
+    if (typeof window === 'undefined') return;
+    const sp = new URLSearchParams(window.location.search);
+    if (tab === 'basics') sp.delete('tab');
+    else sp.set('tab', tab);
+    const qs = sp.toString();
+    const path = isNew ? '/admin/profiles/new' : `/admin/profiles/${id}`;
+    window.history.replaceState(null, '', `${path}${qs ? '?' + qs : ''}`);
+  };
+
+  // QA list view — search + per-row expansion
+  const [qaSearch, setQaSearch] = useState('');
+  const [qaExpanded, setQaExpanded] = useState<Set<number>>(new Set());
+  const toggleQaExpanded = (idx: number) => {
+    setQaExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(idx)) next.delete(idx);
+      else next.add(idx);
+      return next;
+    });
+  };
+
+  // HTTP tool list view — per-row expansion
+  const [httpToolExpanded, setHttpToolExpanded] = useState<Set<number>>(new Set());
+  const toggleHttpToolExpanded = (idx: number) => {
+    setHttpToolExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(idx)) next.delete(idx);
+      else next.add(idx);
+      return next;
+    });
+  };
 
   // Snapshot for dirty-check
   const currentSnapshot = useMemo(
@@ -285,7 +334,10 @@ export default function ProfileDetailPage() {
         method: 'POST',
         parameters: [],
       };
-      return { ...prev, tools: [...tools, placeholder] };
+      const next = [...tools, placeholder];
+      // Auto-expand the just-added tool
+      setHttpToolExpanded((s) => new Set(s).add(next.length - 1));
+      return { ...prev, tools: next };
     });
   };
 
@@ -302,6 +354,14 @@ export default function ProfileDetailPage() {
       ...prev,
       tools: (prev.tools || []).filter((_, i) => i !== idx),
     }));
+    setHttpToolExpanded((prev) => {
+      const next = new Set<number>();
+      prev.forEach((i) => {
+        if (i < idx) next.add(i);
+        else if (i > idx) next.add(i - 1);
+      });
+      return next;
+    });
   };
 
   const updateHttpToolParam = (
@@ -354,10 +414,11 @@ export default function ProfileDetailPage() {
   };
 
   const addQaEntry = () => {
-    setKnown((prev) => ({
-      ...prev,
-      qa_data: [...(prev.qa_data || []), { keywords: [], answer: '' }],
-    }));
+    setKnown((prev) => {
+      const next = [...(prev.qa_data || []), { keywords: [], answer: '' }];
+      setQaExpanded((s) => new Set(s).add(next.length - 1));
+      return { ...prev, qa_data: next };
+    });
   };
 
   const updateQaEntry = (idx: number, patch: Partial<QaEntry>) => {
@@ -373,6 +434,14 @@ export default function ProfileDetailPage() {
       ...prev,
       qa_data: (prev.qa_data || []).filter((_, i) => i !== idx),
     }));
+    setQaExpanded((prev) => {
+      const next = new Set<number>();
+      prev.forEach((i) => {
+        if (i < idx) next.add(i);
+        else if (i > idx) next.add(i - 1);
+      });
+      return next;
+    });
   };
 
   // ── Services CRUD ─────────────────────────────────────────
@@ -441,17 +510,19 @@ export default function ProfileDetailPage() {
       extraObj = parsed as Record<string, unknown>;
     } catch (e) {
       toast.error(`Advanced JSON 解析失敗: ${(e as Error).message}`);
-      setShowAdvanced(true);
+      goToTab('advanced');
       return;
     }
 
     if (isNew) {
       if (!NAME_PATTERN.test(name)) {
         toast.error('Profile name 必須是小寫字母開頭，僅含 a-z, 0-9, _');
+        goToTab('basics');
         return;
       }
       if (!displayName.trim()) {
         toast.error('Display Name 不可為空');
+        goToTab('basics');
         return;
       }
     }
@@ -511,12 +582,36 @@ export default function ProfileDetailPage() {
   const httpToolIndices = (known.tools || [])
     .map((t, i) => (t.endpoint ? i : -1))
     .filter((i) => i >= 0);
+
+  // Filtered QAs (search by keyword or answer substring, case-insensitive)
+  const qaList = known.qa_data || [];
+  const qaQuery = qaSearch.trim().toLowerCase();
+  const filteredQas: { qa: QaEntry; idx: number }[] = qaList
+    .map((qa, idx) => ({ qa, idx }))
+    .filter(({ qa }) => {
+      if (!qaQuery) return true;
+      const inKw = (qa.keywords || []).some((k) => k.toLowerCase().includes(qaQuery));
+      const inAns = (qa.answer || '').toLowerCase().includes(qaQuery);
+      return inKw || inAns;
+    });
+
+  // Tab badges
+  const handoffEnabled = !!known.human_operator?.enabled;
+  const qaCount = qaList.length;
+  const servicesCount = Object.keys(known.services || {}).length;
+  const httpToolCount = httpTools.length;
+  const builtinCount = builtinSelected.size;
+  const hasExtra = (() => {
+    const t = extraJson.trim();
+    return t !== '' && t !== '{}';
+  })();
+
   const inputClass =
     'border-border bg-background text-foreground w-full rounded-md border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40';
   const textareaClass = `${inputClass} font-sans`;
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 pb-24">
       <div>
         <Link href="/admin/profiles" className="text-primary text-sm hover:underline">
           ← Back to profiles
@@ -537,650 +632,836 @@ export default function ProfileDetailPage() {
         )}
       </div>
 
-      <div className="space-y-5">
-        {/* Identity */}
-        <section className="border-border space-y-4 rounded-md border p-4">
-          <h3 className="text-foreground/70 text-sm font-semibold tracking-wide uppercase">
-            Identity
-          </h3>
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-            <div>
-              <label className="mb-1 block text-sm font-medium">
-                Name <span className="text-foreground/50">(unique, immutable)</span>
-              </label>
-              <input
-                type="text"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                disabled={!isNew}
-                placeholder="e.g. dental_clinic"
-                pattern={NAME_PATTERN.source}
-                className={`${inputClass} font-mono ${!isNew ? 'opacity-60' : ''}`}
-              />
-              {isNew && (
-                <p className="text-foreground/60 mt-1 text-xs">
-                  小寫字母開頭，僅含 <code>a-z 0-9 _</code>
-                </p>
-              )}
-            </div>
-            <div>
-              <label className="mb-1 block text-sm font-medium">Display Name</label>
-              <input
-                type="text"
-                value={displayName}
-                onChange={(e) => setDisplayName(e.target.value)}
-                placeholder="例如：幸福牙醫診所"
-                className={inputClass}
-              />
-            </div>
-            <div>
-              <label className="mb-1 block text-sm font-medium">Agent Name</label>
-              <input
-                type="text"
-                value={known.agent_name ?? ''}
-                onChange={(e) => updateKnown('agent_name', e.target.value)}
-                placeholder="voice-assistant-clinic"
-                className={`${inputClass} font-mono`}
-              />
-              <p className="text-foreground/60 mt-1 text-xs">
-                LiveKit worker 識別名稱（agent_name）
-              </p>
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="mb-1 block text-sm font-medium">Language</label>
-                <select
-                  value={known.language ?? ''}
-                  onChange={(e) => updateKnown('language', e.target.value)}
-                  className={inputClass}
-                >
-                  <option value="">—</option>
-                  {LANGUAGES.map((l) => (
-                    <option key={l.value} value={l.value}>
-                      {l.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className="mb-1 block text-sm font-medium">Timezone</label>
-                <select
-                  value={known.timezone ?? ''}
-                  onChange={(e) => updateKnown('timezone', e.target.value)}
-                  className={inputClass}
-                >
-                  <option value="">—</option>
-                  {TIMEZONES.map((tz) => (
-                    <option key={tz} value={tz}>
-                      {tz}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            </div>
-          </div>
-        </section>
-
-        {/* Messages */}
-        <section className="border-border space-y-4 rounded-md border p-4">
-          <h3 className="text-foreground/70 text-sm font-semibold tracking-wide uppercase">
-            Messages
-          </h3>
-          <div>
-            <label className="mb-1 block text-sm font-medium">
-              Welcome Message <span className="text-foreground/50">(pipeline 逐字 TTS)</span>
-            </label>
-            <textarea
-              value={known.welcome_message ?? ''}
-              onChange={(e) => updateKnown('welcome_message', e.target.value)}
-              rows={4}
-              placeholder="進線第一句歡迎語…"
-              className={textareaClass}
-            />
-          </div>
-          <div>
-            <label className="mb-1 block text-sm font-medium">
-              Welcome Instructions{' '}
-              <span className="text-foreground/50">(realtime 模式 Gemini 描述性提示)</span>
-            </label>
-            <textarea
-              value={known.welcome_instructions ?? ''}
-              onChange={(e) => updateKnown('welcome_instructions', e.target.value)}
-              rows={3}
-              placeholder="向來電者打招呼，簡短介紹自己並詢問需要什麼協助。"
-              className={textareaClass}
-            />
-          </div>
-          <div>
-            <label className="mb-1 block text-sm font-medium">
-              Instructions <span className="text-foreground/50">(system prompt)</span>
-            </label>
-            <textarea
-              value={known.instructions ?? ''}
-              onChange={(e) => updateKnown('instructions', e.target.value)}
-              rows={12}
-              placeholder="主 Agent 的 system prompt…"
-              className={textareaClass}
-            />
-          </div>
-        </section>
-
-        {/* Handoff (Human Operator) */}
-        <section className="border-border space-y-3 rounded-md border p-4">
-          <div className="flex items-center justify-between">
-            <h3 className="text-foreground/70 text-sm font-semibold tracking-wide uppercase">
-              Handoff to Human
-            </h3>
-            <label className="flex cursor-pointer items-center gap-2 text-sm">
-              <input
-                type="checkbox"
-                checked={!!known.human_operator?.enabled}
-                onChange={(e) => updateHandoff('enabled', e.target.checked)}
-              />
-              啟用真人轉接
-            </label>
-          </div>
-          <p className="text-foreground/60 text-xs">
-            開啟後 agent 會掛上 <code>transfer_to_human</code> 工具。LLM 在無法回答 /
-            使用者要求轉接時會切換到人工 persona（不同聲音 + 你寫的 instructions）。
-          </p>
-
-          {known.human_operator?.enabled && (
-            <div className="space-y-3 pt-1">
-              <div>
-                <label className="mb-1 block text-sm font-medium">Greeting (轉接後第一句)</label>
-                <input
-                  type="text"
-                  value={known.human_operator?.greeting ?? ''}
-                  onChange={(e) => updateHandoff('greeting', e.target.value)}
-                  placeholder="親切告知已轉接門市人員，並詢問有什麼可以協助的。兩句話以內。"
-                  className={inputClass}
-                />
-              </div>
-              <div>
-                <label className="mb-1 block text-sm font-medium">
-                  Instructions (人工 persona 的 system prompt)
-                </label>
-                <textarea
-                  value={known.human_operator?.instructions ?? ''}
-                  onChange={(e) => updateHandoff('instructions', e.target.value)}
-                  rows={3}
-                  placeholder="你是 XX 的門市人員。告知使用者已轉接成功…"
-                  className={textareaClass}
-                />
-              </div>
-              <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-                <div>
-                  <label className="mb-1 block text-sm font-medium">Voice (realtime)</label>
-                  <input
-                    type="text"
-                    value={known.human_operator?.voice ?? ''}
-                    onChange={(e) => updateHandoff('voice', e.target.value)}
-                    placeholder="Puck"
-                    className={inputClass}
-                  />
-                  <p className="text-foreground/60 mt-1 text-xs">
-                    Gemini Live 聲音名稱（如 Puck / Kore / Charon）。預設 Puck，與主 agent Kore
-                    區分讓使用者聽到切換。
-                  </p>
-                </div>
-                <div>
-                  <label className="mb-1 block text-sm font-medium">Transfer Message</label>
-                  <input
-                    type="text"
-                    value={known.human_operator?.transfer_message ?? ''}
-                    onChange={(e) => updateHandoff('transfer_message', e.target.value)}
-                    placeholder="正在為您轉接服務人員，請稍候。"
-                    className={inputClass}
-                  />
-                </div>
-              </div>
-            </div>
-          )}
-        </section>
-
-        {/* QA Database */}
-        <section className="border-border space-y-3 rounded-md border p-4">
-          <div className="flex items-center justify-between">
-            <h3 className="text-foreground/70 text-sm font-semibold tracking-wide uppercase">
-              QA Database
-            </h3>
-            <div className="flex items-center gap-3">
-              <span className="text-foreground/60 text-xs">{(known.qa_data || []).length} 條</span>
-              <div className="border-border inline-flex overflow-hidden rounded border text-xs">
-                {(['inline', 'tool'] as QaMode[]).map((m) => {
-                  const active = (known.qa_mode ?? 'inline') === m;
-                  return (
-                    <button
-                      key={m}
-                      type="button"
-                      onClick={() => setQaMode(m)}
-                      className={`px-2 py-1 ${
-                        active ? 'bg-foreground/10 font-medium' : 'hover:bg-foreground/5'
-                      }`}
-                      title={
-                        m === 'inline'
-                          ? 'QA 啟動時嵌入 instructions（零延遲、適合 ≤30 條）'
-                          : 'LLM 透過 lookup_qa tool 查詢（QA 量大時用）'
-                      }
-                    >
-                      {m === 'inline' ? 'Inline (推薦)' : 'Tool call'}
-                    </button>
-                  );
-                })}
-              </div>
+      {/* Tab bar */}
+      <div className="border-border border-b">
+        <nav className="-mb-px flex flex-wrap gap-1">
+          {TABS.map((t) => {
+            const active = activeTab === t.key;
+            return (
               <button
+                key={t.key}
                 type="button"
-                onClick={addQaEntry}
-                className="border-border hover:bg-foreground/5 rounded border px-2 py-1 text-xs"
+                onClick={() => goToTab(t.key)}
+                className={`flex items-center gap-2 border-b-2 px-4 py-2 text-sm transition-colors ${
+                  active
+                    ? 'border-primary text-foreground font-medium'
+                    : 'text-foreground/60 hover:text-foreground border-transparent'
+                }`}
               >
-                + Add QA
+                <span>{t.label}</span>
+                {t.key === 'basics' && !isNew && known.language && (
+                  <span className="text-foreground/40 text-xs">{known.language}</span>
+                )}
+                {t.key === 'conversation' && (
+                  <span className="text-foreground/40 text-xs">
+                    QA {qaCount}
+                    {handoffEnabled ? ' · Handoff' : ''}
+                    {servicesCount > 0 ? ` · ${servicesCount}h` : ''}
+                  </span>
+                )}
+                {t.key === 'tools' && (
+                  <span className="text-foreground/40 text-xs">{builtinCount + httpToolCount}</span>
+                )}
+                {t.key === 'advanced' && hasExtra && (
+                  <span className="text-amber-500" title="有自訂欄位">
+                    ●
+                  </span>
+                )}
               </button>
-            </div>
-          </div>
-          <p className="text-foreground/60 text-xs">
-            <strong>Inline</strong>：啟動時把 QA 拼進 system instructions，零延遲（推薦）。
-            <strong className="ml-2">Tool call</strong>：QA 量大塞不進 context 時改成 LLM 主動呼叫
-            lookup_qa tool。
-          </p>
+            );
+          })}
+        </nav>
+      </div>
 
-          {(known.qa_data || []).length === 0 && (
-            <p className="text-foreground/60 rounded-md border border-dashed py-4 text-center text-sm">
-              尚無 QA 條目
-            </p>
-          )}
-          <div className="space-y-2">
-            {(known.qa_data || []).map((qa, idx) => (
-              <div
-                key={idx}
-                className="border-border bg-foreground/5 space-y-2 rounded-md border p-3"
-              >
-                <div className="flex items-start gap-2">
-                  <div className="flex-1">
-                    <label className="text-foreground/70 mb-1 block text-xs">
-                      Keywords（逗號或頓號分隔；substring 比對 → 越具體越精準）
-                    </label>
-                    <input
-                      type="text"
-                      value={(qa.keywords || []).join('、')}
-                      onChange={(e) =>
-                        updateQaEntry(idx, {
-                          keywords: e.target.value
-                            .split(/[,，、]/)
-                            .map((k) => k.trim())
-                            .filter(Boolean),
-                        })
-                      }
-                      placeholder="費用、價格、多少錢"
-                      className={inputClass}
-                    />
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => removeQaEntry(idx)}
-                    className="border-border hover:bg-foreground/10 mt-5 shrink-0 rounded border px-2 py-1 text-xs text-red-600 dark:text-red-400"
-                  >
-                    Remove
-                  </button>
-                </div>
+      <div className="space-y-5">
+        {/* ── Basics tab ────────────────────────────────────────── */}
+        {activeTab === 'basics' && (
+          <>
+            {/* Identity */}
+            <section className="border-border space-y-4 rounded-md border p-4">
+              <h3 className="text-foreground/70 text-sm font-semibold tracking-wide uppercase">
+                Identity
+              </h3>
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                 <div>
-                  <label className="text-foreground/70 mb-1 block text-xs">Answer</label>
-                  <textarea
-                    value={qa.answer ?? ''}
-                    onChange={(e) => updateQaEntry(idx, { answer: e.target.value })}
-                    rows={2}
-                    placeholder="代檢費用為 600 元，含證照費。"
-                    className={textareaClass}
-                  />
-                </div>
-              </div>
-            ))}
-          </div>
-        </section>
-
-        {/* Service Hours */}
-        <section className="border-border space-y-3 rounded-md border p-4">
-          <div className="flex items-center justify-between">
-            <h3 className="text-foreground/70 text-sm font-semibold tracking-wide uppercase">
-              Service Hours
-            </h3>
-            <button
-              type="button"
-              onClick={addService}
-              className="border-border hover:bg-foreground/5 rounded border px-2 py-1 text-xs"
-            >
-              + Add Service
-            </button>
-          </div>
-          <p className="text-foreground/60 text-xs">
-            營業時間會自動嵌入 instructions，搭配 <code>get_current_time</code> 工具讓 LLM
-            自行判斷是否營業。 進階排程（schedule / closed_days）可在 Advanced JSON 編輯。
-          </p>
-
-          {Object.keys(known.services || {}).length === 0 && (
-            <p className="text-foreground/60 rounded-md border border-dashed py-4 text-center text-sm">
-              尚未設定營業時間
-            </p>
-          )}
-          <div className="space-y-2">
-            {Object.entries(known.services || {}).map(([key, svc]) => (
-              <div
-                key={key}
-                className="border-border bg-foreground/5 space-y-2 rounded-md border p-3"
-              >
-                <div className="flex items-start gap-2">
-                  <div className="flex-1">
-                    <label className="text-foreground/70 mb-1 block text-xs">
-                      Service Key (英數 + 底線)
-                    </label>
-                    <input
-                      type="text"
-                      defaultValue={key}
-                      onBlur={(e) => renameService(key, e.target.value.trim())}
-                      placeholder="inspection / restaurant / fuel"
-                      className={inputClass + ' font-mono text-xs'}
-                    />
-                  </div>
-                  <label className="mt-5 flex shrink-0 items-center gap-1 text-xs">
-                    <input
-                      type="checkbox"
-                      checked={!!svc.always_open}
-                      onChange={(e) => updateService(key, { always_open: e.target.checked })}
-                    />
-                    24h
-                  </label>
-                  <button
-                    type="button"
-                    onClick={() => removeService(key)}
-                    className="border-border hover:bg-foreground/10 mt-5 shrink-0 rounded border px-2 py-1 text-xs text-red-600 dark:text-red-400"
-                  >
-                    Remove
-                  </button>
-                </div>
-                <div>
-                  <label className="text-foreground/70 mb-1 block text-xs">
-                    Hours Text（口語化描述，自由格式）
+                  <label className="mb-1 block text-sm font-medium">
+                    Name <span className="text-foreground/50">(unique, immutable)</span>
                   </label>
                   <input
                     type="text"
-                    value={typeof svc.hours_text === 'string' ? svc.hours_text : ''}
-                    onChange={(e) => updateService(key, { hours_text: e.target.value })}
-                    placeholder="平日上午 8 點至下午 6 點，週六上午 8 點至中午，週日休息"
-                    disabled={typeof svc.hours_text === 'object'}
-                    className={inputClass}
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    disabled={!isNew}
+                    placeholder="e.g. dental_clinic"
+                    pattern={NAME_PATTERN.source}
+                    className={`${inputClass} font-mono ${!isNew ? 'opacity-60' : ''}`}
                   />
-                  {typeof svc.hours_text === 'object' && (
+                  {isNew && (
                     <p className="text-foreground/60 mt-1 text-xs">
-                      此服務使用結構化 hours_text（多時段），請在 Advanced JSON 編輯。
+                      小寫字母開頭，僅含 <code>a-z 0-9 _</code>
                     </p>
                   )}
                 </div>
-              </div>
-            ))}
-          </div>
-        </section>
-
-        {/* Built-in Tools (Tier 1) */}
-        <section className="border-border space-y-3 rounded-md border p-4">
-          <div className="flex items-center justify-between">
-            <h3 className="text-foreground/70 text-sm font-semibold tracking-wide uppercase">
-              Built-in Tools
-            </h3>
-            <span className="text-foreground/60 text-xs">
-              {builtinSelected.size} / {availableTools.length} 啟用
-            </span>
-          </div>
-          <p className="text-foreground/60 text-xs">
-            內建通用工具。<code>lookup_qa</code> 與 <code>transfer_to_human</code> 由 QA / Handoff
-            設定自動啟用，不在這裡勾選。
-          </p>
-          {availableTools.length === 0 ? (
-            <p className="text-foreground/60 text-sm">無法載入工具清單</p>
-          ) : (
-            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
-              {availableTools
-                .filter((n) => n !== 'lookup_qa' && n !== 'transfer_to_human')
-                .map((toolName) => {
-                  const checked = builtinSelected.has(toolName);
-                  return (
-                    <label
-                      key={toolName}
-                      className={`flex cursor-pointer items-start gap-2 rounded-md border px-3 py-2 text-sm transition-colors ${
-                        checked
-                          ? 'border-primary/50 bg-primary/5'
-                          : 'border-border hover:bg-foreground/5'
-                      }`}
-                    >
-                      <input
-                        type="checkbox"
-                        checked={checked}
-                        onChange={() => toggleTool(toolName)}
-                        className="mt-0.5"
-                      />
-                      <span className="flex-1">
-                        <span className="font-mono text-xs">{toolName}</span>
-                      </span>
-                    </label>
-                  );
-                })}
-            </div>
-          )}
-        </section>
-
-        {/* Custom HTTP Tools (Tier 3) */}
-        <section className="border-border space-y-3 rounded-md border p-4">
-          <div className="flex items-center justify-between">
-            <h3 className="text-foreground/70 text-sm font-semibold tracking-wide uppercase">
-              Custom HTTP Tools
-            </h3>
-            <button
-              type="button"
-              onClick={addHttpTool}
-              className="border-border hover:bg-foreground/5 rounded border px-2 py-1 text-xs"
-            >
-              + Add HTTP Tool
-            </button>
-          </div>
-          <p className="text-foreground/60 text-xs">
-            把對話結果送到外部 API（例：通報故障、開單、查 CRM）。Endpoint 必須是公網 HTTPS；secret
-            用 <code>{'${ENV_VAR}'}</code> 從環境變數取得。
-          </p>
-          {httpTools.length === 0 && (
-            <p className="text-foreground/60 rounded-md border border-dashed py-4 text-center text-sm">
-              尚未設定自定義 HTTP 工具
-            </p>
-          )}
-          {httpTools.map((tool, htIdx) => {
-            const realIdx = httpToolIndices[htIdx];
-            return (
-              <div
-                key={realIdx}
-                className="border-border bg-foreground/5 space-y-3 rounded-md border p-3"
-              >
-                <div className="flex items-center gap-2">
-                  <input
-                    type="text"
-                    placeholder="tool_name (lowercase, snake_case)"
-                    value={tool.name}
-                    onChange={(e) => updateHttpTool(realIdx, { name: e.target.value })}
-                    className={inputClass}
-                  />
-                  <button
-                    type="button"
-                    onClick={() => removeHttpTool(realIdx)}
-                    className="border-border hover:bg-foreground/10 shrink-0 rounded border px-2 py-1 text-xs text-red-600 dark:text-red-400"
-                  >
-                    Remove
-                  </button>
-                </div>
-
                 <div>
-                  <label className="text-foreground/70 mb-1 block text-xs">
-                    Description (給 LLM 看)
-                  </label>
+                  <label className="mb-1 block text-sm font-medium">Display Name</label>
                   <input
                     type="text"
-                    placeholder="例：通報電梯故障給維修人員"
-                    value={tool.description || ''}
-                    onChange={(e) => updateHttpTool(realIdx, { description: e.target.value })}
+                    value={displayName}
+                    onChange={(e) => setDisplayName(e.target.value)}
+                    placeholder="例如：幸福牙醫診所"
                     className={inputClass}
                   />
                 </div>
-
-                <div className="grid grid-cols-1 gap-2 md:grid-cols-[1fr_120px]">
+                <div>
+                  <label className="mb-1 block text-sm font-medium">Agent Name</label>
+                  <input
+                    type="text"
+                    value={known.agent_name ?? ''}
+                    onChange={(e) => updateKnown('agent_name', e.target.value)}
+                    placeholder="voice-assistant-clinic"
+                    className={`${inputClass} font-mono`}
+                  />
+                  <p className="text-foreground/60 mt-1 text-xs">
+                    LiveKit worker 識別名稱（agent_name）
+                  </p>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className="text-foreground/70 mb-1 block text-xs">Endpoint URL</label>
-                    <input
-                      type="text"
-                      placeholder="https://api.example.com/path"
-                      value={tool.endpoint || ''}
-                      onChange={(e) => updateHttpTool(realIdx, { endpoint: e.target.value })}
+                    <label className="mb-1 block text-sm font-medium">Language</label>
+                    <select
+                      value={known.language ?? ''}
+                      onChange={(e) => updateKnown('language', e.target.value)}
                       className={inputClass}
-                    />
+                    >
+                      <option value="">—</option>
+                      {LANGUAGES.map((l) => (
+                        <option key={l.value} value={l.value}>
+                          {l.label}
+                        </option>
+                      ))}
+                    </select>
                   </div>
                   <div>
-                    <label className="text-foreground/70 mb-1 block text-xs">Method</label>
+                    <label className="mb-1 block text-sm font-medium">Timezone</label>
                     <select
-                      value={tool.method || 'POST'}
-                      onChange={(e) =>
-                        updateHttpTool(realIdx, { method: e.target.value as HttpMethod })
-                      }
+                      value={known.timezone ?? ''}
+                      onChange={(e) => updateKnown('timezone', e.target.value)}
                       className={inputClass}
                     >
-                      {HTTP_METHODS.map((m) => (
-                        <option key={m} value={m}>
-                          {m}
+                      <option value="">—</option>
+                      {TIMEZONES.map((tz) => (
+                        <option key={tz} value={tz}>
+                          {tz}
                         </option>
                       ))}
                     </select>
                   </div>
                 </div>
+              </div>
+            </section>
 
-                <div>
-                  <label className="text-foreground/70 mb-1 block text-xs">
-                    Auth Header (optional, 支援 <code>{'${ENV_VAR}'}</code>)
-                  </label>
+            {/* Messages */}
+            <section className="border-border space-y-4 rounded-md border p-4">
+              <h3 className="text-foreground/70 text-sm font-semibold tracking-wide uppercase">
+                Messages
+              </h3>
+              <div>
+                <label className="mb-1 block text-sm font-medium">
+                  Welcome Message <span className="text-foreground/50">(pipeline 逐字 TTS)</span>
+                </label>
+                <textarea
+                  value={known.welcome_message ?? ''}
+                  onChange={(e) => updateKnown('welcome_message', e.target.value)}
+                  rows={4}
+                  placeholder="進線第一句歡迎語…"
+                  className={textareaClass}
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-sm font-medium">
+                  Welcome Instructions{' '}
+                  <span className="text-foreground/50">(realtime 模式 Gemini 描述性提示)</span>
+                </label>
+                <textarea
+                  value={known.welcome_instructions ?? ''}
+                  onChange={(e) => updateKnown('welcome_instructions', e.target.value)}
+                  rows={3}
+                  placeholder="向來電者打招呼，簡短介紹自己並詢問需要什麼協助。"
+                  className={textareaClass}
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-sm font-medium">
+                  Instructions <span className="text-foreground/50">(system prompt)</span>
+                </label>
+                <textarea
+                  value={known.instructions ?? ''}
+                  onChange={(e) => updateKnown('instructions', e.target.value)}
+                  rows={12}
+                  placeholder="主 Agent 的 system prompt…"
+                  className={textareaClass}
+                />
+              </div>
+            </section>
+          </>
+        )}
+
+        {/* ── Conversation tab ───────────────────────────────────── */}
+        {activeTab === 'conversation' && (
+          <>
+            {/* Handoff (Human Operator) */}
+            <section className="border-border space-y-3 rounded-md border p-4">
+              <div className="flex items-center justify-between">
+                <h3 className="text-foreground/70 text-sm font-semibold tracking-wide uppercase">
+                  Handoff to Human
+                </h3>
+                <label className="flex cursor-pointer items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={!!known.human_operator?.enabled}
+                    onChange={(e) => updateHandoff('enabled', e.target.checked)}
+                  />
+                  啟用真人轉接
+                </label>
+              </div>
+              <p className="text-foreground/60 text-xs">
+                開啟後 agent 會掛上 <code>transfer_to_human</code> 工具。LLM 在無法回答 /
+                使用者要求轉接時會切換到人工 persona（不同聲音 + 你寫的 instructions）。
+              </p>
+
+              {known.human_operator?.enabled && (
+                <div className="space-y-3 pt-1">
+                  <div>
+                    <label className="mb-1 block text-sm font-medium">
+                      Greeting (轉接後第一句)
+                    </label>
+                    <input
+                      type="text"
+                      value={known.human_operator?.greeting ?? ''}
+                      onChange={(e) => updateHandoff('greeting', e.target.value)}
+                      placeholder="親切告知已轉接門市人員，並詢問有什麼可以協助的。兩句話以內。"
+                      className={inputClass}
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-sm font-medium">
+                      Instructions (人工 persona 的 system prompt)
+                    </label>
+                    <textarea
+                      value={known.human_operator?.instructions ?? ''}
+                      onChange={(e) => updateHandoff('instructions', e.target.value)}
+                      rows={3}
+                      placeholder="你是 XX 的門市人員。告知使用者已轉接成功…"
+                      className={textareaClass}
+                    />
+                  </div>
+                  <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                    <div>
+                      <label className="mb-1 block text-sm font-medium">Voice (realtime)</label>
+                      <input
+                        type="text"
+                        value={known.human_operator?.voice ?? ''}
+                        onChange={(e) => updateHandoff('voice', e.target.value)}
+                        placeholder="Puck"
+                        className={inputClass}
+                      />
+                      <p className="text-foreground/60 mt-1 text-xs">
+                        Gemini Live 聲音名稱（如 Puck / Kore / Charon）。預設 Puck，與主 agent Kore
+                        區分讓使用者聽到切換。
+                      </p>
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-sm font-medium">Transfer Message</label>
+                      <input
+                        type="text"
+                        value={known.human_operator?.transfer_message ?? ''}
+                        onChange={(e) => updateHandoff('transfer_message', e.target.value)}
+                        placeholder="正在為您轉接服務人員，請稍候。"
+                        className={inputClass}
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
+            </section>
+
+            {/* QA Database */}
+            <section className="border-border space-y-3 rounded-md border p-4">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <h3 className="text-foreground/70 text-sm font-semibold tracking-wide uppercase">
+                  QA Database
+                </h3>
+                <div className="flex flex-wrap items-center gap-3">
+                  <span className="text-foreground/60 text-xs">{qaCount} 條</span>
+                  <div className="border-border inline-flex overflow-hidden rounded border text-xs">
+                    {(['inline', 'tool'] as QaMode[]).map((m) => {
+                      const active = (known.qa_mode ?? 'inline') === m;
+                      return (
+                        <button
+                          key={m}
+                          type="button"
+                          onClick={() => setQaMode(m)}
+                          className={`px-2 py-1 ${
+                            active ? 'bg-foreground/10 font-medium' : 'hover:bg-foreground/5'
+                          }`}
+                          title={
+                            m === 'inline'
+                              ? 'QA 啟動時嵌入 instructions（零延遲、適合 ≤30 條）'
+                              : 'LLM 透過 lookup_qa tool 查詢（QA 量大時用）'
+                          }
+                        >
+                          {m === 'inline' ? 'Inline (推薦)' : 'Tool call'}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={addQaEntry}
+                    className="border-border hover:bg-foreground/5 rounded border px-2 py-1 text-xs"
+                  >
+                    + Add QA
+                  </button>
+                </div>
+              </div>
+              <p className="text-foreground/60 text-xs">
+                <strong>Inline</strong>：啟動時把 QA 拼進 system instructions，零延遲（推薦）。
+                <strong className="ml-2">Tool call</strong>：QA 量大塞不進 context 時改成 LLM
+                主動呼叫 lookup_qa tool。
+              </p>
+
+              {qaCount > 0 && (
+                <div className="flex items-center gap-2">
                   <input
                     type="text"
-                    placeholder="Bearer ${MY_API_KEY}"
-                    value={tool.auth_header || ''}
-                    onChange={(e) => updateHttpTool(realIdx, { auth_header: e.target.value })}
-                    className={inputClass + ' font-mono text-xs'}
+                    value={qaSearch}
+                    onChange={(e) => setQaSearch(e.target.value)}
+                    placeholder="🔍 搜尋 keywords 或 answer…"
+                    className={`${inputClass} text-sm`}
                   />
-                </div>
-
-                <div>
-                  <div className="mb-1 flex items-center justify-between">
-                    <label className="text-foreground/70 block text-xs">Parameters</label>
+                  {qaSearch && (
+                    <span className="text-foreground/60 shrink-0 text-xs">
+                      {filteredQas.length} / {qaCount}
+                    </span>
+                  )}
+                  <div className="flex shrink-0 gap-1 text-xs">
                     <button
                       type="button"
-                      onClick={() => addHttpToolParam(realIdx)}
-                      className="border-border hover:bg-foreground/5 rounded border px-2 py-0.5 text-xs"
+                      onClick={() => setQaExpanded(new Set(filteredQas.map(({ idx }) => idx)))}
+                      className="border-border hover:bg-foreground/5 rounded border px-2 py-1"
+                      title="展開全部"
                     >
-                      + Param
+                      ▾ All
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setQaExpanded(new Set())}
+                      className="border-border hover:bg-foreground/5 rounded border px-2 py-1"
+                      title="收合全部"
+                    >
+                      ▸ None
                     </button>
                   </div>
-                  {(tool.parameters || []).length === 0 && (
-                    <p className="text-foreground/50 text-xs">尚無參數</p>
-                  )}
-                  <div className="space-y-2">
-                    {(tool.parameters || []).map((param, pIdx) => (
-                      <div
-                        key={pIdx}
-                        className="border-border grid grid-cols-1 gap-2 rounded-md border p-2 text-xs md:grid-cols-[1fr_100px_1fr_70px_auto]"
-                      >
-                        <input
-                          type="text"
-                          placeholder="param_name"
-                          value={param.name}
-                          onChange={(e) =>
-                            updateHttpToolParam(realIdx, pIdx, { name: e.target.value })
-                          }
-                          className="border-border bg-background text-foreground rounded border px-2 py-1 font-mono text-xs"
-                        />
-                        <select
-                          value={param.type}
-                          onChange={(e) =>
-                            updateHttpToolParam(realIdx, pIdx, {
-                              type: e.target.value as ParamType,
-                            })
-                          }
-                          className="border-border bg-background text-foreground rounded border px-2 py-1 text-xs"
-                        >
-                          {PARAM_TYPES.map((t) => (
-                            <option key={t} value={t}>
-                              {t}
-                            </option>
-                          ))}
-                        </select>
-                        <input
-                          type="text"
-                          placeholder="description（給 LLM 提示）"
-                          value={param.description || ''}
-                          onChange={(e) =>
-                            updateHttpToolParam(realIdx, pIdx, { description: e.target.value })
-                          }
-                          className="border-border bg-background text-foreground rounded border px-2 py-1 text-xs"
-                        />
-                        <label className="flex items-center justify-center gap-1">
-                          <input
-                            type="checkbox"
-                            checked={!!param.required}
-                            onChange={(e) =>
-                              updateHttpToolParam(realIdx, pIdx, { required: e.target.checked })
-                            }
-                          />
-                          required
-                        </label>
+                </div>
+              )}
+
+              {qaCount === 0 && (
+                <p className="text-foreground/60 rounded-md border border-dashed py-4 text-center text-sm">
+                  尚無 QA 條目
+                </p>
+              )}
+
+              {qaCount > 0 && filteredQas.length === 0 && (
+                <p className="text-foreground/60 rounded-md border border-dashed py-4 text-center text-sm">
+                  搜尋無結果
+                </p>
+              )}
+
+              <div className="space-y-2">
+                {filteredQas.map(({ qa, idx }) => {
+                  const isOpen = qaExpanded.has(idx);
+                  const kwPreview = (qa.keywords || []).join('、');
+                  const ansFull = qa.answer || '';
+                  const ansPreview = ansFull.length > 80 ? `${ansFull.slice(0, 80)}…` : ansFull;
+                  return (
+                    <div key={idx} className="border-border bg-foreground/5 rounded-md border">
+                      <div className="flex items-stretch">
                         <button
                           type="button"
-                          onClick={() => removeHttpToolParam(realIdx, pIdx)}
-                          className="text-foreground/60 px-1 hover:text-red-600"
-                          title="刪除參數"
+                          onClick={() => toggleQaExpanded(idx)}
+                          className="hover:bg-foreground/5 flex flex-1 items-center gap-3 px-3 py-2 text-left"
+                        >
+                          <span className="text-foreground/60 w-3 shrink-0 text-xs">
+                            {isOpen ? '▾' : '▸'}
+                          </span>
+                          <div className="min-w-0 flex-1">
+                            <div className="truncate text-sm font-medium">
+                              {kwPreview || <span className="text-foreground/40">未設關鍵字</span>}
+                            </div>
+                            <div className="text-foreground/60 truncate text-xs">
+                              {ansPreview || <span className="text-foreground/40">（無回答）</span>}
+                            </div>
+                          </div>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => removeQaEntry(idx)}
+                          className="border-border hover:bg-foreground/10 shrink-0 border-l px-3 text-xs text-red-600 dark:text-red-400"
+                          title="刪除此 QA"
                         >
                           ✕
                         </button>
                       </div>
-                    ))}
-                  </div>
-                </div>
+                      {isOpen && (
+                        <div className="border-border space-y-2 border-t p-3">
+                          <div>
+                            <label className="text-foreground/70 mb-1 block text-xs">
+                              Keywords（逗號或頓號分隔；substring 比對 → 越具體越精準）
+                            </label>
+                            <input
+                              type="text"
+                              value={(qa.keywords || []).join('、')}
+                              onChange={(e) =>
+                                updateQaEntry(idx, {
+                                  keywords: e.target.value
+                                    .split(/[,，、]/)
+                                    .map((k) => k.trim())
+                                    .filter(Boolean),
+                                })
+                              }
+                              placeholder="費用、價格、多少錢"
+                              className={inputClass}
+                            />
+                          </div>
+                          <div>
+                            <label className="text-foreground/70 mb-1 block text-xs">Answer</label>
+                            <textarea
+                              value={qa.answer ?? ''}
+                              onChange={(e) => updateQaEntry(idx, { answer: e.target.value })}
+                              rows={3}
+                              placeholder="代檢費用為 600 元，含證照費。"
+                              className={textareaClass}
+                            />
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
-            );
-          })}
-        </section>
+            </section>
 
-        {/* Advanced JSON */}
-        <section className="border-border rounded-md border">
-          <button
-            type="button"
-            onClick={() => setShowAdvanced(!showAdvanced)}
-            className="flex w-full items-center justify-between p-4 text-left"
-          >
-            <span className="text-foreground/70 text-sm font-semibold tracking-wide uppercase">
+            {/* Service Hours */}
+            <section className="border-border space-y-3 rounded-md border p-4">
+              <div className="flex items-center justify-between">
+                <h3 className="text-foreground/70 text-sm font-semibold tracking-wide uppercase">
+                  Service Hours
+                </h3>
+                <button
+                  type="button"
+                  onClick={addService}
+                  className="border-border hover:bg-foreground/5 rounded border px-2 py-1 text-xs"
+                >
+                  + Add Service
+                </button>
+              </div>
+              <p className="text-foreground/60 text-xs">
+                營業時間會自動嵌入 instructions，搭配 <code>get_current_time</code> 工具讓 LLM
+                自行判斷是否營業。 進階排程（schedule / closed_days）可在 Advanced JSON 編輯。
+              </p>
+
+              {Object.keys(known.services || {}).length === 0 && (
+                <p className="text-foreground/60 rounded-md border border-dashed py-4 text-center text-sm">
+                  尚未設定營業時間
+                </p>
+              )}
+              <div className="space-y-2">
+                {Object.entries(known.services || {}).map(([key, svc]) => (
+                  <div
+                    key={key}
+                    className="border-border bg-foreground/5 space-y-2 rounded-md border p-3"
+                  >
+                    <div className="flex items-start gap-2">
+                      <div className="flex-1">
+                        <label className="text-foreground/70 mb-1 block text-xs">
+                          Service Key (英數 + 底線)
+                        </label>
+                        <input
+                          type="text"
+                          defaultValue={key}
+                          onBlur={(e) => renameService(key, e.target.value.trim())}
+                          placeholder="inspection / restaurant / fuel"
+                          className={inputClass + ' font-mono text-xs'}
+                        />
+                      </div>
+                      <label className="mt-5 flex shrink-0 items-center gap-1 text-xs">
+                        <input
+                          type="checkbox"
+                          checked={!!svc.always_open}
+                          onChange={(e) => updateService(key, { always_open: e.target.checked })}
+                        />
+                        24h
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => removeService(key)}
+                        className="border-border hover:bg-foreground/10 mt-5 shrink-0 rounded border px-2 py-1 text-xs text-red-600 dark:text-red-400"
+                      >
+                        Remove
+                      </button>
+                    </div>
+                    <div>
+                      <label className="text-foreground/70 mb-1 block text-xs">
+                        Hours Text（口語化描述，自由格式）
+                      </label>
+                      <input
+                        type="text"
+                        value={typeof svc.hours_text === 'string' ? svc.hours_text : ''}
+                        onChange={(e) => updateService(key, { hours_text: e.target.value })}
+                        placeholder="平日上午 8 點至下午 6 點，週六上午 8 點至中午，週日休息"
+                        disabled={typeof svc.hours_text === 'object'}
+                        className={inputClass}
+                      />
+                      {typeof svc.hours_text === 'object' && (
+                        <p className="text-foreground/60 mt-1 text-xs">
+                          此服務使用結構化 hours_text（多時段），請在 Advanced JSON 編輯。
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </section>
+          </>
+        )}
+
+        {/* ── Tools tab ─────────────────────────────────────────── */}
+        {activeTab === 'tools' && (
+          <>
+            {/* Built-in Tools (Tier 1) */}
+            <section className="border-border space-y-3 rounded-md border p-4">
+              <div className="flex items-center justify-between">
+                <h3 className="text-foreground/70 text-sm font-semibold tracking-wide uppercase">
+                  Built-in Tools
+                </h3>
+                <span className="text-foreground/60 text-xs">
+                  {builtinSelected.size} / {availableTools.length} 啟用
+                </span>
+              </div>
+              <p className="text-foreground/60 text-xs">
+                內建通用工具。<code>lookup_qa</code> 與 <code>transfer_to_human</code> 由 QA /
+                Handoff 設定自動啟用，不在這裡勾選。
+              </p>
+              {availableTools.length === 0 ? (
+                <p className="text-foreground/60 text-sm">無法載入工具清單</p>
+              ) : (
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                  {availableTools
+                    .filter((n) => n !== 'lookup_qa' && n !== 'transfer_to_human')
+                    .map((toolName) => {
+                      const checked = builtinSelected.has(toolName);
+                      return (
+                        <label
+                          key={toolName}
+                          className={`flex cursor-pointer items-start gap-2 rounded-md border px-3 py-2 text-sm transition-colors ${
+                            checked
+                              ? 'border-primary/50 bg-primary/5'
+                              : 'border-border hover:bg-foreground/5'
+                          }`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={() => toggleTool(toolName)}
+                            className="mt-0.5"
+                          />
+                          <span className="flex-1">
+                            <span className="font-mono text-xs">{toolName}</span>
+                          </span>
+                        </label>
+                      );
+                    })}
+                </div>
+              )}
+            </section>
+
+            {/* Custom HTTP Tools (Tier 3) */}
+            <section className="border-border space-y-3 rounded-md border p-4">
+              <div className="flex items-center justify-between">
+                <h3 className="text-foreground/70 text-sm font-semibold tracking-wide uppercase">
+                  Custom HTTP Tools
+                  <span className="text-foreground/50 ml-2 text-xs normal-case">
+                    {httpToolCount}
+                  </span>
+                </h3>
+                <button
+                  type="button"
+                  onClick={addHttpTool}
+                  className="border-border hover:bg-foreground/5 rounded border px-2 py-1 text-xs"
+                >
+                  + Add HTTP Tool
+                </button>
+              </div>
+              <p className="text-foreground/60 text-xs">
+                把對話結果送到外部 API（例：通報故障、開單、查 CRM）。Endpoint 必須是公網
+                HTTPS；secret 用 <code>{'${ENV_VAR}'}</code> 從環境變數取得。
+              </p>
+              {httpToolCount === 0 && (
+                <p className="text-foreground/60 rounded-md border border-dashed py-4 text-center text-sm">
+                  尚未設定自定義 HTTP 工具
+                </p>
+              )}
+              <div className="space-y-2">
+                {httpTools.map((tool, htIdx) => {
+                  const realIdx = httpToolIndices[htIdx];
+                  const isOpen = httpToolExpanded.has(realIdx);
+                  const paramCount = (tool.parameters || []).length;
+                  return (
+                    <div key={realIdx} className="border-border bg-foreground/5 rounded-md border">
+                      <div className="flex items-stretch">
+                        <button
+                          type="button"
+                          onClick={() => toggleHttpToolExpanded(realIdx)}
+                          className="hover:bg-foreground/5 flex flex-1 items-center gap-3 px-3 py-2 text-left"
+                        >
+                          <span className="text-foreground/60 w-3 shrink-0 text-xs">
+                            {isOpen ? '▾' : '▸'}
+                          </span>
+                          <span
+                            className={`shrink-0 rounded px-1.5 py-0.5 font-mono text-[10px] ${
+                              tool.method === 'GET'
+                                ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300'
+                                : tool.method === 'DELETE'
+                                  ? 'bg-red-500/15 text-red-700 dark:text-red-300'
+                                  : 'bg-blue-500/15 text-blue-700 dark:text-blue-300'
+                            }`}
+                          >
+                            {tool.method || 'POST'}
+                          </span>
+                          <div className="min-w-0 flex-1">
+                            <div className="truncate font-mono text-sm font-medium">
+                              {tool.name || <span className="text-foreground/40">未命名</span>}
+                            </div>
+                            <div className="text-foreground/60 truncate text-xs">
+                              {tool.description ? (
+                                <span>{tool.description}</span>
+                              ) : (
+                                <span className="font-mono">{tool.endpoint || ''}</span>
+                              )}
+                            </div>
+                          </div>
+                          <span className="text-foreground/50 shrink-0 text-xs">
+                            {paramCount} param{paramCount !== 1 && 's'}
+                          </span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => removeHttpTool(realIdx)}
+                          className="border-border hover:bg-foreground/10 shrink-0 border-l px-3 text-xs text-red-600 dark:text-red-400"
+                          title="刪除此工具"
+                        >
+                          ✕
+                        </button>
+                      </div>
+                      {isOpen && (
+                        <div className="border-border space-y-3 border-t p-3">
+                          <div>
+                            <label className="text-foreground/70 mb-1 block text-xs">
+                              Tool name (lowercase, snake_case)
+                            </label>
+                            <input
+                              type="text"
+                              placeholder="report_elevator_failure"
+                              value={tool.name}
+                              onChange={(e) => updateHttpTool(realIdx, { name: e.target.value })}
+                              className={`${inputClass} font-mono`}
+                            />
+                          </div>
+
+                          <div>
+                            <label className="text-foreground/70 mb-1 block text-xs">
+                              Description (給 LLM 看)
+                            </label>
+                            <input
+                              type="text"
+                              placeholder="例：通報電梯故障給維修人員"
+                              value={tool.description || ''}
+                              onChange={(e) =>
+                                updateHttpTool(realIdx, { description: e.target.value })
+                              }
+                              className={inputClass}
+                            />
+                          </div>
+
+                          <div className="grid grid-cols-1 gap-2 md:grid-cols-[1fr_120px]">
+                            <div>
+                              <label className="text-foreground/70 mb-1 block text-xs">
+                                Endpoint URL
+                              </label>
+                              <input
+                                type="text"
+                                placeholder="https://api.example.com/path"
+                                value={tool.endpoint || ''}
+                                onChange={(e) =>
+                                  updateHttpTool(realIdx, { endpoint: e.target.value })
+                                }
+                                className={inputClass}
+                              />
+                            </div>
+                            <div>
+                              <label className="text-foreground/70 mb-1 block text-xs">
+                                Method
+                              </label>
+                              <select
+                                value={tool.method || 'POST'}
+                                onChange={(e) =>
+                                  updateHttpTool(realIdx, {
+                                    method: e.target.value as HttpMethod,
+                                  })
+                                }
+                                className={inputClass}
+                              >
+                                {HTTP_METHODS.map((m) => (
+                                  <option key={m} value={m}>
+                                    {m}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+                          </div>
+
+                          <div>
+                            <label className="text-foreground/70 mb-1 block text-xs">
+                              Auth Header (optional, 支援 <code>{'${ENV_VAR}'}</code>)
+                            </label>
+                            <input
+                              type="text"
+                              placeholder="Bearer ${MY_API_KEY}"
+                              value={tool.auth_header || ''}
+                              onChange={(e) =>
+                                updateHttpTool(realIdx, { auth_header: e.target.value })
+                              }
+                              className={inputClass + ' font-mono text-xs'}
+                            />
+                          </div>
+
+                          <div>
+                            <div className="mb-1 flex items-center justify-between">
+                              <label className="text-foreground/70 block text-xs">Parameters</label>
+                              <button
+                                type="button"
+                                onClick={() => addHttpToolParam(realIdx)}
+                                className="border-border hover:bg-foreground/5 rounded border px-2 py-0.5 text-xs"
+                              >
+                                + Param
+                              </button>
+                            </div>
+                            {(tool.parameters || []).length === 0 && (
+                              <p className="text-foreground/50 text-xs">尚無參數</p>
+                            )}
+                            <div className="space-y-2">
+                              {(tool.parameters || []).map((param, pIdx) => (
+                                <div
+                                  key={pIdx}
+                                  className="border-border grid grid-cols-1 gap-2 rounded-md border p-2 text-xs md:grid-cols-[1fr_100px_1fr_70px_auto]"
+                                >
+                                  <input
+                                    type="text"
+                                    placeholder="param_name"
+                                    value={param.name}
+                                    onChange={(e) =>
+                                      updateHttpToolParam(realIdx, pIdx, {
+                                        name: e.target.value,
+                                      })
+                                    }
+                                    className="border-border bg-background text-foreground rounded border px-2 py-1 font-mono text-xs"
+                                  />
+                                  <select
+                                    value={param.type}
+                                    onChange={(e) =>
+                                      updateHttpToolParam(realIdx, pIdx, {
+                                        type: e.target.value as ParamType,
+                                      })
+                                    }
+                                    className="border-border bg-background text-foreground rounded border px-2 py-1 text-xs"
+                                  >
+                                    {PARAM_TYPES.map((t) => (
+                                      <option key={t} value={t}>
+                                        {t}
+                                      </option>
+                                    ))}
+                                  </select>
+                                  <input
+                                    type="text"
+                                    placeholder="description（給 LLM 提示）"
+                                    value={param.description || ''}
+                                    onChange={(e) =>
+                                      updateHttpToolParam(realIdx, pIdx, {
+                                        description: e.target.value,
+                                      })
+                                    }
+                                    className="border-border bg-background text-foreground rounded border px-2 py-1 text-xs"
+                                  />
+                                  <label className="flex items-center justify-center gap-1">
+                                    <input
+                                      type="checkbox"
+                                      checked={!!param.required}
+                                      onChange={(e) =>
+                                        updateHttpToolParam(realIdx, pIdx, {
+                                          required: e.target.checked,
+                                        })
+                                      }
+                                    />
+                                    required
+                                  </label>
+                                  <button
+                                    type="button"
+                                    onClick={() => removeHttpToolParam(realIdx, pIdx)}
+                                    className="text-foreground/60 px-1 hover:text-red-600"
+                                    title="刪除參數"
+                                  >
+                                    ✕
+                                  </button>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </section>
+          </>
+        )}
+
+        {/* ── Advanced tab ──────────────────────────────────────── */}
+        {activeTab === 'advanced' && (
+          <section className="border-border space-y-3 rounded-md border p-4">
+            <h3 className="text-foreground/70 text-sm font-semibold tracking-wide uppercase">
               Advanced JSON
               <span className="text-foreground/50 ml-2 text-xs normal-case">
                 (進階排程 / 其他自訂欄位)
               </span>
-            </span>
-            <span className="text-foreground/60">{showAdvanced ? '▾' : '▸'}</span>
-          </button>
-          {showAdvanced && (
-            <div className="border-border border-t p-4">
-              <textarea
-                value={extraJson}
-                onChange={(e) => setExtraJson(e.target.value)}
-                rows={15}
-                spellCheck={false}
-                className="border-border bg-background text-foreground w-full rounded-md border px-3 py-2 font-mono text-xs"
-              />
-              <p className="text-foreground/60 mt-2 text-xs">
-                只放上方表單未涵蓋的欄位（如 services 內的 schedule / closed_days、其他客製欄位）。
-                儲存時會與表單欄位合併。
-              </p>
-            </div>
-          )}
-        </section>
+            </h3>
+            <p className="text-foreground/60 text-xs">
+              只放上方表單未涵蓋的欄位（如 services 內的 schedule / closed_days、其他客製欄位）。
+              儲存時會與表單欄位合併。
+            </p>
+            <textarea
+              value={extraJson}
+              onChange={(e) => setExtraJson(e.target.value)}
+              rows={20}
+              spellCheck={false}
+              className="border-border bg-background text-foreground w-full rounded-md border px-3 py-2 font-mono text-xs"
+            />
+          </section>
+        )}
+      </div>
 
+      {/* Sticky save bar — visible on every tab */}
+      <div className="bg-background/95 border-border sticky bottom-0 -mx-6 mt-4 border-t px-6 py-3 backdrop-blur">
         <div className="flex items-center gap-3">
           <button
             type="button"
