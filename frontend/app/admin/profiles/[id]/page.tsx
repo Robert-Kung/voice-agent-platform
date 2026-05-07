@@ -158,6 +158,35 @@ function migrateLegacyHumanOperator(known: KnownConfig): KnownConfig {
   return out;
 }
 
+/** Tool names removed during the Stage 1 cleanup (2026-05-04). They may still
+ *  exist in old profile rows; we drop them on read so the UI reflects the
+ *  current registry. Also drops auto-mounted tools (`lookup_qa`,
+ *  `transfer_to_human`) which are now managed by qa_mode / human_operator
+ *  config — keeping them in the tools array would render duplicate UI.
+ */
+const LEGACY_TOOL_NAMES = new Set([
+  'get_current_datetime',
+  'check_business_status',
+  'check_weather',
+  'book_appointment',
+  'search_menu',
+  'calculate_price',
+  'replay_last_prompt',
+]);
+const AUTO_MOUNTED_TOOLS = new Set(['lookup_qa', 'transfer_to_human']);
+
+function cleanLegacyTools(known: KnownConfig): KnownConfig {
+  const tools = known.tools || [];
+  const cleaned = tools.filter((t) => {
+    if (t.endpoint) return true; // keep all Tier 3 HTTP tools
+    if (LEGACY_TOOL_NAMES.has(t.name)) return false;
+    if (AUTO_MOUNTED_TOOLS.has(t.name)) return false;
+    return true;
+  });
+  if (cleaned.length === tools.length) return known;
+  return { ...known, tools: cleaned };
+}
+
 function buildConfig(known: KnownConfig, extra: Record<string, unknown>): Record<string, unknown> {
   const out: Record<string, unknown> = { ...extra };
   for (const k of KNOWN_KEYS) {
@@ -281,7 +310,7 @@ export default function ProfileDetailPage() {
       .get(id)
       .then((p) => {
         const { known: raw, extra } = splitConfig(p.config || {});
-        const k = migrateLegacyHumanOperator(raw);
+        const k = cleanLegacyTools(migrateLegacyHumanOperator(raw));
         if (!k.tools) k.tools = [];
         const ej = Object.keys(extra).length ? JSON.stringify(extra, null, 2) : '{}';
         setProfile(p);
@@ -548,7 +577,7 @@ export default function ProfileDetailPage() {
         });
         setProfile(updated);
         const { known: raw, extra } = splitConfig(updated.config || {});
-        const k = migrateLegacyHumanOperator(raw);
+        const k = cleanLegacyTools(migrateLegacyHumanOperator(raw));
         if (!k.tools) k.tools = [];
         const ej = Object.keys(extra).length ? JSON.stringify(extra, null, 2) : '{}';
         setKnown(k);
@@ -574,9 +603,15 @@ export default function ProfileDetailPage() {
   if (error) return <div className="text-red-500">Error: {error}</div>;
   if (!profile) return <div>Profile not found.</div>;
 
-  // Built-in tools = entries without `endpoint`; Tier 3 HTTP tools = entries with `endpoint`
+  // Built-in tools = entries without `endpoint`; Tier 3 HTTP tools = entries with `endpoint`.
+  // Cross-check against availableTools so the count never includes names the
+  // backend no longer recognizes (Stage 1 removed several tools but old profile
+  // rows may linger until a save rewrites them).
   const builtinSelected = new Set(
-    (known.tools || []).filter((t) => !t.endpoint).map((t) => t.name)
+    (known.tools || [])
+      .filter((t) => !t.endpoint)
+      .map((t) => t.name)
+      .filter((n) => availableTools.includes(n))
   );
   const httpTools = (known.tools || []).filter((t) => !!t.endpoint);
   const httpToolIndices = (known.tools || [])
@@ -656,7 +691,7 @@ export default function ProfileDetailPage() {
                   <span className="text-foreground/40 text-xs">
                     QA {qaCount}
                     {handoffEnabled ? ' · Handoff' : ''}
-                    {servicesCount > 0 ? ` · ${servicesCount}h` : ''}
+                    {servicesCount > 0 ? ` · Hours ${servicesCount}` : ''}
                   </span>
                 )}
                 {t.key === 'tools' && (
@@ -1207,9 +1242,19 @@ export default function ProfileDetailPage() {
                 HTTPS；secret 用 <code>{'${ENV_VAR}'}</code> 從環境變數取得。
               </p>
               {httpToolCount === 0 && (
-                <p className="text-foreground/60 rounded-md border border-dashed py-4 text-center text-sm">
-                  尚未設定自定義 HTTP 工具
-                </p>
+                <div className="rounded-md border border-dashed py-8 text-center">
+                  <p className="text-foreground/70 mb-1 text-sm">尚未設定自定義 HTTP 工具</p>
+                  <p className="text-foreground/50 mb-4 text-xs">
+                    把對話送到外部 API（例：通報 LINE、開工單、查 CRM）
+                  </p>
+                  <button
+                    type="button"
+                    onClick={addHttpTool}
+                    className="bg-primary text-primary-foreground rounded-md px-3 py-1.5 text-sm font-medium hover:opacity-90"
+                  >
+                    + Add HTTP Tool
+                  </button>
+                </div>
               )}
               <div className="space-y-2">
                 {httpTools.map((tool, htIdx) => {
