@@ -27,3 +27,6 @@ frontend/.pnpm-store/
 # Playwright MCP 快照暫存
 .playwright-mcp/
 *.png
+
+# Claude Code local settings
+.claude/
