@@ -1,11 +1,25 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import dynamic from 'next/dynamic';
 import Link from 'next/link';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { toast } from 'sonner';
+import { buildFlowFromConfig } from '@/components/admin/agent-flow-builder';
+import type { FlowNodeData, FlowNodeType } from '@/components/admin/agent-flow-builder';
 import { profilesApi, testApi, toolsApi } from '@/lib/admin-api';
 import type { Profile } from '@/lib/admin-api';
+
+// Lazy-load the flow builder (heavy dependency: xyflow)
+const AgentFlowBuilder = dynamic(
+  () => import('@/components/admin/agent-flow-builder').then((m) => m.AgentFlowBuilder),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="bg-card border-border h-[480px] animate-pulse rounded-xl border" />
+    ),
+  }
+);
 
 const KNOWN_KEYS = [
   'name',
@@ -44,9 +58,10 @@ const TIMEZONES = [
 type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
 type ParamType = 'string' | 'number' | 'integer' | 'boolean';
 type QaMode = 'inline' | 'tool';
-type TabKey = 'basics' | 'conversation' | 'tools' | 'advanced';
+type TabKey = 'basics' | 'conversation' | 'tools' | 'flow' | 'advanced';
 
 const TABS: { key: TabKey; label: string }[] = [
+  { key: 'flow', label: 'Flow' },
   { key: 'basics', label: 'Basics' },
   { key: 'conversation', label: 'Conversation' },
   { key: 'tools', label: 'Tools' },
@@ -246,7 +261,8 @@ export default function ProfileDetailPage() {
   // Tab state — initial value from URL, sync via window.history on change
   const initialTab = ((): TabKey => {
     const t = searchParams.get('tab');
-    return (TABS.find((tab) => tab.key === t)?.key ?? 'basics') as TabKey;
+    if (TABS.find((tab) => tab.key === t)) return t as TabKey;
+    return isNew ? 'basics' : 'flow';
   })();
   const [activeTab, setActiveTab] = useState<TabKey>(initialTab);
 
@@ -678,7 +694,7 @@ export default function ProfileDetailPage() {
       </div>
 
       <div>
-        <h2 className="text-2xl font-bold">
+        <h2 className="text-2xl font-semibold tracking-tight">
           {isNew ? 'New Profile' : displayName || profile.name}
         </h2>
         {!isNew && (
@@ -733,6 +749,25 @@ export default function ProfileDetailPage() {
       </div>
 
       <div className="space-y-5">
+        {/* ── Flow tab ──────────────────────────────────────────── */}
+        {activeTab === 'flow' && (
+          <FlowTabContent
+            known={known}
+            onNodeSelect={(nodeId, nodeType) => {
+              if (
+                nodeType === 'prompt' ||
+                nodeType === 'qa_database' ||
+                nodeType === 'service_hours' ||
+                nodeType === 'human_handoff'
+              ) {
+                goToTab('conversation');
+              } else if (nodeType === 'builtin_tool' || nodeType === 'http_tool') {
+                goToTab('tools');
+              }
+            }}
+          />
+        )}
+
         {/* ── Basics tab ────────────────────────────────────────── */}
         {activeTab === 'basics' && (
           <>
@@ -856,9 +891,9 @@ export default function ProfileDetailPage() {
                 <textarea
                   value={known.instructions ?? ''}
                   onChange={(e) => updateKnown('instructions', e.target.value)}
-                  rows={12}
+                  rows={20}
                   placeholder="主 Agent 的 system prompt…"
-                  className={textareaClass}
+                  className={`${textareaClass} min-h-[200px] resize-y font-mono text-xs leading-relaxed`}
                 />
               </div>
             </section>
@@ -1565,6 +1600,49 @@ export default function ProfileDetailPage() {
           )}
           {isDirty && <span className="text-xs text-amber-600 dark:text-amber-400">未儲存</span>}
         </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Flow Tab Content ─────────────────────────────────────────────
+function FlowTabContent({
+  known,
+  onNodeSelect,
+}: {
+  known: KnownConfig;
+  onNodeSelect?: (nodeId: string | null, nodeType: FlowNodeType | null) => void;
+}) {
+  const { nodes, edges } = useMemo(() => buildFlowFromConfig(known), [known]);
+
+  return (
+    <div className="space-y-4">
+      <div>
+        <h3 className="text-base font-semibold">Agent Flow</h3>
+        <p className="text-muted-foreground text-sm">
+          Profile 的對話能力組裝。點選節點可跳至對應設定。
+        </p>
+      </div>
+      <AgentFlowBuilder nodes={nodes} edges={edges} onNodeSelect={onNodeSelect} readOnly />
+      <div className="text-muted-foreground flex flex-wrap gap-4 text-xs">
+        <span className="flex items-center gap-1.5">
+          <span className="bg-chart-1/30 inline-block size-2.5 rounded-sm" /> Instructions
+        </span>
+        <span className="flex items-center gap-1.5">
+          <span className="bg-chart-2/30 inline-block size-2.5 rounded-sm" /> QA Database
+        </span>
+        <span className="flex items-center gap-1.5">
+          <span className="bg-chart-3/30 inline-block size-2.5 rounded-sm" /> Service Hours
+        </span>
+        <span className="flex items-center gap-1.5">
+          <span className="bg-chart-4/30 inline-block size-2.5 rounded-sm" /> Human Handoff
+        </span>
+        <span className="flex items-center gap-1.5">
+          <span className="bg-chart-5/30 inline-block size-2.5 rounded-sm" /> Built-in Tool
+        </span>
+        <span className="flex items-center gap-1.5">
+          <span className="bg-primary/30 inline-block size-2.5 rounded-sm" /> HTTP Tool
+        </span>
       </div>
     </div>
   );
