@@ -427,18 +427,40 @@ async def entrypoint(ctx: JobContext):
                 # Flush chat transcript (user/agent messages) from session.history
                 for item in getattr(session.history, "items", []):
                     event_seq += 1
-                    role = getattr(item, "role", "message")
-                    text = getattr(item, "text_content", None)
-                    events_buffer.append(
-                        {
+                    item_type = getattr(item, "type", None)
+
+                    if item_type == "function_call":
+                        events_buffer.append({
+                            "seq": event_seq,
+                            "event_type": "function_call",
+                            "payload_json": {
+                                "name": item.name,
+                                "call_id": item.call_id,
+                                "arguments": item.arguments,
+                            },
+                        })
+                    elif item_type == "function_call_output":
+                        events_buffer.append({
+                            "seq": event_seq,
+                            "event_type": "function_call_output",
+                            "payload_json": {
+                                "name": item.name,
+                                "call_id": item.call_id,
+                                "output": item.output,
+                                "is_error": item.is_error,
+                            },
+                        })
+                    else:
+                        role = getattr(item, "role", "message")
+                        text = getattr(item, "text_content", None)
+                        events_buffer.append({
                             "seq": event_seq,
                             "event_type": f"chat_{role}",
                             "payload_json": {
                                 "role": role,
                                 "text": text if text is not None else repr(item),
                             },
-                        }
-                    )
+                        })
 
                 cost_result = compute_cost(summary, agent_mode=AGENT_MODE)
                 # UsageCollector.get_summary() has no "duration" key; compute
