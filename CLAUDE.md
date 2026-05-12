@@ -101,8 +101,45 @@ tools:
 - Profile 改名 / tool 拿掉時記得同步更新 test_agent_system.py 的 assertion
 - Cost：realtime 用 Gemini Live token rates（`db/cost.py`），pipeline 走 LLM/STT/TTS 分開計費
 
+### Realtime mode 架構（TextInputRealtimeModel）
+
+Realtime mode **不是**純 Gemini audio-in → audio-out。Gemini Live API 接收原始音頻時，audio token 隨對話時間累積，延遲從 1–2 秒遞增到 20–30 秒（已在所有 observability 資料確認）。
+
+解法：`TextInputRealtimeModel`（`agent.py`）封裝 Gemini Live，攔截 `push_audio`，改由外部 Deepgram STT 轉寫後以文字輸入 Gemini。
+
+實際信號流：
+```
+語音 → Silero VAD → Deepgram STT → text
+     → on_user_turn_completed → session.generate_reply(user_input=text)
+     → Gemini Live（文字輸入）→ 語音輸出
+```
+
+因此 `AGENT_STT_PROVIDER` 在 realtime 和 pipeline 兩種 mode 下**都有效**：
+- `inference`（預設）— 走 LiveKit Inference gateway（Cloud 部署用）
+- `deepgram` — 直連 Deepgram API key（Try button 本機測試用，避免吃 free plan STT concurrency quota）
+
+### LiveKit Agents multi-process 陷阱
+
+LiveKit Agents 的 worker 用 multi-process 模型：`entrypoint()` 是在 SDK fork 的 **child process** 執行，不繼承 parent 的 `sys.argv`。
+
+影響：`uv run agent.py connect --profile restaurant` 的 `--profile` flag 只對主 worker process 有效；SDK fork 出來跑 `entrypoint()` 的 child process 找不到 `--profile`，會 fallback 到 `AGENT_PROFILE` env var。
+
+修法（已在 `api/routes_test.py` 實作）：`child_env` 必須同時帶 `AGENT_PROFILE=profile`（env var child process 會繼承）。**不可移除這一行**，否則 Try button 全部 fallback 到預設 profile。
+
+```python
+child_env = {**os.environ, "AGENT_STT_PROVIDER": "deepgram", "AGENT_PROFILE": profile}
+```
+
 ## 部署
 
 - LiveKit Cloud：`lk agent deploy`，`AGENT_PROFILE` env 控制預設 profile
 - Docker：`docker compose up -d --build`（frontend port 3004、api port 8083）
-- Realtime 模式（預設）：Gemini Live + Deepgram STT（避開 audio token 累積延遲 bug）
+- Realtime 模式（預設）：Gemini Live + Deepgram STT（避開 audio token 累積延遲 bug，見上方架構說明）
+
+### SIP 接入的 profile 限制
+
+**LiveKit Cloud dashboard 設定的 SIP dispatch rule 沒有 metadata 欄位**，無法動態切換 profile。SIP 來電的 profile 永遠固定在 `AGENT_PROFILE` secret。
+
+若需要不同電話號碼對應不同 profile，只能：
+1. 透過 LiveKit API（非 dashboard）建立 dispatch rule，可在 `room_config.agents[].metadata` 帶 `{"profile": "dental_clinic"}`，agent 的 `_get_runtime_profile_name()` 會從 `ctx.job.metadata` 讀取
+2. 或部署多個 Cloud agent（不同 `agent_name`），各自對應不同 `AGENT_PROFILE` secret

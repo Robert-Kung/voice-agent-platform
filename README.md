@@ -86,6 +86,17 @@ cd frontend && pnpm dev
 
 ---
 
+# Realtime 模式架構
+
+預設的 realtime mode **不是**純 Gemini audio-in → audio-out。Gemini Live API 直接接收音頻會導致 audio token 累積，造成回覆延遲從数秒逐漸升到 20–30 秒。
+
+實際信號流：
+```
+語音 → Silero VAD → Deepgram STT → 文字 → Gemini Live（文字輸入）→ 語音輸出
+```
+
+Gemini 看到的是文字 token，不是音頻 token，延遲因此保持穩定。這也是為何 `GOOGLE_API_KEY`（Gemini）與 `DEEPGRAM_API_KEY` 兩者同時必填的原因。
+
 ## 環境變數
 
 ```env
@@ -147,6 +158,23 @@ lk agent secrets set ELEVATOR_API_KEY=...
 ```
 
 Cloud 與本機共用 sessions：設定 `AGENT_DB_URL`（如共享 Postgres），會優先於 `AGENT_DB_PATH`。
+
+### Profile 動態切換（Browser / API）
+
+前端建立房間時可在 room metadata 帶入 profile 名稱，同一個部署的 agent 即可服務不同場域：
+
+```json
+// token 請求的 room_config.metadata
+{"profile": "dental_clinic"}
+```
+
+如此則不需部署多個 agent，free plan 只需一個。
+
+### SIP 接入的 profile 限制
+
+**LiveKit Cloud dashboard 設定的 SIP dispatch rule 沒有 metadata 欄位**，無法帶入 profile 資訊。SIP 來電的 profile 固定為 `AGENT_PROFILE` secret，不支援按号碼動態切換。
+
+若需不同電話號碼對應不同場域，需透過 LiveKit Server API（非 dashboard）建立 dispatch rule 並帶入 metadata。
 
 ### 自訂 API URL（前端）
 `NEXT_PUBLIC_ADMIN_API_URL` 是 build-time 編譯進 client bundle，預設 `http://localhost:8080`。非本機部署時：
