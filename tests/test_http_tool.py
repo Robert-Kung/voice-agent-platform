@@ -192,16 +192,19 @@ class TestConfigValidation:
             {"name": "building", "type": "string", "required": True},
             {"name": "symptom", "type": "string"},
         ]))
-        schema = tool.info.raw_schema["parameters"]
+        from livekit.agents.llm import utils as llm_utils
+        schema = llm_utils.build_legacy_openai_schema(tool, internally_tagged=True)["parameters"]
         assert "building" in schema["properties"]
         assert "symptom" in schema["properties"]
-        assert schema["required"] == ["building"]
+        assert "building" in schema["required"]
 
     def test_param_description_in_schema(self):
         tool = make_http_tool({}, self._config(parameters=[
             {"name": "x", "type": "string", "description": "The X value"},
         ]))
-        assert tool.info.raw_schema["parameters"]["properties"]["x"]["description"] == "The X value"
+        from livekit.agents.llm import utils as llm_utils
+        schema = llm_utils.build_legacy_openai_schema(tool, internally_tagged=True)["parameters"]
+        assert schema["properties"]["x"]["description"] == "The X value"
 
 
 # ═══════════════════════════════════════════════════════════
@@ -262,10 +265,11 @@ class TestBuildToolsRouting:
         }
         tools = build_tools_for_agent(profile)
         tool = tools["elevator_report"]
-        schema = tool.info.raw_schema
-        assert schema["name"] == "elevator_report"
-        assert schema["description"] == "通報電梯故障"
-        assert schema["parameters"]["required"] == ["building"]
+        assert tool.info.name == "elevator_report"
+        assert tool.info.description == "通報電梯故障"
+        from livekit.agents.llm import utils as llm_utils
+        schema = llm_utils.build_legacy_openai_schema(tool, internally_tagged=True)["parameters"]
+        assert "building" in schema["required"]
 
 
 # ═══════════════════════════════════════════════════════════

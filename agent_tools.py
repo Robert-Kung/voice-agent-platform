@@ -12,16 +12,20 @@ Agent Tools Registry — 模組化 Tool 工廠
 
 import asyncio
 import datetime
+import inspect
 import ipaddress
 import logging
 import os
 import re
+from typing import Annotated, Optional
 from urllib.parse import urlparse
 from zoneinfo import ZoneInfo
 
 import aiohttp
+from pydantic import Field
 
 from livekit.agents.llm import function_tool
+from livekit.agents.voice.events import RunContext
 
 logger = logging.getLogger("agent-tools")
 
@@ -194,7 +198,7 @@ def make_transfer_to_human(profile: dict, config: dict):
     _HumanOperator.__name__ = f"HumanOperator_{profile.get('name', 'unknown')}"
 
     @function_tool
-    async def transfer_to_human(self):
+    async def transfer_to_human(self: RunContext):
         """
         轉接真人接聽。
         僅在無法對應任何已建檔 QA、意圖不明、或使用者明確要求轉接時使用。
@@ -352,8 +356,16 @@ def make_http_tool(profile: dict, config: dict):
             text = await resp.text()
             return {"success": True, "text": text[:500]}
 
+    # LiveKit SDK 的 prepare_function_arguments 會呼叫 inspect.signature() 和
+    # get_type_hints() 來解析函式參數。**kwargs 會讓 SDK 嘗試查找 type_hints['kwargs']
+    # 而失敗（KeyError: 'kwargs'）。
+    # 解法：使用 **kwargs 實作，但動態 patch __signature__ 和 __annotations__
+    # 讓 SDK 看到具名參數。
+
+    _JSON_TO_PYTYPE = {"string": str, "number": float, "integer": int, "boolean": bool}
+    param_defs = config.get("parameters", []) or []
+
     async def _handler(self, **kwargs) -> dict:
-        """LLM 呼叫此工具時，kwargs 是 LLM 從 schema 推導的參數。"""
         headers = {"Content-Type": "application/json"}
         if auth_header_resolved:
             headers["Authorization"] = auth_header_resolved
@@ -378,13 +390,56 @@ def make_http_tool(profile: dict, config: dict):
             logger.exception("http_tool '%s' unexpected error", name)
             return {"success": False, "error": f"工具呼叫失敗：{type(e).__name__}"}
 
+    # Patch signature：SDK 的 descriptor binding（__get__）在 Agent instance 上
+    # 存取 tool 時會 `params[1:]` 移除第一個參數（假設是 self）。
+    # 所以 signature 必須把 self 放在第一位，讓 bind 正確移除它。
+    #
+    # 用 Annotated[type, Field(description="...")] 把每個參數的 description
+    # 傳給 SDK 的 Pydantic model builder。required 參數不設 default。
+    sig_params = [inspect.Parameter("self", inspect.Parameter.POSITIONAL_OR_KEYWORD, annotation=RunContext)]
+    annotations: dict = {"return": dict, "self": RunContext}
+    for p in param_defs:
+        pname = p["name"]
+        pdesc = p.get("description", "")
+        is_required = p.get("required", False)
+        pytype = _JSON_TO_PYTYPE.get(p.get("type", "string"), str)
+
+        if is_required:
+            annotated_type = Annotated[pytype, Field(description=pdesc)]  # type: ignore[valid-type]
+            sig_params.append(
+                inspect.Parameter(
+                    pname,
+                    inspect.Parameter.KEYWORD_ONLY,
+                    annotation=annotated_type,
+                )
+            )
+        else:
+            annotated_type = Annotated[Optional[pytype], Field(description=pdesc)]  # type: ignore[valid-type]
+            sig_params.append(
+                inspect.Parameter(
+                    pname,
+                    inspect.Parameter.KEYWORD_ONLY,
+                    default=None,
+                    annotation=annotated_type,
+                )
+            )
+        annotations[pname] = annotated_type
+
+    _handler.__signature__ = inspect.Signature(sig_params, return_annotation=dict)
+    _handler.__annotations__ = annotations
+    _handler.__doc__ = description
+    _handler.__name__ = name
+
+    # 重要：不可使用 raw_schema= 參數！
+    # raw_schema 會讓 SDK 建立 RawFunctionTool，Google format converter 會產生
+    # parameters_json_schema（而非 parameters）。Gemini Live API
+    # (gemini-2.5-flash-native-audio-preview) 不正確處理 parameters_json_schema，
+    # 導致模型看到工具名稱但不知道參數格式 → 幻覺工具呼叫而不實際執行。
+    # 使用 name= + description= 讓 SDK 建立 FunctionTool，走 parameters 格式。
     return function_tool(
         _handler,
-        raw_schema={
-            "name": name,
-            "description": description,
-            "parameters": parameters_schema,
-        },
+        name=name,
+        description=description,
     )
 
 
