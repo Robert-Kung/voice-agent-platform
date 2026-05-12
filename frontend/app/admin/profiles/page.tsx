@@ -99,8 +99,8 @@ export default function ProfilesPage() {
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 className="text-2xl font-bold">Profiles</h2>
-          <p className="text-foreground/60 text-sm">Agent configuration profiles</p>
+          <h2 className="text-2xl font-semibold tracking-tight">Profiles</h2>
+          <p className="text-muted-foreground text-sm">Agent configuration profiles</p>
         </div>
         <Link
           href="/admin/profiles/new"
@@ -136,16 +136,28 @@ export default function ProfilesPage() {
           {search ? `沒有符合 "${search}" 的 profile` : '尚無 profile，點右上角建立第一個。'}
         </div>
       ) : (
-        <div className="border-border overflow-hidden rounded-md border">
+        <div className="bg-card border-border overflow-hidden rounded-xl border">
           <table className="w-full text-sm">
-            <thead className="border-border text-foreground/60 bg-foreground/5 border-b">
+            <thead className="bg-muted/50 text-muted-foreground">
               <tr>
-                <th className="p-3 text-left font-medium whitespace-nowrap">Name</th>
-                <th className="p-3 text-left font-medium whitespace-nowrap">Display Name</th>
-                <th className="p-3 text-left font-medium">Tools</th>
-                <th className="p-3 text-left font-medium whitespace-nowrap">Status</th>
-                <th className="p-3 text-left font-medium whitespace-nowrap">Updated</th>
-                <th className="p-3 text-right font-medium whitespace-nowrap">Actions</th>
+                <th className="px-4 py-3 text-left text-xs font-medium tracking-wider whitespace-nowrap uppercase">
+                  Name
+                </th>
+                <th className="px-4 py-3 text-left text-xs font-medium tracking-wider whitespace-nowrap uppercase">
+                  Display Name
+                </th>
+                <th className="px-4 py-3 text-left text-xs font-medium tracking-wider uppercase">
+                  Tools
+                </th>
+                <th className="px-4 py-3 text-left text-xs font-medium tracking-wider whitespace-nowrap uppercase">
+                  Status
+                </th>
+                <th className="px-4 py-3 text-left text-xs font-medium tracking-wider whitespace-nowrap uppercase">
+                  Updated
+                </th>
+                <th className="px-4 py-3 text-right text-xs font-medium tracking-wider whitespace-nowrap uppercase">
+                  Actions
+                </th>
               </tr>
             </thead>
             <tbody>

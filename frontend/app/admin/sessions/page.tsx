@@ -55,8 +55,8 @@ export default function SessionsPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-2xl font-bold">Sessions</h2>
-        <p className="text-foreground/60 text-sm">Agent conversation sessions</p>
+        <h2 className="text-2xl font-semibold tracking-tight">Sessions</h2>
+        <p className="text-muted-foreground text-sm">Agent conversation sessions</p>
       </div>
 
       <div className="flex flex-wrap items-center gap-3">
