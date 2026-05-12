@@ -130,7 +130,12 @@ async def start_test_agent(body: StartRequest):
     # LiveKit Inference STT quota with the deployed Cloud agent (the free plan
     # STT concurrency limit is shared across all projects on the account).
     # Cloud agent never sees this var → stays on inference.STT.
-    child_env = {**os.environ, "AGENT_STT_PROVIDER": "deepgram"}
+    #
+    # Also set AGENT_PROFILE so the LiveKit SDK-spawned child process (which
+    # runs entrypoint() in a forked worker) picks up the right profile.
+    # The parent subprocess has --profile in sys.argv but child processes
+    # spawned by the SDK don't inherit sys.argv — they DO inherit env vars.
+    child_env = {**os.environ, "AGENT_STT_PROVIDER": "deepgram", "AGENT_PROFILE": profile}
 
     # Hold the lock across the full pop-old → spawn-new → record sequence so
     # two concurrent /start calls for the same room can't both spawn (and
