@@ -164,6 +164,19 @@ function ConversationTab({ events }: { events: SessionEvent[] }) {
   return (
     <div className="space-y-2">
       {events.map((ev) => {
+        // Detect function_call / function_call_output by event_type (structured payload)
+        // or by legacy text repr starting with FunctionCall( / FunctionCallOutput(
+        if (ev.event_type === 'function_call') {
+          const name = (ev.payload?.name as string) || '(unknown)';
+          const raw = JSON.stringify(ev.payload, null, 2);
+          return <FunctionCallRow key={ev.id} kind="call" name={name} raw={raw} />;
+        }
+        if (ev.event_type === 'function_call_output') {
+          const name = (ev.payload?.name as string) || '(unknown)';
+          const raw = JSON.stringify(ev.payload, null, 2);
+          return <FunctionCallRow key={ev.id} kind="output" name={name} raw={raw} />;
+        }
+
         const role = (ev.payload?.role as string) || 'message';
         const text = (ev.payload?.text as string) || '';
         const fn = parseFunctionCallText(text);
@@ -590,7 +603,11 @@ function groupEvents(events: SessionEvent[]): {
   const conversation: SessionEvent[] = [];
   const metrics: SessionEvent[] = [];
   for (const ev of events) {
-    if (ev.event_type.startsWith('chat_')) {
+    if (
+      ev.event_type.startsWith('chat_') ||
+      ev.event_type === 'function_call' ||
+      ev.event_type === 'function_call_output'
+    ) {
       conversation.push(ev);
     } else if (ev.event_type.startsWith('metric_')) {
       metrics.push(ev);
