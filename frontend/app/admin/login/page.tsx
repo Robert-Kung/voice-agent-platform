@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useSearchParams } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 
 function safeRedirect(from: string | null): string {
@@ -15,7 +15,6 @@ function safeRedirect(from: string | null): string {
 }
 
 export default function LoginPage() {
-  const router = useRouter();
   const searchParams = useSearchParams();
   const from = safeRedirect(searchParams.get('from'));
 
@@ -45,7 +44,12 @@ export default function LoginPage() {
     }
 
     if (res.ok) {
-      router.replace(from);
+      // Hard navigation (not router.replace) — App Router caches RSC payloads
+      // per URL, and any prefetch of /admin/* that ran *before* the cookie was
+      // set will have been redirected back to /admin/login by middleware. That
+      // cached redirect is what makes `router.replace(from)` look like it does
+      // nothing. A full page load bypasses the client router cache entirely.
+      window.location.assign(from);
       return;
     }
 

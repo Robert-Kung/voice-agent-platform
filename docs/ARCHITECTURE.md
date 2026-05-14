@@ -195,7 +195,9 @@ voice-agent-workshop/
 │   ├── migrate.py             tables + import_yaml_profiles (idempotent)
 │   └── engine.py              singleton engine + session factory
 ├── frontend/             Next.js 14 admin UI
-│   └── app/admin/             Dashboard / Profiles / Sessions / Deploy / Tools
+│   └── app/admin/
+│       ├── (authenticated)/   登入後 layout (sidebar) + Dashboard / Profiles / Sessions / Deploy
+│       └── login/             無 sidebar 的登入頁（route group 外）
 ├── tests/                pytest（147 passed）
 │   ├── test_db.py
 │   ├── test_api.py

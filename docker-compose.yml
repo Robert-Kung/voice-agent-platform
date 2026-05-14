@@ -32,8 +32,12 @@ services:
       - "0.0.0.0"
       - "--port"
       - "8083"
-    ports:
-      - "8083:8083"
+    # `expose` (not `ports`) — keep the admin API inside the compose network
+    # so only the frontend service can reach it. Removing the host port
+    # closes a back-channel that bypasses the Next.js middleware auth gate.
+    # For local dev outside docker, run uvicorn directly on the host instead.
+    expose:
+      - "8083"
     env_file:
       - .env
     environment:
