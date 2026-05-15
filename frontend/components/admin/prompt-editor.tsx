@@ -1,10 +1,10 @@
 'use client';
 
 import { useCallback, useEffect, useRef } from 'react';
-import { EditorView, keymap, placeholder as cmPlaceholder, lineNumbers } from '@codemirror/view';
-import { EditorState } from '@codemirror/state';
 import { markdown } from '@codemirror/lang-markdown';
+import { EditorState } from '@codemirror/state';
 import { oneDark } from '@codemirror/theme-one-dark';
+import { EditorView, placeholder as cmPlaceholder, keymap, lineNumbers } from '@codemirror/view';
 import type { UseProfileFormReturn } from '@/hooks/use-profile-form';
 
 const inputClass =
@@ -24,7 +24,7 @@ export function PromptEditor({ form, onGenerateClick, onSave }: PromptEditorProp
   const { known, updateKnown } = form;
 
   return (
-    <div className="space-y-5 h-full flex flex-col">
+    <div className="flex h-full flex-col space-y-5">
       {/* Welcome Message — compact */}
       <div>
         <label className="text-foreground/60 mb-1 block text-xs font-medium">
@@ -44,7 +44,9 @@ export function PromptEditor({ form, onGenerateClick, onSave }: PromptEditorProp
       <div>
         <label className="text-foreground/60 mb-1 block text-xs font-medium">
           Welcome Instructions
-          <span className="text-foreground/40 ml-2 font-normal">(realtime 模式 — Gemini 自由生成開場)</span>
+          <span className="text-foreground/40 ml-2 font-normal">
+            (realtime 模式 — Gemini 自由生成開場)
+          </span>
         </label>
         <textarea
           value={known.welcome_instructions ?? ''}
@@ -56,8 +58,8 @@ export function PromptEditor({ form, onGenerateClick, onSave }: PromptEditorProp
       </div>
 
       {/* System Prompt — dominant, takes remaining space */}
-      <div className="flex-1 flex flex-col min-h-0">
-        <div className="flex items-center justify-between mb-1">
+      <div className="flex min-h-0 flex-1 flex-col">
+        <div className="mb-1 flex items-center justify-between">
           <label className="text-foreground/60 text-xs font-medium">
             System Prompt
             <span className="text-foreground/40 ml-2 font-normal">(instructions)</span>
@@ -66,7 +68,7 @@ export function PromptEditor({ form, onGenerateClick, onSave }: PromptEditorProp
             <button
               type="button"
               onClick={onGenerateClick}
-              className="flex items-center gap-1 rounded-md border border-border px-2 py-0.5 text-xs text-foreground/60 hover:bg-foreground/5 hover:text-foreground transition-colors"
+              className="border-border text-foreground/60 hover:bg-foreground/5 hover:text-foreground flex items-center gap-1 rounded-md border px-2 py-0.5 text-xs transition-colors"
             >
               ✨ Generate
             </button>
@@ -196,10 +198,5 @@ function SystemPromptEditor({ value, onChange, onSave }: SystemPromptEditorProps
     }
   }, [value]);
 
-  return (
-    <div
-      ref={containerRef}
-      className="flex-1 min-h-[400px] overflow-hidden rounded-md"
-    />
-  );
+  return <div ref={containerRef} className="min-h-[400px] flex-1 overflow-hidden rounded-md" />;
 }

@@ -1,7 +1,7 @@
 'use client';
 
-import { CollapsibleSection } from '../collapsible-section';
 import type { UseProfileFormReturn } from '@/hooks/use-profile-form';
+import { CollapsibleSection } from '../collapsible-section';
 
 const inputClass =
   'border-border bg-background text-foreground w-full rounded-md border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40';
@@ -30,9 +30,7 @@ export function HandoffSection({ form }: HandoffSectionProps) {
           />
           啟用真人轉接
         </label>
-        <p className="text-foreground/50 text-[10px]">
-          開啟後自動掛上 transfer_to_human 工具
-        </p>
+        <p className="text-foreground/50 text-[10px]">開啟後自動掛上 transfer_to_human 工具</p>
 
         {enabled && (
           <div className="space-y-2">
@@ -53,7 +51,7 @@ export function HandoffSection({ form }: HandoffSectionProps) {
                 onChange={(e) => updateHandoff('instructions', e.target.value)}
                 rows={2}
                 placeholder="你是 XX 的門市人員…"
-                className={`${inputClass} text-xs resize-y`}
+                className={`${inputClass} resize-y text-xs`}
               />
             </div>
             <div className="grid grid-cols-2 gap-2">

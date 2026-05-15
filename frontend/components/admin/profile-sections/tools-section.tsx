@@ -1,10 +1,10 @@
 'use client';
 
 import { useState } from 'react';
-import { CollapsibleSection } from '../collapsible-section';
 import type { UseProfileFormReturn } from '@/hooks/use-profile-form';
 import { HTTP_METHODS, PARAM_TYPES } from '@/hooks/use-profile-form';
 import type { HttpMethod, ParamType } from '@/hooks/use-profile-form';
+import { CollapsibleSection } from '../collapsible-section';
 
 const inputClass =
   'border-border bg-background text-foreground w-full rounded-md border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40';
@@ -159,10 +159,8 @@ function HttpToolCard({
           >
             {tool.method || 'POST'}
           </span>
-          <span className="font-mono text-xs truncate flex-1">
-            {tool.name || '未命名'}
-          </span>
-          <span className="text-foreground/40 text-[10px] shrink-0">{paramCount}p</span>
+          <span className="flex-1 truncate font-mono text-xs">{tool.name || '未命名'}</span>
+          <span className="text-foreground/40 shrink-0 text-[10px]">{paramCount}p</span>
         </button>
         <button
           type="button"
@@ -202,7 +200,9 @@ function HttpToolCard({
               className={`${inputClass} text-xs`}
             >
               {HTTP_METHODS.map((m) => (
-                <option key={m} value={m}>{m}</option>
+                <option key={m} value={m}>
+                  {m}
+                </option>
               ))}
             </select>
           </div>
@@ -215,7 +215,7 @@ function HttpToolCard({
           />
           {/* Parameters */}
           <div>
-            <div className="flex items-center justify-between mb-1">
+            <div className="mb-1 flex items-center justify-between">
               <span className="text-foreground/70 text-[10px]">Parameters</span>
               <button
                 type="button"
@@ -233,22 +233,28 @@ function HttpToolCard({
                     placeholder="name"
                     value={param.name}
                     onChange={(e) => updateHttpToolParam(realIdx, pIdx, { name: e.target.value })}
-                    className="border-border bg-background rounded border px-1.5 py-0.5 font-mono text-[10px] flex-1 min-w-0"
+                    className="border-border bg-background min-w-0 flex-1 rounded border px-1.5 py-0.5 font-mono text-[10px]"
                   />
                   <select
                     value={param.type}
-                    onChange={(e) => updateHttpToolParam(realIdx, pIdx, { type: e.target.value as ParamType })}
-                    className="border-border bg-background rounded border px-1 py-0.5 text-[10px] w-16"
+                    onChange={(e) =>
+                      updateHttpToolParam(realIdx, pIdx, { type: e.target.value as ParamType })
+                    }
+                    className="border-border bg-background w-16 rounded border px-1 py-0.5 text-[10px]"
                   >
                     {PARAM_TYPES.map((t) => (
-                      <option key={t} value={t}>{t}</option>
+                      <option key={t} value={t}>
+                        {t}
+                      </option>
                     ))}
                   </select>
                   <label className="flex items-center gap-0.5 text-[10px]">
                     <input
                       type="checkbox"
                       checked={!!param.required}
-                      onChange={(e) => updateHttpToolParam(realIdx, pIdx, { required: e.target.checked })}
+                      onChange={(e) =>
+                        updateHttpToolParam(realIdx, pIdx, { required: e.target.checked })
+                      }
                       className="size-2.5"
                     />
                     req
@@ -256,7 +262,7 @@ function HttpToolCard({
                   <button
                     type="button"
                     onClick={() => removeHttpToolParam(realIdx, pIdx)}
-                    className="text-foreground/40 hover:text-red-500 text-[10px]"
+                    className="text-foreground/40 text-[10px] hover:text-red-500"
                   >
                     ✕
                   </button>

@@ -1,7 +1,7 @@
 'use client';
 
-import { CollapsibleSection } from '../collapsible-section';
 import type { UseProfileFormReturn } from '@/hooks/use-profile-form';
+import { CollapsibleSection } from '../collapsible-section';
 
 interface AdvancedSectionProps {
   form: UseProfileFormReturn;
@@ -27,7 +27,7 @@ export function AdvancedSection({ form }: AdvancedSectionProps) {
           onChange={(e) => setExtraJson(e.target.value)}
           rows={12}
           spellCheck={false}
-          className="border-border bg-background text-foreground w-full rounded-md border px-3 py-2 font-mono text-xs focus:outline-none focus:ring-2 focus:ring-primary/40 resize-y"
+          className="border-border bg-background text-foreground focus:ring-primary/40 w-full resize-y rounded-md border px-3 py-2 font-mono text-xs focus:ring-2 focus:outline-none"
         />
       </div>
     </CollapsibleSection>

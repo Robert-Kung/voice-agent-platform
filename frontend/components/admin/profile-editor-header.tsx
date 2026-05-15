@@ -32,10 +32,10 @@ export function ProfileEditorHeader({
   return (
     <div className="flex items-center gap-4 px-6 py-3">
       {/* Left: back + identity */}
-      <div className="flex items-center gap-3 min-w-0 flex-1">
+      <div className="flex min-w-0 flex-1 items-center gap-3">
         <Link
           href="/admin/profiles"
-          className="text-foreground/50 hover:text-foreground text-sm shrink-0"
+          className="text-foreground/50 hover:text-foreground shrink-0 text-sm"
         >
           ←
         </Link>
@@ -43,35 +43,35 @@ export function ProfileEditorHeader({
           <h1 className="text-foreground truncate text-base font-semibold">
             {isNew ? 'New Profile' : displayName || profileName}
           </h1>
-          {!isNew && (
-            <p className="text-foreground/40 truncate font-mono text-xs">{profileName}</p>
-          )}
+          {!isNew && <p className="text-foreground/40 truncate font-mono text-xs">{profileName}</p>}
         </div>
         {isDirty && (
-          <span className="shrink-0 text-xs text-amber-500" title="未儲存的變更">●</span>
+          <span className="shrink-0 text-xs text-amber-500" title="未儲存的變更">
+            ●
+          </span>
         )}
       </div>
 
       {/* Center: Stack chips */}
-      <div className="hidden md:flex items-center gap-2">
-        <span className="bg-foreground/5 border-border rounded-full border px-2.5 py-0.5 text-[11px] text-foreground/60">
+      <div className="hidden items-center gap-2 md:flex">
+        <span className="bg-foreground/5 border-border text-foreground/60 rounded-full border px-2.5 py-0.5 text-[11px]">
           Realtime
         </span>
-        <span className="bg-foreground/5 border-border rounded-full border px-2.5 py-0.5 text-[11px] text-foreground/60">
+        <span className="bg-foreground/5 border-border text-foreground/60 rounded-full border px-2.5 py-0.5 text-[11px]">
           Gemini Live
         </span>
-        <span className="bg-foreground/5 border-border rounded-full border px-2.5 py-0.5 text-[11px] text-foreground/60">
+        <span className="bg-foreground/5 border-border text-foreground/60 rounded-full border px-2.5 py-0.5 text-[11px]">
           Deepgram STT
         </span>
         {language && (
-          <span className="bg-foreground/5 border-border rounded-full border px-2.5 py-0.5 text-[11px] text-foreground/60">
+          <span className="bg-foreground/5 border-border text-foreground/60 rounded-full border px-2.5 py-0.5 text-[11px]">
             {language}
           </span>
         )}
       </div>
 
       {/* Right: actions */}
-      <div className="flex items-center gap-2 shrink-0">
+      <div className="flex shrink-0 items-center gap-2">
         <button
           type="button"
           onClick={onSave}

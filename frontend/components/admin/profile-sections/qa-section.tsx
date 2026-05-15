@@ -1,9 +1,9 @@
 'use client';
 
 import { useState } from 'react';
-import { CollapsibleSection } from '../collapsible-section';
 import type { UseProfileFormReturn } from '@/hooks/use-profile-form';
 import type { QaMode } from '@/hooks/use-profile-form';
+import { CollapsibleSection } from '../collapsible-section';
 
 const inputClass =
   'border-border bg-background text-foreground w-full rounded-md border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40';
@@ -79,11 +79,11 @@ export function QaSection({ form }: QaSectionProps) {
 
         {/* QA list */}
         {qaCount === 0 && (
-          <p className="text-foreground/50 text-center text-xs py-3 border border-dashed rounded-md">
+          <p className="text-foreground/50 rounded-md border border-dashed py-3 text-center text-xs">
             尚無 QA
           </p>
         )}
-        <div className="space-y-1.5 max-h-[400px] overflow-y-auto">
+        <div className="max-h-[400px] space-y-1.5 overflow-y-auto">
           {filtered.map(({ qa, idx }) => {
             const isOpen = expanded.has(idx);
             const kwPreview = (qa.keywords || []).join('、');
@@ -100,7 +100,7 @@ export function QaSection({ form }: QaSectionProps) {
                         return next;
                       });
                     }}
-                    className="hover:bg-foreground/5 flex flex-1 items-center gap-2 px-2 py-1.5 text-left min-w-0"
+                    className="hover:bg-foreground/5 flex min-w-0 flex-1 items-center gap-2 px-2 py-1.5 text-left"
                   >
                     <span className="text-foreground/50 w-3 text-[10px]">{isOpen ? '▾' : '▸'}</span>
                     <span className="truncate text-xs">{kwPreview || '(no keywords)'}</span>
@@ -137,7 +137,7 @@ export function QaSection({ form }: QaSectionProps) {
                         value={qa.answer ?? ''}
                         onChange={(e) => updateQaEntry(idx, { answer: e.target.value })}
                         rows={2}
-                        className={`${inputClass} text-xs resize-y`}
+                        className={`${inputClass} resize-y text-xs`}
                       />
                     </div>
                   </div>

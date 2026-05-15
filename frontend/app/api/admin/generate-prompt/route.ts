@@ -66,20 +66,14 @@ export async function POST(req: Request) {
     if (!response.ok) {
       const errorBody = await response.text();
       console.error('[generate-prompt] Gemini API error:', response.status, errorBody);
-      return NextResponse.json(
-        { detail: `Gemini API error: ${response.status}` },
-        { status: 502 }
-      );
+      return NextResponse.json({ detail: `Gemini API error: ${response.status}` }, { status: 502 });
     }
 
     const data = await response.json();
     const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
 
     if (!text) {
-      return NextResponse.json(
-        { detail: 'No content generated' },
-        { status: 502 }
-      );
+      return NextResponse.json({ detail: 'No content generated' }, { status: 502 });
     }
 
     return NextResponse.json({ prompt: text });

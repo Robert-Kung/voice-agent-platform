@@ -1,7 +1,7 @@
 'use client';
 
-import { CollapsibleSection } from '../collapsible-section';
 import type { UseProfileFormReturn } from '@/hooks/use-profile-form';
+import { CollapsibleSection } from '../collapsible-section';
 
 const inputClass =
   'border-border bg-background text-foreground w-full rounded-md border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40';
@@ -30,29 +30,32 @@ export function HoursSection({ form }: HoursSectionProps) {
           <button
             type="button"
             onClick={addService}
-            className="border-border hover:bg-foreground/5 rounded border px-2 py-0.5 text-xs shrink-0"
+            className="border-border hover:bg-foreground/5 shrink-0 rounded border px-2 py-0.5 text-xs"
           >
             + Add
           </button>
         </div>
 
         {count === 0 && (
-          <p className="text-foreground/50 text-center text-xs py-3 border border-dashed rounded-md">
+          <p className="text-foreground/50 rounded-md border border-dashed py-3 text-center text-xs">
             未設定
           </p>
         )}
 
         <div className="space-y-2">
           {Object.entries(services).map(([key, svc]) => (
-            <div key={key} className="border-border bg-foreground/5 space-y-2 rounded-md border p-2">
+            <div
+              key={key}
+              className="border-border bg-foreground/5 space-y-2 rounded-md border p-2"
+            >
               <div className="flex items-center gap-2">
                 <input
                   type="text"
                   defaultValue={key}
                   onBlur={(e) => renameService(key, e.target.value.trim())}
-                  className="border-border bg-background rounded border px-2 py-0.5 font-mono text-xs flex-1 min-w-0"
+                  className="border-border bg-background min-w-0 flex-1 rounded border px-2 py-0.5 font-mono text-xs"
                 />
-                <label className="flex items-center gap-1 text-xs shrink-0">
+                <label className="flex shrink-0 items-center gap-1 text-xs">
                   <input
                     type="checkbox"
                     checked={!!svc.always_open}
@@ -64,7 +67,7 @@ export function HoursSection({ form }: HoursSectionProps) {
                 <button
                   type="button"
                   onClick={() => removeService(key)}
-                  className="text-red-500 text-xs hover:text-red-400"
+                  className="text-xs text-red-500 hover:text-red-400"
                 >
                   ✕
                 </button>

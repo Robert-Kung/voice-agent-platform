@@ -1,8 +1,8 @@
 'use client';
 
-import { CollapsibleSection } from '../collapsible-section';
 import type { UseProfileFormReturn } from '@/hooks/use-profile-form';
-import { LANGUAGES, TIMEZONES, NAME_PATTERN } from '@/hooks/use-profile-form';
+import { LANGUAGES, NAME_PATTERN, TIMEZONES } from '@/hooks/use-profile-form';
+import { CollapsibleSection } from '../collapsible-section';
 
 const inputClass =
   'border-border bg-background text-foreground w-full rounded-md border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40';
@@ -35,9 +35,7 @@ export function IdentitySection({ form }: IdentitySectionProps) {
             className={`${inputClass} font-mono text-xs ${!isNew ? 'opacity-60' : ''}`}
           />
           {isNew && (
-            <p className="text-foreground/40 mt-0.5 text-[10px]">
-              小寫字母開頭，僅含 a-z 0-9 _
-            </p>
+            <p className="text-foreground/40 mt-0.5 text-[10px]">小寫字母開頭，僅含 a-z 0-9 _</p>
           )}
         </div>
         <div>
@@ -70,7 +68,9 @@ export function IdentitySection({ form }: IdentitySectionProps) {
             >
               <option value="">—</option>
               {LANGUAGES.map((l) => (
-                <option key={l.value} value={l.value}>{l.label}</option>
+                <option key={l.value} value={l.value}>
+                  {l.label}
+                </option>
               ))}
             </select>
           </div>
@@ -83,7 +83,9 @@ export function IdentitySection({ form }: IdentitySectionProps) {
             >
               <option value="">—</option>
               {TIMEZONES.map((tz) => (
-                <option key={tz} value={tz}>{tz}</option>
+                <option key={tz} value={tz}>
+                  {tz}
+                </option>
               ))}
             </select>
           </div>

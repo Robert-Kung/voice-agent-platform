@@ -600,8 +600,7 @@ export function useProfileForm(): UseProfileFormReturn {
   const httpTools = useMemo(() => (known.tools || []).filter((t) => !!t.endpoint), [known.tools]);
 
   const httpToolIndices = useMemo(
-    () =>
-      (known.tools || []).map((t, i) => (t.endpoint ? i : -1)).filter((i) => i >= 0),
+    () => (known.tools || []).map((t, i) => (t.endpoint ? i : -1)).filter((i) => i >= 0),
     [known.tools]
   );
 

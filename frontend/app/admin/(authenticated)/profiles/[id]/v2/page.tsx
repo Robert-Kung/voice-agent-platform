@@ -1,22 +1,22 @@
 'use client';
 
 import { useState } from 'react';
-import dynamic from 'next/dynamic';
 import { useMemo } from 'react';
-import { useProfileForm } from '@/hooks/use-profile-form';
-import { ProfileEditorLayout } from '@/components/admin/profile-editor-layout';
-import { ProfileEditorHeader } from '@/components/admin/profile-editor-header';
-import { PromptEditor } from '@/components/admin/prompt-editor';
-import {
-  ToolsSection,
-  QaSection,
-  HoursSection,
-  HandoffSection,
-  IdentitySection,
-  AdvancedSection,
-} from '@/components/admin/profile-sections';
+import dynamic from 'next/dynamic';
 import { buildFlowFromConfig } from '@/components/admin/agent-flow-builder';
 import type { FlowNodeType } from '@/components/admin/agent-flow-builder';
+import { ProfileEditorHeader } from '@/components/admin/profile-editor-header';
+import { ProfileEditorLayout } from '@/components/admin/profile-editor-layout';
+import {
+  AdvancedSection,
+  HandoffSection,
+  HoursSection,
+  IdentitySection,
+  QaSection,
+  ToolsSection,
+} from '@/components/admin/profile-sections';
+import { PromptEditor } from '@/components/admin/prompt-editor';
+import { useProfileForm } from '@/hooks/use-profile-form';
 
 // Lazy-load the flow builder
 const AgentFlowBuilder = dynamic(
@@ -72,9 +72,7 @@ export default function ProfileEditorV2Page() {
             onSave={form.handleSave}
           />
         }
-        rightPanel={
-          <RightPanel form={form} />
-        }
+        rightPanel={<RightPanel form={form} />}
       />
 
       {/* AI Generate Modal */}
@@ -94,10 +92,7 @@ export default function ProfileEditorV2Page() {
 // ─── Right Panel ──────────────────────────────────────────────────
 
 function RightPanel({ form }: { form: ReturnType<typeof useProfileForm> }) {
-  const { nodes, edges } = useMemo(
-    () => buildFlowFromConfig(form.known),
-    [form.known]
-  );
+  const { nodes, edges } = useMemo(() => buildFlowFromConfig(form.known), [form.known]);
 
   const handleNodeSelect = (nodeId: string | null, nodeType: FlowNodeType | null) => {
     if (!nodeType) return;
@@ -119,19 +114,14 @@ function RightPanel({ form }: { form: ReturnType<typeof useProfileForm> }) {
   return (
     <div className="space-y-0">
       {/* Flow minimap at top */}
-      <div className="border-border border-b pb-3 mb-0">
+      <div className="border-border mb-0 border-b pb-3">
         <div className="px-4 pt-2 pb-1">
-          <span className="text-foreground/50 text-[10px] uppercase tracking-wider font-medium">
+          <span className="text-foreground/50 text-[10px] font-medium tracking-wider uppercase">
             Flow Overview
           </span>
         </div>
         <div className="h-[200px] px-2">
-          <AgentFlowBuilder
-            nodes={nodes}
-            edges={edges}
-            onNodeSelect={handleNodeSelect}
-            readOnly
-          />
+          <AgentFlowBuilder nodes={nodes} edges={edges} onNodeSelect={handleNodeSelect} readOnly />
         </div>
       </div>
 
@@ -185,8 +175,8 @@ function GeneratePromptModal({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
       <div className="bg-background border-border w-full max-w-lg rounded-xl border p-6 shadow-xl">
-        <h2 className="text-foreground text-lg font-semibold mb-2">✨ AI Generate Prompt</h2>
-        <p className="text-foreground/60 text-sm mb-4">
+        <h2 className="text-foreground mb-2 text-lg font-semibold">✨ AI Generate Prompt</h2>
+        <p className="text-foreground/60 mb-4 text-sm">
           描述這個 Agent 的業務類型和功能需求，AI 會產生 system prompt 初稿。
         </p>
         <textarea
@@ -194,10 +184,10 @@ function GeneratePromptModal({
           onChange={(e) => setDescription(e.target.value)}
           rows={4}
           placeholder="例如：一家台北的牙醫診所客服，需要處理預約掛號、費用查詢、營業時間詢問，語氣親切專業。"
-          className="border-border bg-background text-foreground w-full rounded-md border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40 resize-y mb-3"
+          className="border-border bg-background text-foreground focus:ring-primary/40 mb-3 w-full resize-y rounded-md border px-3 py-2 text-sm focus:ring-2 focus:outline-none"
           autoFocus
         />
-        {error && <p className="text-red-500 text-xs mb-2">{error}</p>}
+        {error && <p className="mb-2 text-xs text-red-500">{error}</p>}
         <div className="flex items-center justify-end gap-2">
           <button
             type="button"

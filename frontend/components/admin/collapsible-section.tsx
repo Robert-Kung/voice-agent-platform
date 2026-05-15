@@ -32,14 +32,10 @@ export function CollapsibleSection({
         onClick={() => setOpen((o) => !o)}
         className="hover:bg-foreground/5 flex w-full items-center gap-2 px-4 py-3 text-left transition-colors"
       >
-        <span className="text-foreground/50 w-4 shrink-0 text-xs">
-          {open ? '▾' : '▸'}
-        </span>
+        <span className="text-foreground/50 w-4 shrink-0 text-xs">{open ? '▾' : '▸'}</span>
         {icon && <span className="text-foreground/60 shrink-0">{icon}</span>}
-        <span className="text-foreground text-sm font-medium flex-1">{title}</span>
-        {badge && !open && (
-          <span className="text-foreground/50 text-xs">{badge}</span>
-        )}
+        <span className="text-foreground flex-1 text-sm font-medium">{title}</span>
+        {badge && !open && <span className="text-foreground/50 text-xs">{badge}</span>}
       </button>
       {open && <div className="px-4 pb-4">{children}</div>}
     </div>

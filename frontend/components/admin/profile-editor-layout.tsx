@@ -17,14 +17,12 @@ export function ProfileEditorLayout({ header, center, rightPanel }: ProfileEdito
   return (
     <div className="flex h-[calc(100vh-3.5rem)] flex-col overflow-hidden">
       {/* Sticky header */}
-      <div className="border-border bg-background/95 shrink-0 border-b backdrop-blur">
-        {header}
-      </div>
+      <div className="border-border bg-background/95 shrink-0 border-b backdrop-blur">{header}</div>
 
       {/* Main content area — split panel */}
       <div className="flex min-h-0 flex-1">
         {/* Center: Prompt area */}
-        <div className="flex min-h-0 flex-[3] flex-col overflow-y-auto border-r border-border">
+        <div className="border-border flex min-h-0 flex-[3] flex-col overflow-y-auto border-r">
           <div className="flex-1 p-6">{center}</div>
         </div>
 
