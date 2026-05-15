@@ -253,6 +253,13 @@ export default function ProfilesPage() {
                         >
                           Edit
                         </Link>
+                        <Link
+                          href={`/admin/profiles/${p.id}/v2`}
+                          className="border-primary/40 text-primary hover:bg-primary/10 rounded border px-2 py-1 text-xs"
+                          title="Profile Editor v2 (Beta)"
+                        >
+                          v2
+                        </Link>
                         {p.is_active && (
                           <button
                             type="button"
