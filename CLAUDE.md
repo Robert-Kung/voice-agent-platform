@@ -13,49 +13,43 @@ LiveKit-based 語音 Agent 平台。Profile-driven Agent 系統，admin UI 管�
 
 ---
 
-## Admin UI 重新設計（2026-05-12 啟動）
+## Profile Editor v2（2026-05-14 啟動）
 
-> 歷史重構紀錄與 Tool 架構決策見 `docs/archive/REFACTORING_COMPLETE_2026-05.md`
+> V1 Admin UI 重新設計已完成，歸檔於 `docs/archive/ADMIN_UI_REDESIGN_V1_2026-05.md`
 
 ### 設計方向
-- **美感**：Dark-first Developer Console（Linear/Vercel 風），保留 light/dark 切換
-- **Layout**：Collapsible sidebar navigation，取代原有 top-nav
-- **重點功能**：Agent Flow Builder — 用 `@xyflow/react` 視覺化 profile 的組裝邏輯
-- **範圍**：僅 `/admin/*` 路徑；首頁 voice testing 維持現狀
+
+參考 Retell AI / Vapi 的 Agent Builder 介面，將現有 Tab-based 編輯器改為 **Split-panel Prompt-first** 架構：
+- **中央 60%**：System Prompt 永遠可見（Welcome Message + Instructions），搭配 CodeMirror 6 編輯器
+- **右側 40%**：可折疊設定面板（Tools / QA / Hours / Handoff / Identity / Advanced）+ 頂部 Flow minimap
+- **Header**：Stack summary chips（Gemini Live · Deepgram · zh）+ Save + Try
+- **AI Generate**：右上角按鈕呼叫 Gemini 2.0 Flash Lite 產生 prompt 初稿
+
+### 路徑
+
+Prototype 建在 `/admin/profiles/[id]/v2`，不動現有 v1 頁面。驗證後再替換。
 
 ### 進度
 
 | # | 內容 | 狀態 |
 |---|------|------|
-| 1 | Sidebar layout + Dark-first 色彩系統 | ✅ |
-| 2 | Agent Flow Builder（Profile 編輯內嵌 xyflow node-graph） | ✅ |
-| 3 | Dashboard 增強（趨勢圖 + real-time indicators） | ✅ |
-| 4 | web-design-guidelines review pass | ✅ |
+| 1 | `useProfileForm` hook 抽出 | ✅ |
+| 2 | `ProfileEditorLayout` split-panel | ✅ |
+| 3 | 右側折疊區塊 6 個元件 | ✅ |
+| 4 | 中央 Prompt Editor（CodeMirror 6） | ✅ |
+| 5 | Header bar + Stack chips | ✅ |
+| 6 | Flow minimap 整合右側面板頂部 | ✅ |
+| 7 | AI Generate Prompt（Gemini 2.0 Flash Lite） | ✅ |
+| 8 | v2/page.tsx 組裝 + Profiles 列表加 Beta 入口 | ✅ |
+| 9 | Docker build 驗證 + 瀏覽器 QA | 🔄 |
 
-### Agent Flow Builder 設計
+### AI Generate Prompt 設計
 
-因 realtime mode + Gemini 模型已固定最佳配置，Flow Builder 不控制底層 STT/LLM/TTS 選擇。
-重點是視覺化**「Profile 的對話能力組裝」**：
-
-```
-[Instructions] → [QA Database] → [Service Hours] → [Tools]
-                                                      ├─ get_current_time
-                                                      ├─ transfer_to_human
-                                                      └─ HTTP Tool × N
-```
-
-節點類型：
-- **Prompt** — system instructions 編輯（主節點）
-- **QA Database** — inline/tool mode 切換 + QA 條目管理
-- **Service Hours** — 營業時間結構化設定
-- **Human Handoff** — 轉接設定
-- **Built-in Tool** — get_current_time 等可選掛載
-- **HTTP Tool** — Tier 3 自定義 API 呼叫（可多個）
-
-互動：
-- 從左側 palette 拖入節點 → 連接到 Agent 主節點
-- 點選節點 → 右側 panel 顯示該區塊的詳細設定表單
-- 儲存時自動 serialize 回 profile config JSON
+- 後端 endpoint：`POST /api/admin/generate-prompt`
+- 使用 `GOOGLE_API_KEY`（已有），模型 `gemini-2.0-flash-lite`
+- 輸入：使用者描述（business type + 功能需求）
+- 輸出：完整 system prompt 初稿
+- 前端：System Prompt 區域右上角「✨ Generate」按鈕 → modal 輸入描述 → 填回編輯器
 
 ---
 

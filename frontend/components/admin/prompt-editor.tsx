@@ -1,5 +1,10 @@
 'use client';
 
+import { useCallback, useEffect, useRef } from 'react';
+import { EditorView, keymap, placeholder as cmPlaceholder, lineNumbers } from '@codemirror/view';
+import { EditorState } from '@codemirror/state';
+import { markdown } from '@codemirror/lang-markdown';
+import { oneDark } from '@codemirror/theme-one-dark';
 import type { UseProfileFormReturn } from '@/hooks/use-profile-form';
 
 const inputClass =
@@ -8,13 +13,14 @@ const inputClass =
 interface PromptEditorProps {
   form: UseProfileFormReturn;
   onGenerateClick?: () => void;
+  onSave?: () => void;
 }
 
 /**
  * Center area of the profile editor v2.
- * Shows: Welcome Message + Welcome Instructions + System Prompt (dominant).
+ * Shows: Welcome Message + Welcome Instructions + System Prompt (CodeMirror).
  */
-export function PromptEditor({ form, onGenerateClick }: PromptEditorProps) {
+export function PromptEditor({ form, onGenerateClick, onSave }: PromptEditorProps) {
   const { known, updateKnown } = form;
 
   return (
@@ -66,13 +72,134 @@ export function PromptEditor({ form, onGenerateClick }: PromptEditorProps) {
             </button>
           )}
         </div>
-        <textarea
+        <SystemPromptEditor
           value={known.instructions ?? ''}
-          onChange={(e) => updateKnown('instructions', e.target.value)}
-          placeholder="主 Agent 的 system prompt…"
-          className={`${inputClass} flex-1 min-h-[400px] resize-y font-mono text-xs leading-relaxed`}
+          onChange={(val) => updateKnown('instructions', val)}
+          onSave={onSave}
         />
       </div>
     </div>
+  );
+}
+
+// ── CodeMirror-based System Prompt Editor ──────────────────────────
+
+interface SystemPromptEditorProps {
+  value: string;
+  onChange: (val: string) => void;
+  onSave?: () => void;
+}
+
+function SystemPromptEditor({ value, onChange, onSave }: SystemPromptEditorProps) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const viewRef = useRef<EditorView | null>(null);
+  const onChangeRef = useRef(onChange);
+  const onSaveRef = useRef(onSave);
+
+  // Keep refs fresh
+  onChangeRef.current = onChange;
+  onSaveRef.current = onSave;
+
+  const createEditor = useCallback(() => {
+    if (!containerRef.current) return;
+
+    // Clean up existing
+    if (viewRef.current) {
+      viewRef.current.destroy();
+      viewRef.current = null;
+    }
+
+    const updateListener = EditorView.updateListener.of((update) => {
+      if (update.docChanged) {
+        onChangeRef.current(update.state.doc.toString());
+      }
+    });
+
+    const saveKeymap = keymap.of([
+      {
+        key: 'Mod-Enter',
+        run: () => {
+          onSaveRef.current?.();
+          return true;
+        },
+      },
+    ]);
+
+    const theme = EditorView.theme({
+      '&': {
+        height: '100%',
+        fontSize: '12px',
+        border: '1px solid var(--border)',
+        borderRadius: '0.375rem',
+      },
+      '&.cm-focused': {
+        outline: 'none',
+        boxShadow: '0 0 0 2px hsl(var(--primary) / 0.4)',
+      },
+      '.cm-scroller': {
+        fontFamily: 'ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace',
+        lineHeight: '1.6',
+      },
+      '.cm-content': {
+        padding: '12px 0',
+      },
+      '.cm-gutters': {
+        backgroundColor: 'transparent',
+        borderRight: '1px solid var(--border)',
+      },
+      '.cm-lineNumbers .cm-gutterElement': {
+        padding: '0 8px 0 12px',
+        minWidth: '3em',
+        color: 'hsl(var(--foreground) / 0.3)',
+        fontSize: '11px',
+      },
+    });
+
+    const state = EditorState.create({
+      doc: value,
+      extensions: [
+        lineNumbers(),
+        markdown(),
+        oneDark,
+        theme,
+        updateListener,
+        saveKeymap,
+        cmPlaceholder('主 Agent 的 system prompt…'),
+        EditorView.lineWrapping,
+      ],
+    });
+
+    viewRef.current = new EditorView({
+      state,
+      parent: containerRef.current,
+    });
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Initialize editor
+  useEffect(() => {
+    createEditor();
+    return () => {
+      viewRef.current?.destroy();
+      viewRef.current = null;
+    };
+  }, [createEditor]);
+
+  // Sync external value changes (e.g., from AI Generate)
+  useEffect(() => {
+    const view = viewRef.current;
+    if (!view) return;
+    const currentDoc = view.state.doc.toString();
+    if (currentDoc !== value) {
+      view.dispatch({
+        changes: { from: 0, to: currentDoc.length, insert: value },
+      });
+    }
+  }, [value]);
+
+  return (
+    <div
+      ref={containerRef}
+      className="flex-1 min-h-[400px] overflow-hidden rounded-md"
+    />
   );
 }

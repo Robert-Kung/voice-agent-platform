@@ -69,6 +69,7 @@ export default function ProfileEditorV2Page() {
           <PromptEditor
             form={form}
             onGenerateClick={() => setShowGenerateModal(true)}
+            onSave={form.handleSave}
           />
         }
         rightPanel={
