@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
-import { ArrowLeft, Info } from 'lucide-react';
+import { ArrowLeft, Info, SlidersHorizontal } from 'lucide-react';
 
 interface ProfileEditorHeaderProps {
   displayName: string;
@@ -15,6 +15,7 @@ interface ProfileEditorHeaderProps {
   onSave: () => void;
   onTry: () => void;
   onSaveAndTry?: () => void;
+  onPanelToggle?: () => void;
 }
 
 /**
@@ -32,6 +33,7 @@ export function ProfileEditorHeader({
   onSave,
   onTry,
   onSaveAndTry,
+  onPanelToggle,
 }: ProfileEditorHeaderProps) {
   const [showConfirm, setShowConfirm] = useState(false);
 
@@ -79,6 +81,16 @@ export function ProfileEditorHeader({
 
       {/* Right: actions */}
       <div className="flex shrink-0 items-center gap-2">
+        {onPanelToggle && (
+          <button
+            type="button"
+            onClick={onPanelToggle}
+            aria-label="Toggle settings panel"
+            className="text-foreground/50 hover:text-foreground hover:bg-foreground/5 inline-flex h-8 w-8 items-center justify-center rounded-md md:hidden"
+          >
+            <SlidersHorizontal size={16} />
+          </button>
+        )}
         <button
           type="button"
           onClick={onSave}
