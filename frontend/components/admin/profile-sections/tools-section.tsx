@@ -1,9 +1,8 @@
 'use client';
 
 import { useState } from 'react';
-import type { UseProfileFormReturn } from '@/hooks/use-profile-form';
+import type { HttpMethod, ParamType, UseProfileFormReturn } from '@/hooks/use-profile-form';
 import { HTTP_METHODS, PARAM_TYPES } from '@/hooks/use-profile-form';
-import type { HttpMethod, ParamType } from '@/hooks/use-profile-form';
 import { CollapsibleSection } from '../collapsible-section';
 
 const inputClass =
@@ -29,13 +28,14 @@ export function ToolsSection({ form }: ToolsSectionProps) {
   } = form;
 
   const badgeText = `${builtinSelected.size + httpTools.length}`;
+  const rawBuiltinCount = (form.known.tools || []).filter((t) => !t.endpoint).length;
 
   return (
     <CollapsibleSection
       title="Tools"
       id="section-tools"
       badge={badgeText}
-      defaultOpen={builtinSelected.size + httpTools.length > 0}
+      defaultOpen={rawBuiltinCount + httpTools.length > 0}
     >
       <div className="space-y-4">
         {/* Built-in Tools */}
@@ -147,7 +147,7 @@ function HttpToolCard({
           onClick={() => setOpen((o) => !o)}
           className="hover:bg-foreground/5 flex flex-1 items-center gap-2 px-2 py-1.5 text-left"
         >
-          <span className="text-foreground/50 w-3 text-[10px]">{open ? '▾' : '▸'}</span>
+          <span className="text-foreground/50 w-3 text-xs">{open ? '▾' : '▸'}</span>
           <span
             className={`shrink-0 rounded px-1 py-0.5 font-mono text-[9px] ${
               tool.method === 'GET'
@@ -160,12 +160,12 @@ function HttpToolCard({
             {tool.method || 'POST'}
           </span>
           <span className="flex-1 truncate font-mono text-xs">{tool.name || '未命名'}</span>
-          <span className="text-foreground/40 shrink-0 text-[10px]">{paramCount}p</span>
+          <span className="text-foreground/40 shrink-0 text-xs">{paramCount}p</span>
         </button>
         <button
           type="button"
           onClick={() => removeHttpTool(realIdx)}
-          className="border-border hover:bg-foreground/10 border-l px-2 text-xs text-red-500"
+          className="border-border hover:bg-foreground/10 min-h-8 min-w-8 border-l px-2 text-xs text-red-500"
         >
           ✕
         </button>
@@ -216,11 +216,11 @@ function HttpToolCard({
           {/* Parameters */}
           <div>
             <div className="mb-1 flex items-center justify-between">
-              <span className="text-foreground/70 text-[10px]">Parameters</span>
+              <span className="text-foreground/70 text-xs">Parameters</span>
               <button
                 type="button"
                 onClick={() => addHttpToolParam(realIdx)}
-                className="text-foreground/60 hover:text-foreground text-[10px]"
+                className="text-foreground/60 hover:text-foreground min-h-8 min-w-8 text-xs"
               >
                 + Add
               </button>
@@ -233,14 +233,14 @@ function HttpToolCard({
                     placeholder="name"
                     value={param.name}
                     onChange={(e) => updateHttpToolParam(realIdx, pIdx, { name: e.target.value })}
-                    className="border-border bg-background min-w-0 flex-1 rounded border px-1.5 py-0.5 font-mono text-[10px]"
+                    className="border-border bg-background min-w-0 flex-1 rounded border px-1.5 py-0.5 font-mono text-xs"
                   />
                   <select
                     value={param.type}
                     onChange={(e) =>
                       updateHttpToolParam(realIdx, pIdx, { type: e.target.value as ParamType })
                     }
-                    className="border-border bg-background w-16 rounded border px-1 py-0.5 text-[10px]"
+                    className="border-border bg-background w-16 rounded border px-1 py-0.5 text-xs"
                   >
                     {PARAM_TYPES.map((t) => (
                       <option key={t} value={t}>
@@ -248,7 +248,7 @@ function HttpToolCard({
                       </option>
                     ))}
                   </select>
-                  <label className="flex items-center gap-0.5 text-[10px]">
+                  <label className="flex items-center gap-0.5 text-xs">
                     <input
                       type="checkbox"
                       checked={!!param.required}
@@ -262,7 +262,7 @@ function HttpToolCard({
                   <button
                     type="button"
                     onClick={() => removeHttpToolParam(realIdx, pIdx)}
-                    className="text-foreground/40 text-[10px] hover:text-red-500"
+                    className="text-foreground/40 text-xs hover:text-red-500"
                   >
                     ✕
                   </button>

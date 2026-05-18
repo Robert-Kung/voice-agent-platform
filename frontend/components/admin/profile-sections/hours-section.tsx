@@ -24,7 +24,7 @@ export function HoursSection({ form }: HoursSectionProps) {
     >
       <div className="space-y-3">
         <div className="flex items-center justify-between">
-          <p className="text-foreground/50 text-[10px]">
+          <p className="text-foreground/50 text-xs">
             營業時間嵌入 instructions，搭配 get_current_time 判斷
           </p>
           <button
@@ -73,14 +73,31 @@ export function HoursSection({ form }: HoursSectionProps) {
                 </button>
               </div>
               {!svc.always_open && (
-                <input
-                  type="text"
-                  value={typeof svc.hours_text === 'string' ? svc.hours_text : ''}
-                  onChange={(e) => updateService(key, { hours_text: e.target.value })}
-                  placeholder="平日 8:00-18:00，週六 8:00-12:00，週日休息"
-                  disabled={typeof svc.hours_text === 'object'}
-                  className={`${inputClass} text-xs`}
-                />
+                <>
+                  <textarea
+                    rows={3}
+                    value={
+                      typeof svc.hours_text === 'string'
+                        ? svc.hours_text
+                        : JSON.stringify(svc.hours_text, null, 2)
+                    }
+                    onChange={(e) => {
+                      try {
+                        const parsed = JSON.parse(e.target.value);
+                        if (parsed !== null && typeof parsed === 'object') {
+                          updateService(key, { hours_text: parsed });
+                          return;
+                        }
+                      } catch {
+                        // not valid JSON — fall through to string
+                      }
+                      updateService(key, { hours_text: e.target.value });
+                    }}
+                    placeholder="平日 8:00-18:00，週六 8:00-12:00，週日休息"
+                    className={`${inputClass} resize-y text-xs`}
+                  />
+                  <p className="text-foreground/40 mt-1 text-xs">JSON 物件或自由文字均可</p>
+                </>
               )}
             </div>
           ))}
