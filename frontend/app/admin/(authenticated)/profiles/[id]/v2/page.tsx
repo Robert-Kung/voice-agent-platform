@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import dynamic from 'next/dynamic';
-import { Sparkles, X } from 'lucide-react';
+import { Maximize2, Sparkles, X } from 'lucide-react';
 import { buildFlowFromConfig } from '@/components/admin/agent-flow-builder';
 import type { FlowNodeType } from '@/components/admin/agent-flow-builder';
 import { ProfileEditorHeader } from '@/components/admin/profile-editor-header';
@@ -63,6 +63,7 @@ export default function ProfileEditorV2Page() {
             trying={form.trying}
             onSave={form.handleSave}
             onTry={form.handleTry}
+            onSaveAndTry={form.handleSaveAndTry}
           />
         }
         center={
@@ -93,6 +94,16 @@ export default function ProfileEditorV2Page() {
 
 function RightPanel({ form }: { form: ReturnType<typeof useProfileForm> }) {
   const { nodes, edges } = useMemo(() => buildFlowFromConfig(form.known), [form.known]);
+  const [flowExpanded, setFlowExpanded] = useState(false);
+
+  useEffect(() => {
+    if (!flowExpanded) return;
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setFlowExpanded(false);
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [flowExpanded]);
 
   const handleNodeSelect = (nodeId: string | null, nodeType: FlowNodeType | null) => {
     if (!nodeType) return;
@@ -115,15 +126,50 @@ function RightPanel({ form }: { form: ReturnType<typeof useProfileForm> }) {
     <div className="space-y-0">
       {/* Flow minimap at top */}
       <div className="border-border mb-0 border-b pb-3">
-        <div className="px-4 pt-2 pb-1">
-          <span className="text-foreground/50 text-[10px] font-medium tracking-wider uppercase">
+        <div className="flex items-center justify-between px-4 pt-2 pb-1">
+          <span className="text-foreground/50 text-xs font-medium tracking-wider uppercase">
             Flow Overview
           </span>
+          <button
+            type="button"
+            onClick={() => setFlowExpanded(true)}
+            title="展開全螢幕"
+            className="text-foreground/40 hover:text-foreground rounded p-1"
+          >
+            <Maximize2 size={12} />
+          </button>
         </div>
-        <div className="h-[200px] px-2">
+        <div className="min-h-[300px] px-2">
           <AgentFlowBuilder nodes={nodes} edges={edges} onNodeSelect={handleNodeSelect} readOnly />
         </div>
       </div>
+
+      {/* Fullscreen flow overlay */}
+      {flowExpanded && (
+        <div
+          className="bg-background fixed inset-0 z-50 flex flex-col"
+          onClick={(e) => e.target === e.currentTarget && setFlowExpanded(false)}
+        >
+          <div className="border-border flex items-center justify-between border-b px-4 py-2">
+            <span className="text-sm font-medium">Flow Overview</span>
+            <button
+              type="button"
+              onClick={() => setFlowExpanded(false)}
+              className="text-foreground/50 hover:text-foreground rounded p-1"
+            >
+              <X size={18} />
+            </button>
+          </div>
+          <div className="flex-1">
+            <AgentFlowBuilder
+              nodes={nodes}
+              edges={edges}
+              onNodeSelect={handleNodeSelect}
+              readOnly
+            />
+          </div>
+        </div>
+      )}
 
       {/* Collapsible sections */}
       <ToolsSection form={form} />
