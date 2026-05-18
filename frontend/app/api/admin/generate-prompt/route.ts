@@ -1,9 +1,10 @@
 import { NextResponse } from 'next/server';
 
-const GOOGLE_API_KEY = process.env.GOOGLE_API_KEY;
-const MODEL = 'gemini-2.0-flash-lite';
+// Local LM Studio — OpenAI-compatible API on the same LAN
+const LM_STUDIO_URL = process.env.LM_STUDIO_URL || 'http://192.168.2.100:1234/v1';
+const LM_MODEL = process.env.LM_MODEL || 'google/gemma-4-26b-a4b';
 
-const SYSTEM_INSTRUCTION = `你是一位專業的語音 AI Agent 系統提示詞工程師。
+const CREATE_SYSTEM = `你是一位專業的語音 AI Agent 系統提示詞工程師。
 使用者會描述一個業務場景（行業類型、功能需求、語氣風格），你要產生一份完整的 system prompt。
 
 產出格式要求：
@@ -15,73 +16,95 @@ const SYSTEM_INSTRUCTION = `你是一位專業的語音 AI Agent 系統提示詞
 
 只輸出 system prompt 本體，不要加任何前綴說明或後綴評論。`;
 
-export async function POST(req: Request) {
-  if (!GOOGLE_API_KEY) {
-    return NextResponse.json(
-      { detail: 'GOOGLE_API_KEY not configured on server' },
-      { status: 500 }
-    );
+const ENHANCE_SYSTEM = `你是一位專業的語音 AI Agent 系統提示詞工程師。
+使用者會提供一份現有的 system prompt，以及他們希望改進的方向。
+你的任務是在保留原有架構和風格的基礎上，針對使用者指定的方向進行改進。
+
+規則：
+- 保留原 prompt 中已經良好的部分，只改動有問題或需要加強的地方
+- 改進後的 prompt 應與原版風格一致
+- 不要完全重寫——這是協作補強，不是取代
+- 用繁體中文撰寫（除非原 prompt 使用其他語言）
+- 只輸出改進後的完整 system prompt 本體，不要加任何說明或比較`;
+
+async function callLM(systemPrompt: string, userMessage: string): Promise<string> {
+  const res = await fetch(`${LM_STUDIO_URL}/chat/completions`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: 'Bearer lm-studio',
+    },
+    body: JSON.stringify({
+      model: LM_MODEL,
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userMessage },
+      ],
+      temperature: 0.7,
+      max_tokens: 4096,
+    }),
+  });
+
+  if (!res.ok) {
+    const body = await res.text();
+    console.error('[generate-prompt] LM Studio error:', res.status, body);
+    throw new Error(`LM Studio error: ${res.status}`);
   }
 
-  let body: { description?: string };
+  const data = await res.json();
+  const text = data?.choices?.[0]?.message?.content;
+  if (!text) throw new Error('No content generated');
+  return text as string;
+}
+
+export async function POST(req: Request) {
+  let body: {
+    mode?: 'create' | 'enhance';
+    description?: string;
+    existing_prompt?: string;
+    direction?: string;
+  };
+
   try {
-    body = (await req.json()) as { description?: string };
+    body = await req.json();
   } catch {
     return NextResponse.json({ detail: 'Invalid JSON body' }, { status: 400 });
   }
 
-  const description = body.description?.trim();
-  if (!description) {
-    return NextResponse.json({ detail: 'description is required' }, { status: 400 });
-  }
-
-  // Limit input length to prevent abuse
-  if (description.length > 2000) {
-    return NextResponse.json({ detail: 'description too long (max 2000 chars)' }, { status: 400 });
-  }
+  const mode = body.mode ?? 'create';
 
   try {
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent?key=${GOOGLE_API_KEY}`;
+    if (mode === 'enhance') {
+      const existing = body.existing_prompt?.trim();
+      const direction = body.direction?.trim();
+      if (!existing) {
+        return NextResponse.json({ detail: 'existing_prompt is required for enhance mode' }, { status: 400 });
+      }
+      if (!direction) {
+        return NextResponse.json({ detail: 'direction is required for enhance mode' }, { status: 400 });
+      }
+      if (existing.length > 8000 || direction.length > 2000) {
+        return NextResponse.json({ detail: 'Input too long' }, { status: 400 });
+      }
 
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        system_instruction: {
-          parts: [{ text: SYSTEM_INSTRUCTION }],
-        },
-        contents: [
-          {
-            role: 'user',
-            parts: [{ text: description }],
-          },
-        ],
-        generationConfig: {
-          temperature: 0.7,
-          maxOutputTokens: 4096,
-        },
-      }),
-    });
-
-    if (!response.ok) {
-      const errorBody = await response.text();
-      console.error('[generate-prompt] Gemini API error:', response.status, errorBody);
-      return NextResponse.json({ detail: `Gemini API error: ${response.status}` }, { status: 502 });
+      const userMessage = `【現有 System Prompt】\n${existing}\n\n【希望改進的方向】\n${direction}`;
+      const prompt = await callLM(ENHANCE_SYSTEM, userMessage);
+      return NextResponse.json({ prompt });
     }
 
-    const data = await response.json();
-    const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
-
-    if (!text) {
-      return NextResponse.json({ detail: 'No content generated' }, { status: 502 });
+    // default: create
+    const description = body.description?.trim();
+    if (!description) {
+      return NextResponse.json({ detail: 'description is required' }, { status: 400 });
+    }
+    if (description.length > 2000) {
+      return NextResponse.json({ detail: 'description too long (max 2000 chars)' }, { status: 400 });
     }
 
-    return NextResponse.json({ prompt: text });
+    const prompt = await callLM(CREATE_SYSTEM, description);
+    return NextResponse.json({ prompt });
   } catch (e) {
     console.error('[generate-prompt] Error:', e);
-    return NextResponse.json(
-      { detail: `Internal error: ${(e as Error).message}` },
-      { status: 500 }
-    );
+    return NextResponse.json({ detail: (e as Error).message }, { status: 502 });
   }
 }

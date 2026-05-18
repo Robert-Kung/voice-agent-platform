@@ -32,6 +32,7 @@ const AgentFlowBuilder = dynamic(
 export default function ProfileEditorV2Page() {
   const form = useProfileForm();
   const [showGenerateModal, setShowGenerateModal] = useState(false);
+  const [panelOpen, setPanelOpen] = useState(false);
 
   if (form.loading) {
     return (
@@ -64,6 +65,7 @@ export default function ProfileEditorV2Page() {
             onSave={form.handleSave}
             onTry={form.handleTry}
             onSaveAndTry={form.handleSaveAndTry}
+            onPanelToggle={() => setPanelOpen((o) => !o)}
           />
         }
         center={
@@ -74,11 +76,14 @@ export default function ProfileEditorV2Page() {
           />
         }
         rightPanel={<RightPanel form={form} />}
+        panelOpen={panelOpen}
+        onPanelClose={() => setPanelOpen(false)}
       />
 
       {/* AI Generate Modal */}
       {showGenerateModal && (
         <GeneratePromptModal
+          currentInstructions={form.known.instructions ?? ''}
           onClose={() => setShowGenerateModal(false)}
           onGenerated={(prompt) => {
             form.updateKnown('instructions', prompt);
@@ -105,7 +110,7 @@ function RightPanel({ form }: { form: ReturnType<typeof useProfileForm> }) {
     return () => window.removeEventListener('keydown', handler);
   }, [flowExpanded]);
 
-  const handleNodeSelect = (nodeId: string | null, nodeType: FlowNodeType | null) => {
+  const handleNodeSelect = (_nodeId: string | null, nodeType: FlowNodeType | null) => {
     if (!nodeType) return;
     // Scroll to corresponding section
     const sectionMap: Record<string, string> = {
@@ -184,40 +189,54 @@ function RightPanel({ form }: { form: ReturnType<typeof useProfileForm> }) {
 
 // ─── Generate Prompt Modal ────────────────────────────────────────
 
+type GenerateMode = 'create' | 'enhance';
+
 function GeneratePromptModal({
+  currentInstructions,
   onClose,
   onGenerated,
 }: {
+  currentInstructions: string;
   onClose: () => void;
   onGenerated: (prompt: string) => void;
 }) {
+  const hasExisting = currentInstructions.trim().length > 0;
+  const [mode, setMode] = useState<GenerateMode>(hasExisting ? 'enhance' : 'create');
   const [description, setDescription] = useState('');
+  const [direction, setDirection] = useState('');
   const [generating, setGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
 
-  // Escape key closes modal
   useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
+    const handler = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose();
     };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
   }, [onClose]);
 
+  const canGenerate =
+    mode === 'create' ? description.trim().length > 0 : direction.trim().length > 0;
+
   const handleGenerate = async () => {
-    if (!description.trim()) return;
+    if (!canGenerate) return;
     setGenerating(true);
     setError(null);
     try {
+      const body =
+        mode === 'create'
+          ? { mode: 'create', description: description.trim() }
+          : { mode: 'enhance', existing_prompt: currentInstructions, direction: direction.trim() };
+
       const res = await fetch('/api/admin/generate-prompt', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ description: description.trim() }),
+        body: JSON.stringify(body),
       });
       if (!res.ok) {
-        const body = await res.json().catch(() => ({ detail: res.statusText }));
-        throw new Error(body.detail || 'Generation failed');
+        const data = await res.json().catch(() => ({ detail: res.statusText }));
+        throw new Error(data.detail || 'Generation failed');
       }
       const data = await res.json();
       setPreview(data.prompt);
@@ -228,19 +247,19 @@ function GeneratePromptModal({
     }
   };
 
-  const handleBackdropClick = (e: React.MouseEvent<HTMLDivElement>) => {
-    if (e.target === e.currentTarget) onClose();
+  const handleReset = () => {
+    setPreview(null);
+    setError(null);
   };
-
-  const isPreview = preview !== null;
 
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm"
-      onClick={handleBackdropClick}
+      onClick={(e) => e.target === e.currentTarget && onClose()}
     >
       <div className="bg-background border-border w-full max-w-lg rounded-xl border p-6 shadow-xl">
-        <div className="mb-2 flex items-start justify-between gap-2">
+        {/* Header */}
+        <div className="mb-4 flex items-start justify-between gap-2">
           <h2 className="text-foreground flex items-center gap-2 text-lg font-semibold">
             <Sparkles size={18} />
             AI Generate Prompt
@@ -255,10 +274,61 @@ function GeneratePromptModal({
           </button>
         </div>
 
-        {!isPreview ? (
+        {/* Mode tabs */}
+        {!preview && (
+          <div className="border-border mb-4 flex rounded-md border p-0.5">
+            {(['create', 'enhance'] as GenerateMode[]).map((m) => (
+              <button
+                key={m}
+                type="button"
+                onClick={() => { setMode(m); setError(null); }}
+                disabled={m === 'enhance' && !hasExisting}
+                className={`flex-1 rounded py-1 text-xs font-medium transition-colors ${
+                  mode === m
+                    ? 'bg-primary text-primary-foreground'
+                    : 'text-foreground/50 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40'
+                }`}
+              >
+                {m === 'create' ? '全新建立' : '補強現有'}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {preview !== null ? (
+          /* Preview pane */
           <>
-            <p className="text-foreground/60 mb-4 text-sm">
-              描述這個 Agent 的業務類型和功能需求，AI 會產生 system prompt 初稿。
+            <p className="text-foreground/60 mb-3 text-xs">
+              {mode === 'enhance' ? '補強結果預覽 — 確認後將覆寫現有 prompt。' : '生成結果預覽 — 確認後將覆寫現有 prompt。'}
+            </p>
+            <textarea
+              value={preview}
+              readOnly
+              rows={12}
+              className="border-border bg-foreground/5 text-foreground mb-3 w-full resize-y rounded-md border px-3 py-2 font-mono text-xs focus:outline-none"
+            />
+            <div className="flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={handleReset}
+                className="border-border hover:bg-foreground/5 rounded-md border px-4 py-1.5 text-sm"
+              >
+                重新產生
+              </button>
+              <button
+                type="button"
+                onClick={() => onGenerated(preview)}
+                className="rounded-md bg-green-600 px-4 py-1.5 text-sm font-medium text-white hover:opacity-90"
+              >
+                Replace
+              </button>
+            </div>
+          </>
+        ) : mode === 'create' ? (
+          /* Create form */
+          <>
+            <p className="text-foreground/60 mb-3 text-sm">
+              描述業務場景與功能需求，AI 會從頭產生 system prompt 初稿。
             </p>
             <textarea
               value={description}
@@ -270,17 +340,13 @@ function GeneratePromptModal({
             />
             {error && <p className="mb-2 text-xs text-red-500">{error}</p>}
             <div className="flex items-center justify-end gap-2">
-              <button
-                type="button"
-                onClick={onClose}
-                className="border-border hover:bg-foreground/5 rounded-md border px-4 py-1.5 text-sm"
-              >
+              <button type="button" onClick={onClose} className="border-border hover:bg-foreground/5 rounded-md border px-4 py-1.5 text-sm">
                 取消
               </button>
               <button
                 type="button"
                 onClick={handleGenerate}
-                disabled={generating || !description.trim()}
+                disabled={generating || !canGenerate}
                 className="bg-primary text-primary-foreground rounded-md px-4 py-1.5 text-sm font-medium hover:opacity-90 disabled:opacity-50"
               >
                 {generating ? '生成中…' : 'Generate'}
@@ -288,35 +354,35 @@ function GeneratePromptModal({
             </div>
           </>
         ) : (
+          /* Enhance form */
           <>
-            <p className="text-foreground/60 mb-3 text-sm">
-              預覽生成結果。此操作將覆寫現有 system prompt。
-            </p>
+            <div className="border-border bg-foreground/5 mb-3 rounded-md border px-3 py-2">
+              <p className="text-foreground/40 mb-1 text-[10px] uppercase tracking-wider">現有 Prompt（前 300 字）</p>
+              <p className="text-foreground/70 line-clamp-4 font-mono text-xs whitespace-pre-wrap">
+                {currentInstructions.slice(0, 300)}{currentInstructions.length > 300 ? '…' : ''}
+              </p>
+            </div>
+            <p className="text-foreground/60 mb-2 text-sm">描述你希望補強或改進的方向：</p>
             <textarea
-              value={preview ?? ''}
-              readOnly
-              rows={10}
-              className="border-border bg-foreground/5 text-foreground mb-3 w-full resize-y rounded-md border px-3 py-2 font-mono text-xs focus:outline-none"
+              value={direction}
+              onChange={(e) => setDirection(e.target.value)}
+              rows={3}
+              placeholder="例如：加強拒絕非相關問題的措辭、補充預約取消的流程、語氣更親切一些"
+              className="border-border bg-background text-foreground focus:ring-primary/40 mb-3 w-full resize-y rounded-md border px-3 py-2 text-sm focus:ring-2 focus:outline-none"
+              autoFocus
             />
+            {error && <p className="mb-2 text-xs text-red-500">{error}</p>}
             <div className="flex items-center justify-end gap-2">
-              <button
-                type="button"
-                onClick={() => {
-                  setPreview(null);
-                  setError(null);
-                }}
-                className="border-border hover:bg-foreground/5 rounded-md border px-4 py-1.5 text-sm"
-              >
-                重新產生
+              <button type="button" onClick={onClose} className="border-border hover:bg-foreground/5 rounded-md border px-4 py-1.5 text-sm">
+                取消
               </button>
               <button
                 type="button"
-                onClick={() => {
-                  if (preview !== null) onGenerated(preview);
-                }}
-                className="rounded-md bg-green-600 px-4 py-1.5 text-sm font-medium text-white hover:opacity-90"
+                onClick={handleGenerate}
+                disabled={generating || !canGenerate}
+                className="bg-primary text-primary-foreground rounded-md px-4 py-1.5 text-sm font-medium hover:opacity-90 disabled:opacity-50"
               >
-                Replace
+                {generating ? '補強中…' : 'Enhance'}
               </button>
             </div>
           </>
