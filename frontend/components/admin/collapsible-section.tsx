@@ -1,6 +1,7 @@
 'use client';
 
 import { type ReactNode, useState } from 'react';
+import { AnimatePresence, motion } from 'motion/react';
 
 interface CollapsibleSectionProps {
   title: string;
@@ -37,7 +38,20 @@ export function CollapsibleSection({
         <span className="text-foreground flex-1 text-sm font-medium">{title}</span>
         {badge && !open && <span className="text-foreground/50 text-xs">{badge}</span>}
       </button>
-      {open && <div className="px-4 pb-4">{children}</div>}
+      <AnimatePresence initial={false}>
+        {open && (
+          <motion.div
+            key="content"
+            initial={{ height: 0, opacity: 0, y: -4 }}
+            animate={{ height: 'auto', opacity: 1, y: 0 }}
+            exit={{ height: 0, opacity: 0, y: -4 }}
+            transition={{ duration: 0.2, ease: 'easeOut' }}
+            style={{ overflow: 'hidden' }}
+          >
+            <div className="px-4 pb-4">{children}</div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
