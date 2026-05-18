@@ -1,8 +1,8 @@
 'use client';
 
-import { useState } from 'react';
-import { useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import dynamic from 'next/dynamic';
+import { Sparkles, X } from 'lucide-react';
 import { buildFlowFromConfig } from '@/components/admin/agent-flow-builder';
 import type { FlowNodeType } from '@/components/admin/agent-flow-builder';
 import { ProfileEditorHeader } from '@/components/admin/profile-editor-header';
@@ -148,6 +148,16 @@ function GeneratePromptModal({
   const [description, setDescription] = useState('');
   const [generating, setGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [preview, setPreview] = useState<string | null>(null);
+
+  // Escape key closes modal
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [onClose]);
 
   const handleGenerate = async () => {
     if (!description.trim()) return;
@@ -164,7 +174,7 @@ function GeneratePromptModal({
         throw new Error(body.detail || 'Generation failed');
       }
       const data = await res.json();
-      onGenerated(data.prompt);
+      setPreview(data.prompt);
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -172,39 +182,99 @@ function GeneratePromptModal({
     }
   };
 
+  const handleBackdropClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (e.target === e.currentTarget) onClose();
+  };
+
+  const isPreview = preview !== null;
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm"
+      onClick={handleBackdropClick}
+    >
       <div className="bg-background border-border w-full max-w-lg rounded-xl border p-6 shadow-xl">
-        <h2 className="text-foreground mb-2 text-lg font-semibold">✨ AI Generate Prompt</h2>
-        <p className="text-foreground/60 mb-4 text-sm">
-          描述這個 Agent 的業務類型和功能需求，AI 會產生 system prompt 初稿。
-        </p>
-        <textarea
-          value={description}
-          onChange={(e) => setDescription(e.target.value)}
-          rows={4}
-          placeholder="例如：一家台北的牙醫診所客服，需要處理預約掛號、費用查詢、營業時間詢問，語氣親切專業。"
-          className="border-border bg-background text-foreground focus:ring-primary/40 mb-3 w-full resize-y rounded-md border px-3 py-2 text-sm focus:ring-2 focus:outline-none"
-          autoFocus
-        />
-        {error && <p className="mb-2 text-xs text-red-500">{error}</p>}
-        <div className="flex items-center justify-end gap-2">
+        <div className="mb-2 flex items-start justify-between gap-2">
+          <h2 className="text-foreground flex items-center gap-2 text-lg font-semibold">
+            <Sparkles size={18} />
+            AI Generate Prompt
+          </h2>
           <button
             type="button"
             onClick={onClose}
-            className="border-border hover:bg-foreground/5 rounded-md border px-4 py-1.5 text-sm"
+            aria-label="Close"
+            className="text-foreground/60 hover:bg-foreground/5 hover:text-foreground -mt-1 -mr-1 rounded-md p-1"
           >
-            取消
-          </button>
-          <button
-            type="button"
-            onClick={handleGenerate}
-            disabled={generating || !description.trim()}
-            className="bg-primary text-primary-foreground rounded-md px-4 py-1.5 text-sm font-medium hover:opacity-90 disabled:opacity-50"
-          >
-            {generating ? '生成中…' : 'Generate'}
+            <X size={16} />
           </button>
         </div>
+
+        {!isPreview ? (
+          <>
+            <p className="text-foreground/60 mb-4 text-sm">
+              描述這個 Agent 的業務類型和功能需求，AI 會產生 system prompt 初稿。
+            </p>
+            <textarea
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              rows={4}
+              placeholder="例如：一家台北的牙醫診所客服，需要處理預約掛號、費用查詢、營業時間詢問，語氣親切專業。"
+              className="border-border bg-background text-foreground focus:ring-primary/40 mb-3 w-full resize-y rounded-md border px-3 py-2 text-sm focus:ring-2 focus:outline-none"
+              autoFocus
+            />
+            {error && <p className="mb-2 text-xs text-red-500">{error}</p>}
+            <div className="flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={onClose}
+                className="border-border hover:bg-foreground/5 rounded-md border px-4 py-1.5 text-sm"
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                onClick={handleGenerate}
+                disabled={generating || !description.trim()}
+                className="bg-primary text-primary-foreground rounded-md px-4 py-1.5 text-sm font-medium hover:opacity-90 disabled:opacity-50"
+              >
+                {generating ? '生成中…' : 'Generate'}
+              </button>
+            </div>
+          </>
+        ) : (
+          <>
+            <p className="text-foreground/60 mb-3 text-sm">
+              預覽生成結果。此操作將覆寫現有 system prompt。
+            </p>
+            <textarea
+              value={preview ?? ''}
+              readOnly
+              rows={10}
+              className="border-border bg-foreground/5 text-foreground mb-3 w-full resize-y rounded-md border px-3 py-2 font-mono text-xs focus:outline-none"
+            />
+            <div className="flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setPreview(null);
+                  setError(null);
+                }}
+                className="border-border hover:bg-foreground/5 rounded-md border px-4 py-1.5 text-sm"
+              >
+                重新產生
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (preview !== null) onGenerated(preview);
+                }}
+                className="rounded-md bg-green-600 px-4 py-1.5 text-sm font-medium text-white hover:opacity-90"
+              >
+                Replace
+              </button>
+            </div>
+          </>
+        )}
       </div>
     </div>
   );
