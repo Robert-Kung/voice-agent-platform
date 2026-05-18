@@ -1,5 +1,6 @@
 'use client';
 
+import { useState } from 'react';
 import Link from 'next/link';
 import { ArrowLeft, Info } from 'lucide-react';
 
@@ -13,6 +14,7 @@ interface ProfileEditorHeaderProps {
   trying: boolean;
   onSave: () => void;
   onTry: () => void;
+  onSaveAndTry?: () => void;
 }
 
 /**
@@ -29,7 +31,10 @@ export function ProfileEditorHeader({
   trying,
   onSave,
   onTry,
+  onSaveAndTry,
 }: ProfileEditorHeaderProps) {
+  const [showConfirm, setShowConfirm] = useState(false);
+
   return (
     <div className="flex items-center gap-4 px-6 py-3">
       {/* Left: back + identity */}
@@ -92,15 +97,45 @@ export function ProfileEditorHeader({
           )}
         </button>
         {!isNew && (
-          <button
-            type="button"
-            onClick={onTry}
-            disabled={trying || isDirty}
-            title={isDirty ? '先儲存變更' : '啟動本機 connect-mode agent 測試'}
-            className="border-border hover:bg-foreground/5 rounded-md border px-4 py-1.5 text-sm disabled:opacity-50"
-          >
-            {trying ? '啟動中…' : 'Try ▶'}
-          </button>
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => {
+                if (isDirty) {
+                  setShowConfirm(true);
+                } else {
+                  onTry();
+                }
+              }}
+              disabled={trying}
+              title="啟動本機 connect-mode agent 測試"
+              className="border-border hover:bg-foreground/5 rounded-md border px-4 py-1.5 text-sm disabled:opacity-50"
+            >
+              {trying ? '啟動中…' : 'Try ▶'}
+            </button>
+            {showConfirm && (
+              <div className="border-border bg-background absolute top-full right-0 z-10 mt-1 flex items-center gap-2 rounded-md border px-3 py-2 text-xs whitespace-nowrap shadow-sm">
+                <span>未儲存，要先儲存後再 Try 嗎？</span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    onSaveAndTry?.();
+                    setShowConfirm(false);
+                  }}
+                  className="text-primary font-medium"
+                >
+                  儲存並 Try
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowConfirm(false)}
+                  className="text-foreground/50"
+                >
+                  取消
+                </button>
+              </div>
+            )}
+          </div>
         )}
       </div>
     </div>

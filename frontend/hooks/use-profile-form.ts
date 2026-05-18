@@ -250,6 +250,7 @@ export interface UseProfileFormReturn {
   removeService: (key: string) => void;
   handleSave: () => Promise<void>;
   handleTry: () => Promise<void>;
+  handleSaveAndTry: () => Promise<void>;
 }
 
 export function useProfileForm(): UseProfileFormReturn {
@@ -575,7 +576,7 @@ export function useProfileForm(): UseProfileFormReturn {
             extraJson: ej,
           })
         );
-        toast.success('Saved.');
+        toast.success('Profile 已儲存', { duration: 3000 });
       }
     } catch (e) {
       toast.error(`儲存失敗: ${(e as Error).message}`);
@@ -583,6 +584,12 @@ export function useProfileForm(): UseProfileFormReturn {
       setSaving(false);
     }
   }, [name, displayName, known, extraJson, isNew, id, currentSnapshot, router]);
+
+  const handleSaveAndTry = useCallback(async () => {
+    await handleSave();
+    // small delay to let the save settle
+    setTimeout(() => handleTry(), 500);
+  }, [handleSave, handleTry]);
 
   // ── Computed ─────────────────────────────────────────────────────
 
@@ -645,5 +652,6 @@ export function useProfileForm(): UseProfileFormReturn {
     removeService,
     handleSave,
     handleTry,
+    handleSaveAndTry,
   };
 }
