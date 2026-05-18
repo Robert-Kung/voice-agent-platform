@@ -1,9 +1,10 @@
 'use client';
 
 import { useCallback, useEffect, useRef } from 'react';
+import { Sparkles } from 'lucide-react';
 import { markdown } from '@codemirror/lang-markdown';
+import { defaultHighlightStyle, syntaxHighlighting } from '@codemirror/language';
 import { EditorState } from '@codemirror/state';
-import { oneDark } from '@codemirror/theme-one-dark';
 import { EditorView, placeholder as cmPlaceholder, keymap, lineNumbers } from '@codemirror/view';
 import type { UseProfileFormReturn } from '@/hooks/use-profile-form';
 
@@ -23,8 +24,18 @@ interface PromptEditorProps {
 export function PromptEditor({ form, onGenerateClick, onSave }: PromptEditorProps) {
   const { known, updateKnown } = form;
 
+  const charCount = known.instructions?.length ?? 0;
+  const tokenEstimate = Math.ceil(charCount / 4);
+
   return (
     <div className="flex h-full flex-col space-y-5">
+      {/* Welcome helper — only one mode applies */}
+      <p className="text-foreground/50 text-xs leading-relaxed">
+        <span className="font-medium">僅一種模式生效</span>
+        ：pipeline 模式逐字朗讀 Welcome Message；realtime 模式由 Gemini 依 Welcome Instructions
+        生成。
+      </p>
+
       {/* Welcome Message — compact */}
       <div>
         <label className="text-foreground/60 mb-1 block text-xs font-medium">
@@ -70,7 +81,8 @@ export function PromptEditor({ form, onGenerateClick, onSave }: PromptEditorProp
               onClick={onGenerateClick}
               className="border-border text-foreground/60 hover:bg-foreground/5 hover:text-foreground flex items-center gap-1 rounded-md border px-2 py-0.5 text-xs transition-colors"
             >
-              ✨ Generate
+              <Sparkles size={14} />
+              Generate
             </button>
           )}
         </div>
@@ -79,6 +91,9 @@ export function PromptEditor({ form, onGenerateClick, onSave }: PromptEditorProp
           onChange={(val) => updateKnown('instructions', val)}
           onSave={onSave}
         />
+        <div className="text-foreground/40 mt-1 text-right font-mono text-[11px]">
+          {charCount} chars · ~{tokenEstimate} tokens
+        </div>
       </div>
     </div>
   );
@@ -101,6 +116,12 @@ function SystemPromptEditor({ value, onChange, onSave }: SystemPromptEditorProps
   // Keep refs fresh
   onChangeRef.current = onChange;
   onSaveRef.current = onSave;
+
+  // Stable initial value snapshot so createEditor isn't reinvoked on each keystroke
+  const initialValueRef = useRef(value);
+  // Track latest value via ref (used by createEditor without retriggering it)
+  const latestValueRef = useRef(value);
+  latestValueRef.current = value;
 
   const createEditor = useCallback(() => {
     if (!containerRef.current) return;
@@ -133,6 +154,7 @@ function SystemPromptEditor({ value, onChange, onSave }: SystemPromptEditorProps
         fontSize: '12px',
         border: '1px solid var(--border)',
         borderRadius: '0.375rem',
+        backgroundColor: 'transparent',
       },
       '&.cm-focused': {
         outline: 'none',
@@ -144,25 +166,37 @@ function SystemPromptEditor({ value, onChange, onSave }: SystemPromptEditorProps
       },
       '.cm-content': {
         padding: '12px 0',
+        color: 'hsl(var(--foreground))',
+        caretColor: 'hsl(var(--foreground))',
       },
       '.cm-gutters': {
-        backgroundColor: 'transparent',
+        backgroundColor: 'hsl(var(--foreground) / 0.03)',
         borderRight: '1px solid var(--border)',
+        color: 'hsl(var(--foreground) / 0.4)',
       },
       '.cm-lineNumbers .cm-gutterElement': {
         padding: '0 8px 0 12px',
         minWidth: '3em',
         color: 'hsl(var(--foreground) / 0.3)',
-        fontSize: '11px',
+        fontSize: '12px',
+      },
+      '.cm-activeLine': {
+        backgroundColor: 'hsl(var(--foreground) / 0.03)',
+      },
+      '.cm-activeLineGutter': {
+        backgroundColor: 'hsl(var(--foreground) / 0.05)',
+      },
+      '.cm-selectionBackground, &.cm-focused .cm-selectionBackground, ::selection': {
+        backgroundColor: 'hsl(var(--primary) / 0.2)',
       },
     });
 
     const state = EditorState.create({
-      doc: value,
+      doc: initialValueRef.current,
       extensions: [
         lineNumbers(),
         markdown(),
-        oneDark,
+        syntaxHighlighting(defaultHighlightStyle),
         theme,
         updateListener,
         saveKeymap,
@@ -175,9 +209,9 @@ function SystemPromptEditor({ value, onChange, onSave }: SystemPromptEditorProps
       state,
       parent: containerRef.current,
     });
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, []);
 
-  // Initialize editor
+  // Initialize editor once
   useEffect(() => {
     createEditor();
     return () => {
