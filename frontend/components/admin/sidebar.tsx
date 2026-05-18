@@ -109,7 +109,7 @@ export function AdminSidebar({ onLogout }: AdminSidebarProps) {
               collapsed && 'rotate-180'
             )}
           />
-          {!collapsed && <span>Collapse</span>}
+          <span className={collapsed ? 'sr-only' : ''}>{collapsed ? 'Expand' : 'Collapse'}</span>
         </button>
       </div>
     </aside>

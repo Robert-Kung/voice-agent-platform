@@ -30,7 +30,7 @@ ENV AGENT_NAME=$AGENT_NAME
 ENV NEXT_PUBLIC_ADMIN_API_URL=$NEXT_PUBLIC_ADMIN_API_URL
 ENV NEXT_TELEMETRY_DISABLED=1
 
-RUN pnpm build
+RUN --network=host pnpm build
 
 # ── Stage 3: Run ──────────────────────────────────────────────────────────────
 FROM base AS runner
