@@ -20,7 +20,7 @@ services:
   # 與 agent 共用同一個 SQLite 檔（data volume）。
   api:
     build:
-      context: .
+      context: ./agents
       dockerfile: Dockerfile
       network: host
     command:
@@ -49,7 +49,7 @@ services:
       - ./data:/app/data
       # Share profiles dir with host so DB→YAML exports (used by /deploy/redeploy)
       # show up on disk and make it into `lk agent deploy`'s upload tarball.
-      - ./profiles:/app/profiles
+      - ./agents/profiles:/app/profiles
     restart: unless-stopped
 
   # ── Frontend (Next.js) ──────────────────────────────────────

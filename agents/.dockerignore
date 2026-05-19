@@ -1,8 +1,8 @@
+# Local runtime data (SQLite DB, etc.) — environment-specific, not part of the image.
+data/
+
 # Project tests
-test/
 tests/
-eval/
-evals/
 
 # Python bytecode and artifacts
 __pycache__/

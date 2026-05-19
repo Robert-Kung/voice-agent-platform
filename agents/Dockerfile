@@ -41,15 +41,18 @@ RUN mkdir -p src
 # Ensure your uv.lock file is checked in for consistency across environments
 RUN uv sync --locked
 
-# Copy all remaining application files into the container
-# This includes source code, configuration files, and dependency specifications
-# (Excludes files specified in .dockerignore)
-COPY . .
+# Copy only the agent entrypoints needed for model pre-download.
+# This layer is cached independently from profile YAMLs and API code,
+# so model downloads are skipped on redeploys that only change profiles.
+COPY agent.py agent_factory.py agent_tools.py ./
 
 # Pre-download any ML models or files the agent needs.
 # HF_HOME must point under /app so the cache survives the multi-stage COPY.
 ENV HF_HOME=/app/.hf_cache
 RUN uv run "agent.py" download-files
+
+# Copy all remaining application files into the container
+COPY . .
 
 # --- Production stage ---
 # Build tools (gcc, g++, python3-dev) are not included in the final image
