@@ -225,47 +225,60 @@ function HttpToolCard({
                 + Add
               </button>
             </div>
-            <div className="space-y-1">
+            <div className="space-y-1.5">
               {(tool.parameters || []).map((param, pIdx) => (
-                <div key={pIdx} className="flex items-center gap-1">
+                <div key={pIdx} className="space-y-0.5">
+                  <div className="flex items-center gap-1">
+                    <input
+                      type="text"
+                      placeholder="name"
+                      value={param.name}
+                      onChange={(e) => updateHttpToolParam(realIdx, pIdx, { name: e.target.value })}
+                      className="border-border bg-background min-w-0 flex-1 rounded border px-1.5 py-0.5 font-mono text-xs"
+                    />
+                    <select
+                      value={param.type}
+                      onChange={(e) =>
+                        updateHttpToolParam(realIdx, pIdx, { type: e.target.value as ParamType })
+                      }
+                      className="border-border bg-background w-16 rounded border px-1 py-0.5 text-xs"
+                    >
+                      {PARAM_TYPES.map((t) => (
+                        <option key={t} value={t}>
+                          {t}
+                        </option>
+                      ))}
+                    </select>
+                    <label className="flex items-center gap-0.5 text-xs">
+                      <input
+                        type="checkbox"
+                        checked={!!param.required}
+                        onChange={(e) =>
+                          updateHttpToolParam(realIdx, pIdx, { required: e.target.checked })
+                        }
+                        className="size-2.5"
+                      />
+                      req
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => removeHttpToolParam(realIdx, pIdx)}
+                      className="text-foreground/40 text-xs hover:text-red-500"
+                    >
+                      ✕
+                    </button>
+                  </div>
                   <input
                     type="text"
-                    placeholder="name"
-                    value={param.name}
-                    onChange={(e) => updateHttpToolParam(realIdx, pIdx, { name: e.target.value })}
-                    className="border-border bg-background min-w-0 flex-1 rounded border px-1.5 py-0.5 font-mono text-xs"
-                  />
-                  <select
-                    value={param.type}
+                    placeholder="Description（給 LLM 看，選填）"
+                    value={param.description || ''}
                     onChange={(e) =>
-                      updateHttpToolParam(realIdx, pIdx, { type: e.target.value as ParamType })
+                      updateHttpToolParam(realIdx, pIdx, {
+                        description: e.target.value || undefined,
+                      })
                     }
-                    className="border-border bg-background w-16 rounded border px-1 py-0.5 text-xs"
-                  >
-                    {PARAM_TYPES.map((t) => (
-                      <option key={t} value={t}>
-                        {t}
-                      </option>
-                    ))}
-                  </select>
-                  <label className="flex items-center gap-0.5 text-xs">
-                    <input
-                      type="checkbox"
-                      checked={!!param.required}
-                      onChange={(e) =>
-                        updateHttpToolParam(realIdx, pIdx, { required: e.target.checked })
-                      }
-                      className="size-2.5"
-                    />
-                    req
-                  </label>
-                  <button
-                    type="button"
-                    onClick={() => removeHttpToolParam(realIdx, pIdx)}
-                    className="text-foreground/40 text-xs hover:text-red-500"
-                  >
-                    ✕
-                  </button>
+                    className="border-border bg-background text-foreground/70 w-full rounded border px-1.5 py-0.5 text-xs"
+                  />
                 </div>
               ))}
             </div>

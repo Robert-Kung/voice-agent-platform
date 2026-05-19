@@ -69,13 +69,29 @@
 
 ---
 
-## Sprint C — 加值（後話）
+## Sprint C — 加值 ✅ 完成（2026-05-18~19）
 
-- C1：Generate prompt SSE streaming（Gemini Flash Lite 支援 stream）
-- C2：Tablet（768px）響應式：右 panel 變抽屜
-- C3：Generate「在現有 prompt 上補強」迭代模式
-- C4：Token 估算改用 `gpt-tokenizer`（更準）
-- C5：Section 折疊動畫（framer-motion 已裝？查）
+| ID | 內容 | 狀態 |
+|----|------|------|
+| C1 | Generate prompt 改用 LM Studio（`http://192.168.2.100:1234/v1`，`google/gemma-4-26b-a4b`） | ✅ |
+| C2 | `<md` 響應式：右 panel 改為 slide-in drawer，header 加 SlidersHorizontal toggle | ✅ |
+| C3 | Generate dual-mode：「全新建立」（create）+ 「補強現有」（enhance，保留架構協作改寫）| ✅ |
+| C4 | Token 估算改用精確 API | ❌ 跳過（per-keystroke API call 浪費額度，`chars/4` 估算已足夠） |
+| C5 | CollapsibleSection 折疊動畫（`motion/react` AnimatePresence） | ✅ |
+
+### Create 模式 few-shot 範例（2026-05-19 補）
+
+`CREATE_SYSTEM` prompt 加入 `car_inspection` + `elevator_repair` 兩個去識別化範例，引導 LLM 產出【區塊標題】格式、適合語音的 system prompt 架構。已 curl 驗證兩個情境（牙醫診所 / 社區管委會）輸出正確。
+
+---
+
+## Sprint D — Bug fix（2026-05-19）
+
+| ID | 內容 | 狀態 |
+|----|------|------|
+| D1 | HTTP Tool parameter `description` 欄位在 UI 缺失（型別有但未渲染） | ✅ 修復 |
+
+**D1 說明**：`tools-section.tsx` parameter 列只有 `name | type | req | ✕`，缺少 `description` 輸入欄。`HttpToolParam.description?: string` 型別已存在，只需在 name 行下加第二行 input 即可。elevator_repair `create_maintenance_ticket` 的 8 個 parameter descriptions 之前無法在 UI 填寫。
 
 ---
 
