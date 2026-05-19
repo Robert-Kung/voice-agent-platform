@@ -555,7 +555,7 @@ export function useProfileForm(): UseProfileFormReturn {
         });
         toast.success(`Profile "${created.name}" 建立成功`);
         setInitialSnapshot(currentSnapshot);
-        router.push(`/admin/profiles/${created.id}/v2`);
+        router.push(`/admin/profiles/${created.id}`);
       } else {
         const updated = await profilesApi.update(id, {
           display_name: displayName,
