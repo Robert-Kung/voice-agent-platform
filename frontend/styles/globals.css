@@ -123,6 +123,10 @@
   }
 }
 
+@keyframes shimmer {
+  100% { transform: translateX(200%); }
+}
+
 /* ─── Admin Shell: Dark-first Developer Console ─────────────────── */
 .admin-shell {
   --background: oklch(0.13 0.005 260);

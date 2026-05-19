@@ -281,7 +281,10 @@ function GeneratePromptModal({
               <button
                 key={m}
                 type="button"
-                onClick={() => { setMode(m); setError(null); }}
+                onClick={() => {
+                  setMode(m);
+                  setError(null);
+                }}
                 disabled={m === 'enhance' && !hasExisting}
                 className={`flex-1 rounded py-1 text-xs font-medium transition-colors ${
                   mode === m
@@ -299,7 +302,9 @@ function GeneratePromptModal({
           /* Preview pane */
           <>
             <p className="text-foreground/60 mb-3 text-xs">
-              {mode === 'enhance' ? '補強結果預覽 — 確認後將覆寫現有 prompt。' : '生成結果預覽 — 確認後將覆寫現有 prompt。'}
+              {mode === 'enhance'
+                ? '補強結果預覽 — 確認後將覆寫現有 prompt。'
+                : '生成結果預覽 — 確認後將覆寫現有 prompt。'}
             </p>
             <textarea
               value={preview}
@@ -340,7 +345,11 @@ function GeneratePromptModal({
             />
             {error && <p className="mb-2 text-xs text-red-500">{error}</p>}
             <div className="flex items-center justify-end gap-2">
-              <button type="button" onClick={onClose} className="border-border hover:bg-foreground/5 rounded-md border px-4 py-1.5 text-sm">
+              <button
+                type="button"
+                onClick={onClose}
+                className="border-border hover:bg-foreground/5 rounded-md border px-4 py-1.5 text-sm"
+              >
                 取消
               </button>
               <button
@@ -357,9 +366,12 @@ function GeneratePromptModal({
           /* Enhance form */
           <>
             <div className="border-border bg-foreground/5 mb-3 rounded-md border px-3 py-2">
-              <p className="text-foreground/40 mb-1 text-[10px] uppercase tracking-wider">現有 Prompt（前 300 字）</p>
+              <p className="text-foreground/40 mb-1 text-[10px] tracking-wider uppercase">
+                現有 Prompt（前 300 字）
+              </p>
               <p className="text-foreground/70 line-clamp-4 font-mono text-xs whitespace-pre-wrap">
-                {currentInstructions.slice(0, 300)}{currentInstructions.length > 300 ? '…' : ''}
+                {currentInstructions.slice(0, 300)}
+                {currentInstructions.length > 300 ? '…' : ''}
               </p>
             </div>
             <p className="text-foreground/60 mb-2 text-sm">描述你希望補強或改進的方向：</p>
@@ -373,7 +385,11 @@ function GeneratePromptModal({
             />
             {error && <p className="mb-2 text-xs text-red-500">{error}</p>}
             <div className="flex items-center justify-end gap-2">
-              <button type="button" onClick={onClose} className="border-border hover:bg-foreground/5 rounded-md border px-4 py-1.5 text-sm">
+              <button
+                type="button"
+                onClick={onClose}
+                className="border-border hover:bg-foreground/5 rounded-md border px-4 py-1.5 text-sm"
+              >
                 取消
               </button>
               <button

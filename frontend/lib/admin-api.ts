@@ -223,10 +223,19 @@ export interface DeployResult {
   stdout?: unknown;
 }
 
+export interface DeployProgress {
+  is_deploying: boolean;
+  profile_name: string | null;
+  elapsed_s: number | null;
+  phase: 'build' | 'activate' | null;
+  last_result: { status: 'ok' | 'error'; active_profile?: string; error?: string } | null;
+}
+
 export const deployApi = {
   status: () => request<DeployStatus>('/api/deploy/status'),
   logs: (tail = 200, logType: 'deploy' | 'build' = 'deploy') =>
     request<DeployLogs>(`/api/deploy/logs?tail=${tail}&log_type=${logType}`),
+  progress: () => request<DeployProgress>('/api/deploy/progress'),
   deploy: (profileId?: string) =>
     request<DeployResult>('/api/deploy/deploy', {
       method: 'POST',

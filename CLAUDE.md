@@ -3,13 +3,14 @@
 LiveKit-based 語音 Agent 平台。Profile-driven Agent 系統，admin UI 管理 profile / 工具 / 部署 / sessions。
 
 主要架構：
-- `agent.py` — LiveKit Agent entrypoint（pipeline + realtime 雙模式）
-- `agent_factory.py` — 動態 Agent class 建立（讀 profile YAML/DB）
-- `agent_tools.py` — Tool factory registry
-- `api/` — FastAPI 管理 API（profiles / sessions / deploy / tools / test）
+- `agents/agent.py` — LiveKit Agent entrypoint（pipeline + realtime 雙模式）
+- `agents/agent_factory.py` — 動態 Agent class 建立（讀 profile YAML/DB）
+- `agents/agent_tools.py` — Tool factory registry
+- `agents/api/` — FastAPI 管理 API（profiles / sessions / deploy / tools / test）
 - `frontend/` — Next.js admin UI + voice 測試頁
-- `db/` — SQLAlchemy（SQLite，profile / session / cost 持久化）
-- `profiles/` — YAML profile 定義（fallback 來源）
+- `agents/db/` — SQLAlchemy（SQLite，profile / session / cost 持久化）
+- `agents/profiles/` — YAML profile 定義（fallback 來源）
+- `agents/Dockerfile` + `agents/livekit.toml` — `lk agent deploy` 從 `agents/` 執行
 
 ---
 
@@ -58,9 +59,9 @@ Prototype 建在 `/admin/profiles/[id]/v2`，不動現有 v1 頁面。驗證後�
 - 安全 / 中間件 / auth：Apr 30 review 後已 hardened，動到 `frontend/middleware.ts`、`frontend/app/api/admin/*`、`api/routes_test.py` 前先看 git log 理解
 - Admin 路由結構：`frontend/app/admin/(authenticated)/` route group 包住所有登入後頁面（共用含 sidebar 的 layout），`frontend/app/admin/login/` 維持平行、不套 sidebar。新增登入後頁面請放進 `(authenticated)/` 內
 - 登入跳轉用 `window.location.assign()` 而非 `router.replace()`：login 頁與 dashboard 在不同 layout 下，但 App Router 仍會 prefetch dashboard 的 RSC payload；prefetch 發生時還沒 cookie，middleware 回 redirect 並被 client cache，導致登入後 `router.replace` 拿到的是舊的 redirect。hard navigation 直接繞過 client cache
-- Test：`uv run pytest tests/ -q`，目前 147 pass。`tests/test_api.py` 的 `client` fixture 會 unset `ADMIN_API_TOKEN`，auth 強制驗證用 `secured_client`
+- Test：`cd agents && uv run pytest tests/ -q`，目前 147 pass。`tests/test_api.py` 的 `client` fixture 會 unset `ADMIN_API_TOKEN`，auth 強制驗證用 `secured_client`
 - DB：SQLite，profile 透過 `db.profile_store` 持久化；YAML 是 fallback。`db.engine` 是 module-global singleton，conftest.py 已將測試 DB 指向 `:memory:`
-- Profile 改名 / tool 拿掉時記得同步更新 test_agent_system.py 的 assertion
+- Profile 改名 / tool 拿掉時記得同步更新 `agents/tests/test_agent_system.py` 的 assertion
 - Cost：realtime 用 Gemini Live token rates（`db/cost.py`），pipeline 走 LLM/STT/TTS 分開計費
 
 ### Realtime mode 架構（TextInputRealtimeModel）

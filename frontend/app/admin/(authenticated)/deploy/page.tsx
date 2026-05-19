@@ -1,11 +1,11 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { toast } from 'sonner';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { deployApi, profilesApi } from '@/lib/admin-api';
-import type { DeployLogs, DeployStatus, Profile } from '@/lib/admin-api';
+import type { DeployLogs, DeployProgress, DeployStatus, Profile } from '@/lib/admin-api';
 
 const LOG_TYPES: Array<'deploy' | 'build'> = ['deploy', 'build'];
 
@@ -32,7 +32,11 @@ export default function DeployPage() {
   const [lastFetched, setLastFetched] = useState<Date | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [deploying, setDeploying] = useState(false);
+  const [deployElapsed, setDeployElapsed] = useState(0);
+  const [deployPhase, setDeployPhase] = useState<'build' | 'activate' | null>(null);
+  const [deployProfileName, setDeployProfileName] = useState<string | null>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const deployStartRef = useRef<number | null>(null);
 
   const loadAll = useCallback(() => {
     setLoading(true);
@@ -64,6 +68,54 @@ export default function DeployPage() {
   useEffect(() => {
     loadLogs();
   }, [loadLogs]);
+
+  // On mount: check if a deploy is already running (e.g. after page reload)
+  useEffect(() => {
+    deployApi
+      .progress()
+      .then((p: DeployProgress) => {
+        if (p.is_deploying) {
+          setDeploying(true);
+          setDeployPhase(p.phase);
+          setDeployProfileName(p.profile_name);
+          const alreadyElapsed = p.elapsed_s ?? 0;
+          deployStartRef.current = Date.now() - alreadyElapsed * 1000;
+          setDeployElapsed(Math.round(alreadyElapsed));
+        }
+      })
+      .catch(() => {
+        /* ignore */
+      });
+  }, []);
+
+  // Elapsed timer while deploying
+  useEffect(() => {
+    if (!deploying) {
+      setDeployElapsed(0);
+      return;
+    }
+    if (!deployStartRef.current) deployStartRef.current = Date.now();
+    const timer = setInterval(() => {
+      setDeployElapsed(Math.round((Date.now() - deployStartRef.current!) / 1000));
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [deploying]);
+
+  // Auto-poll build logs every 5s while deploying
+  useEffect(() => {
+    if (!deploying) return;
+    const interval = setInterval(() => {
+      deployApi
+        .logs(100, 'build')
+        .then((data) => {
+          if (data.lines.length > 1) setLogs(data);
+        })
+        .catch(() => {
+          /* ignore */
+        });
+    }, 5000);
+    return () => clearInterval(interval);
+  }, [deploying]);
 
   const livePlaceholder = useMemo(() => profiles.find((p) => p.is_live) || null, [profiles]);
   const others = useMemo(() => profiles.filter((p) => !p.is_live), [profiles]);
@@ -102,10 +154,41 @@ export default function DeployPage() {
     return { label: 'Activate', disabled: false, slow: false };
   }, [selected]);
 
+  // Poll /progress every 3s while deploying (to sync phase + catch background completion)
+  useEffect(() => {
+    if (!deploying) return;
+    const interval = setInterval(async () => {
+      try {
+        const p = await deployApi.progress();
+        if (p.phase) setDeployPhase(p.phase);
+        if (!p.is_deploying) {
+          // Background deploy finished
+          setDeploying(false);
+          setDeployPhase(null);
+          setDeployProfileName(null);
+          deployStartRef.current = null;
+          if (p.last_result?.status === 'ok') {
+            toast.success(`已 deploy + 啟用 "${p.last_result.active_profile ?? p.profile_name}"`);
+          } else if (p.last_result?.status === 'error') {
+            toast.error(`Deploy 失敗: ${p.last_result.error}`);
+          }
+          loadAll();
+          loadLogs();
+        }
+      } catch {
+        /* ignore transient errors */
+      }
+    }, 3000);
+    return () => clearInterval(interval);
+  }, [deploying, loadAll, loadLogs]);
+
   const handleConfirm = async () => {
     if (!selected) return;
     setConfirmOpen(false);
     setDeploying(true);
+    setDeployPhase(action.slow ? 'build' : null);
+    setDeployProfileName(selected.name);
+    deployStartRef.current = Date.now();
     toast.info(
       action.slow
         ? `"${selected.name}" — build + rollout 需 3–6 分鐘…`
@@ -113,17 +196,28 @@ export default function DeployPage() {
     );
     try {
       const result = await deployApi.switchProfile(selected.id);
-      toast.success(
-        result.mode === 'secret-only'
-          ? `已切換 AGENT_PROFILE → ${result.active_profile}`
-          : `已 deploy + 啟用 "${result.active_profile}"`
-      );
-      loadAll();
-      loadLogs();
+      if (result.mode === 'secret-only') {
+        // Fast path — completed synchronously
+        toast.success(`已切換 AGENT_PROFILE → ${result.active_profile}`);
+        setDeploying(false);
+        setDeployPhase(null);
+        setDeployProfileName(null);
+        deployStartRef.current = null;
+        loadAll();
+        loadLogs();
+      }
+      // Slow path (status: "accepted"): keep deploying=true, poll loop will handle completion
     } catch (e) {
-      toast.error(`失敗: ${(e as Error).message}`);
-    } finally {
+      const msg = (e as Error).message;
+      if (msg.includes('409') || msg.toLowerCase().includes('already in progress')) {
+        toast.warning(`Deploy 已在進行中，請等待完成後再試`);
+      } else {
+        toast.error(`失敗: ${msg}`);
+      }
       setDeploying(false);
+      setDeployPhase(null);
+      setDeployProfileName(null);
+      deployStartRef.current = null;
     }
   };
 
@@ -167,6 +261,15 @@ export default function DeployPage() {
         tracked by this admin UI — if someone flips <code>AGENT_PROFILE</code> via the{' '}
         <code>lk</code> CLI directly, it may go stale until the next admin-UI action.
       </div>
+
+      {deploying && (
+        <DeployProgressBanner
+          profileName={deployProfileName}
+          elapsed={deployElapsed}
+          phase={deployPhase}
+          buildLogs={logs?.log_type === 'build' ? logs.lines : []}
+        />
+      )}
 
       {error ? (
         <div className="rounded-md border border-red-500/40 bg-red-500/10 p-4 text-sm text-red-700 dark:text-red-400">
@@ -565,4 +668,71 @@ function formatDate(iso: string): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(
     d.getHours()
   )}:${pad(d.getMinutes())}`;
+}
+
+// ── Deploy Progress Banner ────────────────────────────────────
+
+function DeployProgressBanner({
+  profileName,
+  elapsed,
+  phase,
+  buildLogs,
+}: {
+  profileName: string | null;
+  elapsed: number;
+  phase: 'build' | 'activate' | null;
+  buildLogs: string[];
+}) {
+  const EXPECTED_TOTAL = 300; // ~5 min typical
+  const pct = Math.min(Math.round((elapsed / EXPECTED_TOTAL) * 100), 95);
+
+  const mins = Math.floor(elapsed / 60);
+  const secs = elapsed % 60;
+  const elapsedStr = mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
+
+  const phaseLabel = phase === 'activate' ? '設定 AGENT_PROFILE…' : '建構 + 推送 Docker image…';
+
+  const recentLogs = buildLogs.filter((l) => !l.startsWith('Using agent ')).slice(-8);
+
+  return (
+    <div className="space-y-3 rounded-md border border-amber-500/40 bg-amber-500/5 p-4">
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center gap-2">
+          <span className="inline-block h-2.5 w-2.5 animate-pulse rounded-full bg-amber-500" />
+          <span className="text-sm font-medium">
+            Deploy 進行中
+            {profileName && (
+              <>
+                {' '}
+                — <code className="font-mono text-xs">{profileName}</code>
+              </>
+            )}
+          </span>
+        </div>
+        <span className="text-foreground/60 text-xs tabular-nums">{elapsedStr}</span>
+      </div>
+
+      {/* Progress bar */}
+      <div className="relative h-1.5 w-full overflow-hidden rounded-full bg-amber-500/20">
+        <div
+          className="h-full rounded-full bg-amber-500 transition-all duration-1000 ease-linear"
+          style={{ width: `${pct}%` }}
+        />
+        {/* Shimmer for indeterminate feel */}
+        <div className="absolute inset-0 -translate-x-full animate-[shimmer_2s_infinite] bg-gradient-to-r from-transparent via-white/20 to-transparent" />
+      </div>
+
+      <div className="text-foreground/60 text-xs">{phaseLabel}</div>
+
+      {recentLogs.length > 0 && (
+        <pre className="max-h-32 overflow-auto rounded border border-amber-500/20 bg-black/60 p-2 font-mono text-[10px] leading-relaxed text-amber-100/80">
+          {recentLogs.join('\n')}
+        </pre>
+      )}
+
+      <p className="text-foreground/50 text-xs">
+        通常需 3–6 分鐘。請勿重複點擊 Deploy，伺服器已鎖定防止並行。
+      </p>
+    </div>
+  );
 }

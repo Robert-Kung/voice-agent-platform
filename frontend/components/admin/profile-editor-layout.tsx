@@ -1,8 +1,8 @@
 'use client';
 
-import { useEffect, type ReactNode } from 'react';
-import { AnimatePresence, motion } from 'motion/react';
+import { type ReactNode, useEffect } from 'react';
 import { X } from 'lucide-react';
+import { AnimatePresence, motion } from 'motion/react';
 
 interface ProfileEditorLayoutProps {
   header: ReactNode;
@@ -57,7 +57,7 @@ export function ProfileEditorLayout({
           <>
             {/* Backdrop */}
             <motion.div
-              className="bg-black/40 fixed inset-0 z-40 md:hidden"
+              className="fixed inset-0 z-40 bg-black/40 md:hidden"
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
