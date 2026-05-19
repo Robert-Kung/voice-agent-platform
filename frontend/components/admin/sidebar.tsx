@@ -1,9 +1,21 @@
 'use client';
 
 import { useState } from 'react';
+import { useTheme } from 'next-themes';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { ChevronLeft, Cpu, LayoutDashboard, LogOut, Rocket, ScrollText } from 'lucide-react';
+import {
+  ChevronLeft,
+  Cpu,
+  LayoutDashboard,
+  LogOut,
+  Monitor,
+  Moon,
+  Rocket,
+  ScrollText,
+  Sun,
+} from 'lucide-react';
+import { ThemeToggle } from '@/components/app/theme-toggle';
 import { cn } from '@/lib/shadcn/utils';
 
 interface NavItem {
@@ -26,6 +38,15 @@ interface AdminSidebarProps {
 export function AdminSidebar({ onLogout }: AdminSidebarProps) {
   const pathname = usePathname();
   const [collapsed, setCollapsed] = useState(false);
+  const { theme, setTheme } = useTheme();
+
+  const cycleTheme = () => {
+    if (theme === 'light') setTheme('dark');
+    else if (theme === 'dark') setTheme('system');
+    else setTheme('light');
+  };
+
+  const ThemeIcon = theme === 'dark' ? Moon : theme === 'light' ? Sun : Monitor;
 
   return (
     <aside
@@ -85,6 +106,21 @@ export function AdminSidebar({ onLogout }: AdminSidebarProps) {
 
       {/* Footer */}
       <div className="border-sidebar-border space-y-1 border-t px-2 py-3">
+        {collapsed ? (
+          <button
+            type="button"
+            onClick={cycleTheme}
+            aria-label="切換主題"
+            title="切換主題"
+            className="text-sidebar-foreground/50 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-sm transition-colors"
+          >
+            <ThemeIcon className="size-4 shrink-0" aria-hidden="true" />
+          </button>
+        ) : (
+          <div className="px-0.5 py-1">
+            <ThemeToggle />
+          </div>
+        )}
         <button
           type="button"
           onClick={onLogout}
