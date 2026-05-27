@@ -118,6 +118,13 @@ def make_transfer_to_human(profile: dict, config: dict):
         or config.get("transfer_message")
         or "感謝您的耐心等候，現在為您轉接服務人員，請稍候。"
     )
+    # 此描述會進到 LLM 的 function-calling schema，決定模型何時觸發轉接。
+    # 領域中立的預設值，profile 可覆寫成具體觸發情境。
+    tool_description = (
+        ho.get("tool_description")
+        or profile.get("human_operator_tool_description")
+        or "轉接真人客服。當使用者明確要求真人、出現無法自動處理的情境、或需要人工介入時呼叫。"
+    )
     # 預設用男聲 Puck，與主 Agent 的女聲 Kore 區別，讓使用者聽到切換
     human_voice = (
         ho.get("voice")
@@ -197,12 +204,7 @@ def make_transfer_to_human(profile: dict, config: dict):
 
     _HumanOperator.__name__ = f"HumanOperator_{profile.get('name', 'unknown')}"
 
-    @function_tool
     async def transfer_to_human(self: RunContext):
-        """
-        轉接真人接聽。
-        僅在無法對應任何已建檔 QA、意圖不明、或使用者明確要求轉接時使用。
-        """
         # Realtime 模式：建立不同聲音的 model，讓使用者聽到切換
         llm_override = None
         if isinstance(self.session.llm, _llm.RealtimeModel):
@@ -215,7 +217,7 @@ def make_transfer_to_human(profile: dict, config: dict):
         )
         return _HumanOperator(chat_ctx=self.chat_ctx, llm_override=llm_override), transfer_msg
 
-    return transfer_to_human
+    return function_tool(transfer_to_human, description=tool_description)
 
 
 # ═══════════════════════════════════════════════════════════

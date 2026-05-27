@@ -45,6 +45,21 @@ export function HandoffSection({ form }: HandoffSectionProps) {
               />
             </div>
             <div>
+              <label className="text-foreground/60 text-[10px]">
+                Tool Description (何時觸發轉接)
+              </label>
+              <textarea
+                value={known.human_operator?.tool_description ?? ''}
+                onChange={(e) => updateHandoff('tool_description', e.target.value)}
+                rows={2}
+                placeholder="留空用通用預設。可寫具體觸發情境，例如：緊急派工後、建單失敗、或詢問價格/合約時呼叫"
+                className={`${inputClass} resize-y text-xs`}
+              />
+              <p className="text-foreground/40 mt-0.5 text-[10px]">
+                此描述會送進模型，決定它何時呼叫 transfer_to_human
+              </p>
+            </div>
+            <div>
               <label className="text-foreground/60 text-[10px]">Instructions (人工 persona)</label>
               <textarea
                 value={known.human_operator?.instructions ?? ''}

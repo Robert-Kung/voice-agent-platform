@@ -18,6 +18,7 @@ export type HumanOperatorConfig = {
   instructions?: string;
   voice?: string;
   transfer_message?: string;
+  tool_description?: string;
 };
 
 export type QaEntry = {
