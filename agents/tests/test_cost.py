@@ -257,3 +257,18 @@ class TestSelectedModelCost:
         assert r["stt_rate_per_min"] == STT_RATES["deepgram"]
         assert abs(r["stt_usd"] - (600 / 60.0) * STT_RATES["deepgram"]) < 1e-9
         assert r["stt_provider"] == "deepgram/nova-2"
+
+
+class TestRealtimeRateMatching:
+    """code-review P1b: the selected realtime variant must resolve to its OWN rate
+    key, not silently fall to the default via a non-matching key."""
+
+    def test_selected_25_model_matches_its_own_key(self):
+        from db.cost import _match_realtime_rate
+        _, key = _match_realtime_rate("gemini-2.5-flash-native-audio-preview-12-2025")
+        assert key == "gemini-2.5-flash-native-audio"  # matched, not coincidental default
+
+    def test_unknown_realtime_model_falls_to_default(self):
+        from db.cost import _match_realtime_rate, _REALTIME_DEFAULT
+        _, key = _match_realtime_rate("some-future-model")
+        assert key == _REALTIME_DEFAULT

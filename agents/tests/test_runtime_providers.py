@@ -191,3 +191,49 @@ class TestModelsBlockValidation:
     def test_realtime_dead_variant_rejected(self):
         with pytest.raises(SpecError):
             validate_models_block({"realtime": {"model": "gemini-3.1-flash-live-preview"}})
+
+
+class TestCodeReviewFixes:
+    """Regression tests for code-review findings on commit 8b78bd1."""
+
+    def test_p1a_nondirect_stt_override_does_not_crash(self, monkeypatch):
+        # AGENT_STT_PROVIDER set to a non-direct/typo value must NOT flip a default
+        # STT spec to direct (which would SpecError and kill session start).
+        monkeypatch.setenv("AGENT_STT_PROVIDER", "elevenlabs")
+        r = providers.resolve_session_components({}, "pipeline")  # must not raise
+        assert isinstance(r.stt, lk_stt.FallbackAdapter)
+
+    def test_p1a_typo_override_is_noop(self, monkeypatch):
+        monkeypatch.setenv("AGENT_STT_PROVIDER", "deepgrammm")
+        spec = normalize_spec("stt", {"provider": "deepgram", "model": "nova-2", "via": "inference"})
+        comp = providers.build_stt([providers._apply_stt_override(spec)])
+        assert "inference" in type(comp).__module__  # not flipped to direct
+
+    def test_p2a_direct_llm_rejected_at_validation(self):
+        with pytest.raises(SpecError):
+            normalize_spec("llm", {"provider": "google", "model": "x", "via": "direct"})
+
+    def test_p2a_direct_tts_rejected_at_validation(self):
+        with pytest.raises(SpecError):
+            normalize_spec("tts", {"provider": "deepgram", "model": "x", "via": "direct"})
+
+    def test_p2a_direct_stt_nondeepgram_rejected(self):
+        with pytest.raises(SpecError):
+            normalize_spec("stt", {"provider": "google", "model": "x", "via": "direct"})
+
+    def test_p2a_direct_stt_deepgram_ok(self):
+        assert normalize_spec("stt", {"provider": "deepgram", "model": "nova-2", "via": "direct"})["via"] == "direct"
+
+    def test_p2b_reserved_option_keys_rejected(self):
+        for bad in ({"language": "zh"}, {"model": "x"}, {"provider": "y"}):
+            with pytest.raises(SpecError):
+                normalize_spec("stt", {"provider": "deepgram", "model": "nova-2", "options": bad})
+
+    def test_p2b_normal_options_allowed(self):
+        spec = normalize_spec("llm", {"provider": "google", "model": "x", "options": {"temperature": 0.5}})
+        assert spec["options"] == {"temperature": 0.5}
+
+    def test_p2c_garbage_mode_falls_back_to_default(self, monkeypatch):
+        from agent import _resolve_mode, _DEFAULT_MODE
+        monkeypatch.setenv("AGENT_MODE", "pipelime")
+        assert _resolve_mode({}) == _DEFAULT_MODE

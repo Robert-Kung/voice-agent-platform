@@ -32,13 +32,15 @@ KINDS = ("llm", "stt", "tts")
 KNOWN_DIRECT_PROVIDERS = {"deepgram", "google"}
 
 # Gemini Live variants known to work with the TextInputRealtimeModel text-input
-# path. 3.1-live is intentionally excluded: generate_reply() routes through
-# send_client_content, which 3.1 blocks → 1007 mid-session (see agent.py notes).
-# Realtime has NO FallbackAdapter net, so a bad variant kills the call — this
-# allowlist is the gate (plan-eng-review P3).
+# path AND priced in db/cost.py REALTIME_RATES. 3.1-live is excluded:
+# generate_reply() routes through send_client_content, which 3.1 blocks → 1007
+# mid-session (see agent.py notes). Realtime has NO FallbackAdapter net, so a bad
+# variant kills the call — this allowlist is the gate (plan-eng-review P3).
+# Only list variants we actually run AND can price; adding one means adding its
+# rate to REALTIME_RATES in the same change (code-review: don't allow what we
+# can't price, or cost silently falls to the default rate).
 REALTIME_MODEL_ALLOWLIST = {
     "gemini-2.5-flash-native-audio-preview-12-2025",
-    "gemini-2.0-flash-live-001",
 }
 
 # Providers accepted for the realtime LLM. Locked to Gemini by the
@@ -74,15 +76,31 @@ def normalize_spec(kind: str, spec: dict) -> dict:
     via = via.strip().lower()
     if via not in VALID_VIA:
         raise SpecError(f"{kind} spec has invalid via '{via}', expected one of {VALID_VIA}")
-    if via == VIA_DIRECT and provider not in KNOWN_DIRECT_PROVIDERS:
-        raise SpecError(
-            f"{kind} spec: direct provider '{provider}' not supported "
-            f"(known direct: {sorted(KNOWN_DIRECT_PROVIDERS)}); use via:inference"
-        )
+    # Kind-aware direct support — must match exactly what providers.build_* can
+    # build, or a profile would pass save-time validation then crash at session
+    # start (no FallbackAdapter net on a SIP call). Only deepgram STT is a direct
+    # pipeline component; google-direct is realtime-only (validated separately).
+    if via == VIA_DIRECT:
+        if kind == "stt":
+            if provider != "deepgram":
+                raise SpecError(
+                    f"stt spec: via:direct is only supported for deepgram, not '{provider}'; use via:inference"
+                )
+        else:
+            raise SpecError(
+                f"{kind} spec: via:direct is not supported (only deepgram STT uses direct in the "
+                f"pipeline; realtime google is configured under models.realtime); use via:inference"
+            )
 
     options = spec.get("options") or {}
     if not isinstance(options, dict):
         raise SpecError(f"{kind} spec 'options' must be a mapping")
+    # Reserved keys are passed as explicit kwargs by the builders; allowing them
+    # inside options would raise a duplicate-kwarg TypeError at build time (past
+    # save-time validation). Reject them up front.
+    reserved = {"model", "provider", "via", "language"} & set(options)
+    if reserved:
+        raise SpecError(f"{kind} spec 'options' may not contain reserved keys {sorted(reserved)}")
 
     out = {
         "kind": kind,

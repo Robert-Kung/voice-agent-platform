@@ -27,7 +27,6 @@ from livekit.plugins import deepgram, google
 from google.genai import types as genai_types
 
 from runtime.constants import (
-    DEFAULT_VIA,
     REALTIME_LLM_PROVIDERS,
     REALTIME_MODEL_ALLOWLIST,
     SpecError,
@@ -82,12 +81,17 @@ def _model_id(spec: dict) -> str:
 
 # ── AGENT_STT_PROVIDER global override ─────────────────────
 def _apply_stt_override(spec: dict) -> dict:
-    """Generalizes the legacy AGENT_STT_PROVIDER env: when set, force the matching
-    provider's STT spec to via:direct regardless of its declared via. Used by the
-    Try button (`AGENT_STT_PROVIDER=deepgram`) to dodge the free-plan Inference STT
-    concurrency quota. Higher precedence than the spec's own `via` (design D2)."""
+    """Legacy AGENT_STT_PROVIDER env override: when set to "deepgram", force a
+    deepgram STT spec to via:direct (Try button dodging the free-plan Inference STT
+    concurrency quota). Higher precedence than the spec's own `via` (design D2).
+
+    Only "deepgram" is honored — it's the sole direct-buildable STT provider.
+    Any other value (incl. "inference" or a typo) is a no-op, mirroring the legacy
+    `_build_stt`, which defaulted everything-but-deepgram to inference. Flipping a
+    non-deepgram provider to direct would crash session start with no fallback net.
+    """
     override = os.environ.get("AGENT_STT_PROVIDER", "").strip().lower()
-    if override and spec["provider"] == override:
+    if override == "deepgram" and spec["provider"] == "deepgram":
         return {**spec, "via": VIA_DIRECT}
     return spec
 

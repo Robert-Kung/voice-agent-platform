@@ -177,15 +177,28 @@ DEFAULT_PROFILE = "car_inspection"
 _DEFAULT_MODE = "realtime"
 
 
+_VALID_MODES = ("pipeline", "realtime")
+
+
 def _resolve_mode(profile: dict) -> str:
-    """Effective agent mode: AGENT_MODE env override > profile models.mode > default."""
+    """Effective agent mode: AGENT_MODE env override > profile models.mode > default.
+
+    An unknown value (typo'd env secret, or a profile that somehow bypassed
+    validation) is rejected with a warning and falls back to the default rather
+    than silently running the pipeline branch — a typo'd AGENT_MODE secret must
+    not silently swap the whole architecture and cost model in production.
+    """
     if "AGENT_MODE" in os.environ:
-        return os.environ["AGENT_MODE"].strip().lower()
-    models = (profile or {}).get("models") or {}
-    mode = models.get("mode")
-    if mode:
-        return str(mode).strip().lower()
-    return _DEFAULT_MODE
+        mode = os.environ["AGENT_MODE"].strip().lower()
+    else:
+        models = (profile or {}).get("models") or {}
+        mode = str(models.get("mode") or "").strip().lower() or _DEFAULT_MODE
+
+    if mode not in _VALID_MODES:
+        logger.warning("Unknown agent mode %r (expected %s); falling back to %s",
+                       mode, _VALID_MODES, _DEFAULT_MODE)
+        return _DEFAULT_MODE
+    return mode
 
 
 def _get_cli_profile_name() -> str:

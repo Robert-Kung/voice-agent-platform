@@ -13,9 +13,12 @@ from __future__ import annotations
 # Source: Google Gemini Live API pricing (2.5 Flash native audio preview).
 # Update these alongside model changes.
 REALTIME_RATES: dict[str, dict[str, float]] = {
-    # Default key used when usage_summary indicates audio tokens but no model
-    # name is captured — most current sessions hit this path.
-    "google/gemini-live-2.5-flash-native-audio": {
+    # Keyed so the key is a SUBSTRING of the actual model name the resolver records
+    # (e.g. "gemini-2.5-flash-native-audio-preview-12-2025"), so _match_realtime_rate
+    # resolves the selected variant to its own rate instead of silently falling to
+    # the default. Adding a realtime variant to REALTIME_MODEL_ALLOWLIST requires a
+    # matching key here (code-review fix).
+    "gemini-2.5-flash-native-audio": {
         "audio_in": 3.00,
         "audio_out": 12.00,
         "text_in": 0.50,
@@ -25,7 +28,7 @@ REALTIME_RATES: dict[str, dict[str, float]] = {
 }
 
 # Default realtime rate to use when the selected variant isn't in the table.
-_REALTIME_DEFAULT = "google/gemini-live-2.5-flash-native-audio"
+_REALTIME_DEFAULT = "gemini-2.5-flash-native-audio"
 
 
 # ── Pipeline: per-1M tokens (LLM) / per-minute (audio) ────────────────────
