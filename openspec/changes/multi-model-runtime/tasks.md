@@ -16,6 +16,7 @@
 - [x] 2.3 Compute effective mode in `entrypoint()` AFTER `load_profile_with_id` (`models.mode` ⊕ `AGENT_MODE` env precedence); thread the single value into both the session branch (`agent.py:308`) and `create_agent_class` (`agent.py:279`). Remove reliance on the module-global `AGENT_MODE` read at `agent.py:195`. Detect env presence with `"AGENT_MODE" in os.environ` — NOT `os.environ.get("AGENT_MODE", "realtime")`, which collapses unset→realtime and makes the "use models.mode when env unset" branch unreachable (review Finding 2 + P2)
 - [x] 2.4 Verify forked child process and SIP-pinned profile both resolve `models` from re-loaded profile config (no `sys.argv` dependency)
 - [x] 2.5 Record the resolved primary model names on the DB session row at start (`session_store.create_session` new field), so cost reads them instead of metrics (review P1)
+- [x] 2.5a Make the recorded model-name field shape extensible (JSON list/segments, not one string per kind) — graph-runtime-executor's per-node models will put multiple LLMs in one session; the current one-name-per-kind shape forecloses that and would force a cost-channel rework. Touches 2.5 + §4 lookup, still cheap while uncommitted (2026-06-10 graph-agent-builder review, outside voice F10)
 
 > NOTE: 2.5 must land BEFORE §4 — task 4.2 depends on the model-name channel existing. The original §1→§2→§4 order would otherwise compute cost against `llm_model == "FallbackAdapter"`.
 
@@ -49,6 +50,8 @@
 - [x] 5.10 Cost test: realtime STT rate resolved from `STT_RATES` by profile's realtime STT provider (review Finding 5 / test gap)
 
 ## 6. Verification
+
+> **6.2 / 6.3 are RELEASE-BLOCKING gates, not trailing checkboxes** (2026-06-10 graph-agent-builder review, outside voice F11): they are the only live verification of the single non-negotiable CLAUDE.md constraint (TextInputRealtimeModel latency mitigation). "Behavior moved verbatim into the resolver" is exactly the kind of refactor that breaks via ordering/kwargs subtleties — offline proxies do not close them. Do not merge/deploy this change with these unchecked.
 
 - [x] 6.1 Run `cd agents && uv run pytest tests/ -q` (baseline 147 pass + new tests)
 - [ ] 6.2 Local Try-button verification: pipeline profile with `models` block + realtime default both connect and respond — REQUIRES LIVE LiveKit creds + browser; not runnable headless. Offline proxy DONE: agent.py imports clean, resolver builds both modes (test_runtime_providers), restaurant `models` block validates.

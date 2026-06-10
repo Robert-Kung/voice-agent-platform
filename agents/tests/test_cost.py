@@ -218,7 +218,7 @@ class TestSelectedModelCost:
         r = compute_cost(
             {"llm_model": "FallbackAdapter", "llm_prompt_tokens": 1_000_000, "llm_completion_tokens": 0},
             agent_mode="pipeline",
-            selected={"llm": "google/gemini-3.1-flash-lite"},
+            selected={"schema": 1, "llm": [{"model": "google/gemini-3.1-flash-lite"}]},
         )
         assert r["llm_usd"] == 0.075
         assert r["incomplete"] is False
@@ -239,7 +239,7 @@ class TestSelectedModelCost:
                 "tts_model": "FallbackAdapter", "tts_characters_count": 150,
             },
             agent_mode="pipeline",
-            selected={"stt": "deepgram/nova-2", "tts": "cartesia/sonic-3"},
+            selected={"schema": 1, "stt": [{"model": "deepgram/nova-2"}], "tts": [{"model": "cartesia/sonic-3"}]},
         )
         assert r["stt_usd"] is not None
         assert r["tts_usd"] is not None
@@ -252,11 +252,56 @@ class TestSelectedModelCost:
         r = compute_cost(
             {"llm_input_audio_tokens": 1_000_000, "stt_audio_duration": 600},
             agent_mode="realtime",
-            selected={"realtime_model": "gemini-2.5-flash-native-audio-preview-12-2025", "realtime_stt": "deepgram/nova-2"},
+            selected={
+                "schema": 1,
+                "realtime": [{"model": "gemini-2.5-flash-native-audio-preview-12-2025"}],
+                "stt": [{"model": "deepgram/nova-2"}],
+            },
         )
         assert r["stt_rate_per_min"] == STT_RATES["deepgram"]
         assert abs(r["stt_usd"] - (600 / 60.0) * STT_RATES["deepgram"]) < 1e-9
         assert r["stt_provider"] == "deepgram/nova-2"
+
+
+class TestModelNamesShapeCompat:
+    """Task 2.5a: model_names is a segment-list structure; the legacy flat shape
+    (rows written before the change) must still price correctly."""
+
+    _PIPELINE_USAGE = {"llm_model": "FallbackAdapter", "llm_prompt_tokens": 1_000_000, "llm_completion_tokens": 0}
+
+    def test_legacy_flat_pipeline_shape_still_priced(self):
+        r = compute_cost(self._PIPELINE_USAGE, agent_mode="pipeline",
+                         selected={"llm": "google/gemini-3.1-flash-lite"})
+        assert r["llm_usd"] == 0.075
+        assert r["incomplete"] is False
+
+    def test_legacy_flat_realtime_keys_still_priced(self):
+        from db.cost import STT_RATES
+        r = compute_cost(
+            {"llm_input_audio_tokens": 1_000_000, "stt_audio_duration": 600},
+            agent_mode="realtime",
+            selected={"realtime_model": "gemini-2.5-flash-native-audio-preview-12-2025", "realtime_stt": "deepgram/nova-2"},
+        )
+        assert r["model"] == "gemini-2.5-flash-native-audio"
+        assert r["stt_rate_per_min"] == STT_RATES["deepgram"]
+
+    def test_multi_segment_prices_by_first(self):
+        # Graph per-node sessions will record several LLM segments; until executor
+        # defines per-segment attribution, cost prices by the primary (first).
+        r = compute_cost(
+            self._PIPELINE_USAGE, agent_mode="pipeline",
+            selected={"schema": 1, "llm": [{"model": "google/gemini-3.1-flash-lite"}, {"model": "openai/gpt-4o"}]},
+        )
+        assert r["llm_usd"] == 0.075
+
+    def test_empty_segment_list_falls_back_to_metrics(self):
+        r = compute_cost(
+            {"llm_model": "google/gemini-2.5-flash", "llm_prompt_tokens": 1_000_000, "llm_completion_tokens": 0},
+            agent_mode="pipeline",
+            selected={"schema": 1, "llm": []},
+        )
+        assert r["llm_usd"] == 0.15  # metrics name used, not incomplete
+        assert r["incomplete"] is False
 
 
 class TestRealtimeRateMatching:

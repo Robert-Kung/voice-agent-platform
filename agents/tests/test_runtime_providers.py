@@ -132,7 +132,9 @@ class TestRealtimeResolver:
         assert r.mode == "realtime"
         assert isinstance(r.llm, providers.TextInputRealtimeModel)
         assert r.tts is None
-        assert r.model_names["realtime_stt"] == "deepgram/nova-2"
+        assert r.model_names["schema"] == 1
+        assert r.model_names["stt"] == [{"model": "deepgram/nova-2"}]
+        assert r.model_names["realtime"][0]["model"]
 
 
 # ── regression: no models block == pre-change defaults ─────
@@ -144,9 +146,10 @@ class TestDefaultBackfill:
         assert isinstance(r.stt, lk_stt.FallbackAdapter)
         assert isinstance(r.tts, lk_tts.FallbackAdapter)
         # primary model names equal the old hard-coded first entries
-        assert r.model_names["llm"] == "google/gemini-3.1-flash-lite"
-        assert r.model_names["stt"] == "elevenlabs/scribe_v2_realtime"
-        assert r.model_names["tts"].startswith("cartesia/sonic-3")
+        assert r.model_names["schema"] == 1
+        assert r.model_names["llm"] == [{"model": "google/gemini-3.1-flash-lite"}]
+        assert r.model_names["stt"] == [{"model": "elevenlabs/scribe_v2_realtime"}]
+        assert r.model_names["tts"][0]["model"].startswith("cartesia/sonic-3")
 
     def test_partial_block_backfills_missing(self):
         # declare only llm → declared LLM used; stt/tts fall back to defaults
@@ -154,11 +157,11 @@ class TestDefaultBackfill:
             {"models": {"llm": [{"provider": "google", "model": "gemini-2.5-flash"}]}},
             "pipeline",
         )
-        assert r.model_names["llm"] == "google/gemini-2.5-flash"
+        assert r.model_names["llm"] == [{"model": "google/gemini-2.5-flash"}]
         assert isinstance(r.llm, lk_llm.LLM) and not isinstance(r.llm, lk_llm.FallbackAdapter)
         # backfilled defaults:
-        assert r.model_names["stt"] == "elevenlabs/scribe_v2_realtime"
-        assert r.model_names["tts"].startswith("cartesia/sonic-3")
+        assert r.model_names["stt"] == [{"model": "elevenlabs/scribe_v2_realtime"}]
+        assert r.model_names["tts"][0]["model"].startswith("cartesia/sonic-3")
 
 
 # ── effective mode precedence ──────────────────────────────

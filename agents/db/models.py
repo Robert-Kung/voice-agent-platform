@@ -69,11 +69,13 @@ class Session(Base):
     # "realtime" or "pipeline" — captured from AGENT_MODE env at session start.
     # Nullable for rows written before this column existed.
     agent_mode: Mapped[str | None] = mapped_column(String(20), nullable=True)
-    # JSON of the resolved primary model names at session start, e.g.
-    # {"llm": "google/gemini-3.1-flash-lite", "stt": "...", "tts": "..."} or
-    # {"realtime_model": "...", "realtime_stt": "deepgram/nova-2"}. Cost prices by
-    # these instead of the metrics-reported name, which is "FallbackAdapter" for any
-    # fallback chain (see db/cost.py). Nullable for rows written before this column.
+    # JSON of the resolved model names at session start, as segment lists (2.5a):
+    # {"schema": 1, "llm": [{"model": "google/gemini-3.1-flash-lite"}], "stt": [...],
+    # "tts": [...]} or {"schema": 1, "realtime": [{"model": "..."}], "stt": [...]}.
+    # Lists so graph per-node models can record several segments per kind later.
+    # Cost prices by segment [0] instead of the metrics-reported name, which is
+    # "FallbackAdapter" for any fallback chain (see db/cost.py). Nullable for rows
+    # written before this column; cost also accepts the pre-2.5a flat shape.
     model_names_json: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     profile: Mapped[Profile | None] = relationship(back_populates="sessions")

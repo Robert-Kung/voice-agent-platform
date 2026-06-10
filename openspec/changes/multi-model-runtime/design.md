@@ -111,7 +111,7 @@ child process 因為重新 load profile + 繼承 env，自動拿到正確模型�
 定案做法：
 
 1. **resolver 回傳 resolved 主模型名稱**（pipeline 的 LLM/STT/TTS、realtime 的 Gemini 變體 + STT provider）。
-2. **session 起始時把這些名稱記在 DB session row**（`session_store.create_session` 加欄位），不依賴 metrics 的模型名。
+2. **session 起始時把這些名稱記在 DB session row**（`session_store.create_session` 加欄位），不依賴 metrics 的模型名。**欄位形狀須可擴充（2026-06-10 graph review 補充）**：用 JSON list/segments 結構而非單一字串欄位——graph-runtime-executor 的 per-node 模型（OQ4）會讓單一 session 跨節點使用不同 LLM，「一 kind 一名稱」的形狀屆時必須重做；現有實作尚未 commit，現在改最便宜。
 3. `compute_cost(summary, selected=...)` 用記錄的名稱查 rate table；真的拿不到才退回 fuzzy match。
 4. realtime STT 費率改依記錄的 realtime STT provider 查 `STT_RATES`，刪掉重複的 `_REALTIME_STT_RATE_PER_MIN`（Finding 5）。realtime LLM 變體查 `REALTIME_RATES`，保留 default。
 5. **凍結歷史成本**：`routes_sessions.py:49-71` 目前在 read time 重算 `compute_cost`——一旦 rate table 改動，舊 session 會用今天的費率重算、或變 incomplete。改為**讀取 session row 上已存的 cost**（`complete_session` 已寫入 `raw_report_json.cost`），read path 不再重算（outside voice P3）。
@@ -126,8 +126,8 @@ realtime STT 費率（`_REALTIME_STT_RATE_PER_MIN = 0.0043`，`cost.py:33`）目
 
 採「**存檔驗證 + 啟動硬擋 + FallbackAdapter 接住**」，**全程不偷偷換模型**：
 
-1. **存檔時（admin UI）**：`schemas.py` 以 hand-written Pydantic schema 驗證 `models` 區塊形狀（provider / via / kind 的合法組合）。**provider enum 由 `PROVIDER_REGISTRY` 的 key 衍生**（如 `Literal` 由 registry 常數建出），新增 provider 只動 registry 一處，降低 drift。形狀錯誤回 422，壞設定進不了正式環境。
-2. **啟動時**：resolver 對 registry 找不到的 `(kind, provider, via)` 組合 **fail loud**（raise），不回填預設。
+1. **存檔時（admin UI）**：`schemas.py` 以 hand-written Pydantic schema 驗證 `models` 區塊形狀。**（2026-06-10 graph review 同步修正：與 D1 lite 版對齊，registry 已不存在）** provider enum **只約束 `via: direct`**，由 `KNOWN_DIRECT_PROVIDERS` 字串常數衍生；`via: inference` 是刻意開放的 gateway passthrough 字串（`provider/model` 直送 gateway），**不設 enum**——否則 gateway 的彈性被默默閹割。形狀錯誤回 422，壞設定進不了正式環境。
+2. **啟動時**：resolver 對不支援的 `via: direct` 組合 **fail loud**（raise），不回填預設；`via: inference` 的未知 provider/model 由 gateway 在接通時回錯，落入第 3 層。
 3. **執行時**：模型名稱合法但 provider 接通回錯（如 `gpt-5.4` + reasoning_effort → 400）由既有 `FallbackAdapter` 鏈換下一個 spec 吸收。
 
 **注意邊界**：存檔驗證只能擋「形狀 / 未知 provider」錯誤，**擋不掉 provider 接通才回的 runtime 錯誤**（gpt-5.4/400 屬此類）——那一層唯一的安全網是 FallbackAdapter。

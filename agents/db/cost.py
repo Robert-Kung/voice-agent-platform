@@ -82,6 +82,29 @@ def _match_llm_rate(llm_model: str) -> dict[str, float] | None:
     return None
 
 
+def _selected_model(selected: dict | None, kind: str, legacy_key: str | None = None) -> str | None:
+    """Primary model name for a kind from the session row's recorded model_names.
+
+    Accepts both shapes (task 2.5a):
+      - segment list: {"schema": 1, "llm": [{"model": "..."}], ...} — primary is
+        segment [0]; later segments (graph per-node models) are ignored here until
+        graph-runtime-executor defines per-segment cost attribution.
+      - legacy flat: {"llm": "..."} / {"realtime_model": "...", "realtime_stt": "..."}
+        recorded by rows written before the shape change.
+    """
+    if not selected:
+        return None
+    val = selected.get(kind)
+    if val is None and legacy_key:
+        val = selected.get(legacy_key)
+    if isinstance(val, list):
+        first = val[0] if val else None
+        if isinstance(first, dict):
+            first = first.get("model")
+        return first if isinstance(first, str) else None
+    return val if isinstance(val, str) else None
+
+
 def _match_realtime_rate(name: str | None) -> tuple[dict[str, float], str]:
     """Pick a realtime rate by the selected Gemini Live variant, falling back to
     the default when the variant isn't in the table (D5). Returns (rate, key)."""
@@ -108,12 +131,11 @@ def _is_realtime(usage_summary, agent_mode: str | None) -> bool:
 def _compute_realtime_cost(get, selected: dict | None = None) -> dict:
     """Compute cost for a realtime streaming model using granular token fields.
 
-    `selected` carries the resolver's chosen model names (realtime_model /
-    realtime_stt) recorded on the session row, so rates are driven by the actual
-    selection rather than guessed.
+    `selected` carries the resolver's chosen model names (realtime / stt segment
+    lists, or the legacy realtime_model / realtime_stt flat keys) recorded on the
+    session row, so rates are driven by the actual selection rather than guessed.
     """
-    selected = selected or {}
-    rate, model_key = _match_realtime_rate(selected.get("realtime_model"))
+    rate, model_key = _match_realtime_rate(_selected_model(selected, "realtime", "realtime_model"))
 
     audio_in = get("llm_input_audio_tokens", 0)
     audio_in_cached = get("llm_input_cached_audio_tokens", 0)
@@ -139,7 +161,7 @@ def _compute_realtime_cost(get, selected: dict | None = None) -> dict:
     # the selected realtime STT provider via the shared STT_RATES table (single
     # source of truth — no separate hard-coded constant). Defaults to deepgram,
     # which the realtime architecture always uses.
-    stt_name = selected.get("realtime_stt") or "deepgram/nova-2"
+    stt_name = _selected_model(selected, "stt", "realtime_stt") or "deepgram/nova-2"
     stt_rate_per_min = _match_rate(stt_name, STT_RATES) or STT_RATES["deepgram"]
     stt_seconds = get("stt_audio_duration", 0)
     stt_usd = (stt_seconds / 60.0) * stt_rate_per_min if stt_seconds > 0 else None
@@ -180,7 +202,6 @@ def _compute_pipeline_cost(get, selected: dict | None = None) -> dict:
     no rate key matches — so without `selected` every chained session would be
     marked incomplete.
     """
-    selected = selected or {}
     llm_usd = None
     tts_usd = None
     stt_usd = None
@@ -188,7 +209,7 @@ def _compute_pipeline_cost(get, selected: dict | None = None) -> dict:
 
     prompt_tokens = get("llm_prompt_tokens", 0)
     completion_tokens = get("llm_completion_tokens", 0)
-    llm_model = selected.get("llm") or get("llm_model", "")
+    llm_model = _selected_model(selected, "llm") or get("llm_model", "")
     if prompt_tokens or completion_tokens:
         rate = _match_llm_rate(llm_model)
         if rate:
@@ -197,7 +218,7 @@ def _compute_pipeline_cost(get, selected: dict | None = None) -> dict:
             incomplete = True
 
     tts_chars = get("tts_characters_count", 0) or get("tts_characters", 0)
-    tts_provider = selected.get("tts") or get("tts_model", "")
+    tts_provider = _selected_model(selected, "tts") or get("tts_model", "")
     if tts_chars:
         rate = _match_rate(tts_provider, TTS_RATES)
         if rate:
@@ -207,7 +228,7 @@ def _compute_pipeline_cost(get, selected: dict | None = None) -> dict:
             incomplete = True
 
     stt_duration = get("stt_audio_duration", 0)
-    stt_provider = selected.get("stt") or get("stt_model", "")
+    stt_provider = _selected_model(selected, "stt") or get("stt_model", "")
     if stt_duration:
         rate = _match_rate(stt_provider, STT_RATES)
         if rate:
@@ -235,9 +256,12 @@ def compute_cost(usage_summary, agent_mode: str | None = None, selected: dict | 
         usage_summary: dict or UsageSummary with token / audio fields.
         agent_mode: "realtime" / "pipeline" / None — when None, auto-detect
                     from the presence of audio tokens.
-        selected: resolver-selected model names recorded on the session row
-                  (e.g. {"llm": "google/gemini-3.1-flash-lite"} or
-                  {"realtime_model": "...", "realtime_stt": "deepgram/nova-2"}).
+        selected: resolver-selected model names recorded on the session row,
+                  as segment lists (e.g. {"schema": 1, "llm": [{"model":
+                  "google/gemini-3.1-flash-lite"}]} or {"schema": 1, "realtime":
+                  [{"model": "..."}], "stt": [{"model": "deepgram/nova-2"}]}).
+                  The legacy flat shape (one string per kind, realtime_model /
+                  realtime_stt keys) is still accepted for pre-2.5a rows.
                   Preferred over the metrics-reported model name, which is the
                   literal "FallbackAdapter" for any fallback chain.
 

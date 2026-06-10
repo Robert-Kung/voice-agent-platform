@@ -191,6 +191,11 @@ def build_realtime_llm(realtime: dict):
     return realtime_llm, model, voice
 
 
+def _segments(*names: str | None) -> list[dict]:
+    """Model-name segments for ResolvedComponents.model_names (one per name)."""
+    return [{"model": n} for n in names if n]
+
+
 # ── Resolver ───────────────────────────────────────────────
 @dataclass
 class ResolvedComponents:
@@ -200,6 +205,13 @@ class ResolvedComponents:
     there); the resolver only builds the swappable components and reports which
     models it picked, so cost can price by the actual selection instead of the
     metrics-reported name (which is "FallbackAdapter" for any chain — see D5).
+
+    `model_names` shape (task 2.5a — extensible for graph per-node models):
+    {"schema": 1, "<kind>": [{"model": "<name>"}, ...]} where kind is
+    llm/stt/tts (pipeline) or realtime/stt (realtime). Each kind holds a LIST of
+    segments so a future graph session can record several models per kind (one
+    per node); today the resolver records exactly one — the primary. Cost prices
+    by segment [0]; per-segment attribution is graph-runtime-executor's to define.
     """
 
     mode: str
@@ -207,7 +219,7 @@ class ResolvedComponents:
     stt: Any
     tts: Any | None = None
     realtime_voice: str | None = None
-    model_names: dict[str, str | None] = field(default_factory=dict)
+    model_names: dict[str, Any] = field(default_factory=dict)
 
 
 def resolve_session_components(profile: dict, mode: str, env=None) -> ResolvedComponents:
@@ -234,8 +246,9 @@ def resolve_session_components(profile: dict, mode: str, env=None) -> ResolvedCo
             tts=None,
             realtime_voice=rt_voice,
             model_names={
-                "realtime_model": rt_model,
-                "realtime_stt": _model_id(stt_built),
+                "schema": 1,
+                "realtime": _segments(rt_model),
+                "stt": _segments(_model_id(stt_built)),
             },
         )
 
@@ -250,8 +263,9 @@ def resolve_session_components(profile: dict, mode: str, env=None) -> ResolvedCo
         stt=build_stt(stt_specs),
         tts=build_tts(tts_specs),
         model_names={
-            "llm": _model_id(llm_specs[0]) if llm_specs else None,
-            "stt": _model_id(stt_specs[0]) if stt_specs else None,
-            "tts": _model_id(tts_specs[0]) if tts_specs else None,
+            "schema": 1,
+            "llm": _segments(_model_id(llm_specs[0]) if llm_specs else None),
+            "stt": _segments(_model_id(stt_specs[0]) if stt_specs else None),
+            "tts": _segments(_model_id(tts_specs[0]) if tts_specs else None),
         },
     )
