@@ -207,3 +207,53 @@ class TestRealtimeCost:
             agent_mode="pipeline",
         )
         assert r["mode"] == "pipeline"
+
+
+class TestSelectedModelCost:
+    """Cost driven by the resolver-selected model names (recorded on the session
+    row), not the metrics-reported name. Critical because a fallback chain reports
+    its model as the literal "FallbackAdapter" (fallback_adapter.py:80)."""
+
+    def test_selected_prices_when_metrics_say_fallbackadapter(self):
+        r = compute_cost(
+            {"llm_model": "FallbackAdapter", "llm_prompt_tokens": 1_000_000, "llm_completion_tokens": 0},
+            agent_mode="pipeline",
+            selected={"llm": "google/gemini-3.1-flash-lite"},
+        )
+        assert r["llm_usd"] == 0.075
+        assert r["incomplete"] is False
+
+    def test_without_selected_fallbackadapter_is_incomplete(self):
+        """Documents the bug being fixed: no selected name → unmatched → incomplete."""
+        r = compute_cost(
+            {"llm_model": "FallbackAdapter", "llm_prompt_tokens": 1_000_000, "llm_completion_tokens": 0},
+            agent_mode="pipeline",
+        )
+        assert r["llm_usd"] is None
+        assert r["incomplete"] is True
+
+    def test_selected_stt_tts_priced(self):
+        r = compute_cost(
+            {
+                "stt_model": "FallbackAdapter", "stt_audio_duration": 60,
+                "tts_model": "FallbackAdapter", "tts_characters_count": 150,
+            },
+            agent_mode="pipeline",
+            selected={"stt": "deepgram/nova-2", "tts": "cartesia/sonic-3"},
+        )
+        assert r["stt_usd"] is not None
+        assert r["tts_usd"] is not None
+        assert r["incomplete"] is False
+
+    def test_realtime_stt_rate_from_stt_rates_table(self):
+        """5.10: realtime STT rate resolves from STT_RATES by the selected provider,
+        not a separate hard-coded constant."""
+        from db.cost import STT_RATES
+        r = compute_cost(
+            {"llm_input_audio_tokens": 1_000_000, "stt_audio_duration": 600},
+            agent_mode="realtime",
+            selected={"realtime_model": "gemini-2.5-flash-native-audio-preview-12-2025", "realtime_stt": "deepgram/nova-2"},
+        )
+        assert r["stt_rate_per_min"] == STT_RATES["deepgram"]
+        assert abs(r["stt_usd"] - (600 / 60.0) * STT_RATES["deepgram"]) < 1e-9
+        assert r["stt_provider"] == "deepgram/nova-2"

@@ -16,14 +16,20 @@ def create_session(
     profile_id: str | None = None,
     participant_identity: str = "",
     agent_mode: str | None = None,
+    model_names: dict | None = None,
 ) -> Session:
-    """Create a new session record (status=running)."""
+    """Create a new session record (status=running).
+
+    `model_names` is the resolver's selected primary model names; stored so cost
+    prices by the actual selection instead of the metrics-reported "FallbackAdapter".
+    """
     sess = Session(
         room_name=room_name,
         profile_id=profile_id,
         participant_identity=participant_identity,
         status="running",
         agent_mode=agent_mode,
+        model_names_json=json.dumps(model_names, ensure_ascii=False) if model_names else None,
     )
     db.add(sess)
     db.commit()

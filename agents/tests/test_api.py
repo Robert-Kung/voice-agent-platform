@@ -331,3 +331,51 @@ class TestTestRoutesGates:
         )
         assert r.status_code == 200
         assert r.json() == {"running": {}}
+
+
+class TestModelsBlockValidation:
+    """5.7: profile save validates the optional `models` block shape (422 on bad)."""
+
+    def test_valid_models_block_accepted(self, client):
+        r = client.post("/api/profiles", json={
+            "name": "mv_ok", "display_name": "OK",
+            "config": {"models": {"mode": "pipeline", "llm": [{"provider": "google", "model": "gemini-2.5-flash"}]}},
+        })
+        assert r.status_code == 201, r.text
+
+    def test_unknown_direct_provider_rejected(self, client):
+        r = client.post("/api/profiles", json={
+            "name": "mv_bad_direct", "display_name": "Bad",
+            "config": {"models": {"llm": [{"provider": "cartesia", "model": "x", "via": "direct"}]}},
+        })
+        assert r.status_code == 422, r.text
+
+    def test_bad_mode_rejected(self, client):
+        r = client.post("/api/profiles", json={
+            "name": "mv_bad_mode", "display_name": "Bad",
+            "config": {"models": {"mode": "banana"}},
+        })
+        assert r.status_code == 422, r.text
+
+    def test_dead_realtime_variant_rejected(self, client):
+        r = client.post("/api/profiles", json={
+            "name": "mv_dead_rt", "display_name": "Bad",
+            "config": {"models": {"realtime": {"model": "gemini-3.1-flash-live-preview"}}},
+        })
+        assert r.status_code == 422, r.text
+
+    def test_patch_with_bad_models_rejected(self, client):
+        client.post("/api/profiles", json={"name": "mv_patch", "display_name": "P"})
+        got = client.get("/api/profiles")
+        pid = next(p["id"] for p in got.json() if p["name"] == "mv_patch")
+        r = client.patch(f"/api/profiles/{pid}", json={
+            "config": {"models": {"stt": [{"provider": "elevenlabs", "model": "x", "via": "direct"}]}},
+        })
+        assert r.status_code == 422, r.text
+
+    def test_config_without_models_still_free_form(self, client):
+        r = client.post("/api/profiles", json={
+            "name": "mv_free", "display_name": "Free",
+            "config": {"anything": {"nested": [1, 2, 3]}, "qa_mode": "inline"},
+        })
+        assert r.status_code == 201, r.text

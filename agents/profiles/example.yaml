@@ -26,6 +26,33 @@ human_operator:
 # QA 模式：inline = 啟動時嵌入 instructions（零延遲，預設）；tool = 保留 lookup_qa tool call（QA 量大時用）
 qa_mode: inline
 
+# ── 模型設定（可選 models 區塊）──────────────────────────────
+# 省略整個 models 區塊 → 行為與舊版完全相同（pipeline 預設 FallbackAdapter 清單，
+# 或 realtime 預設 Gemini Live + Deepgram STT）。逐欄省略則該欄回填內建預設。
+#
+# 每個 llm/stt/tts 是「spec 清單」：第一個為主選，其餘為 fallback chain
+# （多個 → FallbackAdapter；單一 → 裸元件，無 fallback 安全網）。
+#   provider/model：模型；via：inference（gateway，預設）| direct（SDK + API key）
+#   direct 目前僅支援 deepgram（STT）與 google（realtime）；其餘 direct 會報錯
+#
+# ⚠️ 單一 pinned 模型沒有 fallback：provider 接通回錯（如 gpt-5.4/400）會讓該輪直接失敗。
+#    要安全請配至少一個 fallback spec（首次切換約有 5s 延遲）。
+#
+# models:
+#   mode: pipeline          # pipeline | realtime；省略時用 AGENT_MODE env / 預設
+#   llm:
+#     - { provider: google, model: gemini-3.1-flash-lite, via: inference, options: { temperature: 0.7 } }
+#     - { provider: openai, model: gpt-4.1-mini, via: inference }   # fallback
+#   stt:
+#     - { provider: deepgram, model: nova-2, via: inference, language: zh-TW }
+#   tts:
+#     - { provider: cartesia, model: "sonic-3:9626c31c-...", via: inference, language: zh }
+#   realtime:               # mode=realtime 時使用；LLM 永遠鎖 Gemini Live
+#     model: gemini-2.5-flash-native-audio-preview-12-2025   # 須在 allowlist 內
+#     voice: Kore
+#     thinking_budget: 0
+#     stt: { provider: deepgram, model: nova-2, via: direct, language: zh-TW }
+
 # 主 Agent system prompt
 instructions: |
   你是「範例店家」的電話語音客服。

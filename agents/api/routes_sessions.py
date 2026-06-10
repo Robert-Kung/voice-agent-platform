@@ -41,18 +41,29 @@ def _derive_agent_mode(sess: SessionModel, raw_report: dict | None = None) -> st
     return None
 
 
+def _selected_models(sess: SessionModel) -> dict | None:
+    """Parse the resolver-selected model names recorded on the session row."""
+    if not sess.model_names_json:
+        return None
+    try:
+        return json.loads(sess.model_names_json)
+    except (json.JSONDecodeError, TypeError):
+        return None
+
+
 def _summary_to_out(sess: SessionModel) -> SessionSummary:
     out = SessionSummary.model_validate(sess)
     if out.agent_mode is None:
         out.agent_mode = _derive_agent_mode(sess)
-    # Backfill cost for legacy realtime rows whose total was null because the
-    # old compute_cost couldn't price audio tokens. Cheap: only recomputes
-    # when stored value is missing.
+    # Freeze: stored cost is authoritative — a rate-table edit must NOT re-price a
+    # completed session. Only recompute when the stored total is missing (legacy
+    # rows whose total was null because the old compute_cost couldn't price audio
+    # tokens). When we do recompute, drive it with the row's recorded model names.
     if out.total_cost_usd is None and out.agent_mode:
         report = json.loads(sess.raw_report_json) if sess.raw_report_json else {}
         usage = report.get("usage_summary") if isinstance(report, dict) else None
         if isinstance(usage, dict):
-            recomputed = compute_cost(usage, agent_mode=out.agent_mode)
+            recomputed = compute_cost(usage, agent_mode=out.agent_mode, selected=_selected_models(sess))
             if recomputed.get("total_usd") is not None:
                 out.total_cost_usd = recomputed["total_usd"]
     return out
@@ -63,20 +74,19 @@ def _detail_to_out(sess: SessionModel) -> SessionDetail:
     base = SessionSummary.model_validate(sess)
     if base.agent_mode is None:
         base.agent_mode = _derive_agent_mode(sess, raw_report)
-    # If stored cost is missing/null, recompute and merge into raw_report so the
-    # detail page shows a current Gemini Live breakdown for legacy realtime rows.
+    # Freeze: keep the stored cost breakdown. Only recompute (and merge) when the
+    # stored cost is missing/null — legacy rows that never got a price. Driven by
+    # the row's recorded model names so the backfill is correct, not guessed.
     if isinstance(raw_report, dict):
         usage = raw_report.get("usage_summary")
-        if isinstance(usage, dict):
-            recomputed = compute_cost(usage, agent_mode=base.agent_mode)
-            existing_cost = raw_report.get("cost") or {}
-            if (
-                not isinstance(existing_cost, dict)
-                or existing_cost.get("total_usd") is None
-            ):
-                raw_report["cost"] = recomputed
-                if base.total_cost_usd is None and recomputed.get("total_usd") is not None:
-                    base.total_cost_usd = recomputed["total_usd"]
+        existing_cost = raw_report.get("cost") or {}
+        if isinstance(usage, dict) and (
+            not isinstance(existing_cost, dict) or existing_cost.get("total_usd") is None
+        ):
+            recomputed = compute_cost(usage, agent_mode=base.agent_mode, selected=_selected_models(sess))
+            raw_report["cost"] = recomputed
+            if base.total_cost_usd is None and recomputed.get("total_usd") is not None:
+                base.total_cost_usd = recomputed["total_usd"]
     return SessionDetail(**base.model_dump(), raw_report=raw_report)
 
 

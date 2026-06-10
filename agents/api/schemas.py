@@ -3,7 +3,27 @@
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+# Import-light: runtime.constants pulls NO livekit plugins, so validating a
+# profile's models block on save doesn't drag the agent's plugin graph (or
+# require provider API keys) into the API process. Validation is shape-only —
+# it never instantiates components (plan-eng-review P2 / Finding 3).
+from runtime.constants import SpecError, validate_models_block
+
+
+def _validate_config(config: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Validate the optional `models` block inside a free-form profile config.
+
+    The rest of config stays free-form; only `models` has a known shape. Raising
+    ValueError here surfaces as an HTTP 422 from the FastAPI request layer.
+    """
+    if config and config.get("models") is not None:
+        try:
+            validate_models_block(config["models"])
+        except SpecError as e:
+            raise ValueError(f"invalid models block: {e}") from e
+    return config
 
 
 # ── Profile ──────────────────────────────────────────────────
@@ -19,12 +39,22 @@ class ProfileBase(BaseModel):
 class ProfileCreate(ProfileBase):
     config: dict[str, Any] = Field(default_factory=dict)
 
+    @field_validator("config")
+    @classmethod
+    def _check_models_block(cls, v):
+        return _validate_config(v)
+
 
 class ProfileUpdate(BaseModel):
     display_name: str | None = None
     description: str | None = None
     is_active: bool | None = None
     config: dict[str, Any] | None = None
+
+    @field_validator("config")
+    @classmethod
+    def _check_models_block(cls, v):
+        return _validate_config(v)
 
 
 class ProfileOut(ProfileBase):

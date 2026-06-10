@@ -24,6 +24,22 @@ human_operator:
 # QA 模式：inline = 啟動時嵌入 instructions（零延遲，預設）；tool = 保留 lookup_qa tool call
 qa_mode: inline
 
+# ── 模型設定（pipeline 端到端驗證用）──────────────────────────
+# 顯式 pin pipeline 的 LLM/STT/TTS：主 LLM Gemini 3.1 Flash Lite，fallback GPT-4.1 mini；
+# STT/TTS 走 Inference gateway。等同舊版寫死的預設，但現在由 profile 驅動、可改。
+# 故意不寫 mode：保留由 AGENT_MODE env / 預設決定（prod 仍 realtime，不被本區塊改動）。
+# pipeline E2E 驗證時用 AGENT_MODE=pipeline 啟動即套用以下 specs。
+models:
+  llm:
+    - { provider: google, model: gemini-3.1-flash-lite, via: inference }
+    - { provider: openai, model: gpt-4.1-mini, via: inference }
+  stt:
+    - { provider: elevenlabs, model: scribe_v2_realtime, via: inference, language: zh }
+    - { provider: deepgram, model: nova-2, via: inference, language: zh-TW }
+  tts:
+    - { provider: cartesia, model: "sonic-3:9626c31c-bec5-4cca-baa8-f8ba9e84c8bc", via: inference, language: zh }
+    - { provider: elevenlabs, model: eleven_multilingual_v2, via: inference, language: zh }
+
 instructions: |
   你是「好食光餐廳」的電話語音智慧客服 Agent，使用繁體中文回答。
 

@@ -80,6 +80,7 @@ def _add_missing_columns(engine: Engine) -> None:
         ],
         "sessions": [
             ("agent_mode", "VARCHAR(20) NULL"),
+            ("model_names_json", "TEXT NULL"),
         ],
     }
     insp = inspect(engine)

@@ -11,19 +11,14 @@ from livekit.agents import (
     TurnHandlingOptions,
     WorkerOptions,
     cli,
-    inference,
-    llm,
     room_io,
-    stt,
-    tts,
 )
-from livekit.plugins import deepgram, google, noise_cancellation, silero
+from livekit.plugins import noise_cancellation, silero
 from livekit.plugins.turn_detector.multilingual import MultilingualModel
 from livekit.agents import metrics, MetricsCollectedEvent, AgentStateChangedEvent
 
 from agent_factory import load_profile_with_id, create_agent_class, list_profiles
-
-from google.genai import types as genai_types
+from runtime.providers import resolve_session_components
 
 logger = logging.getLogger("agent")
 
@@ -137,31 +132,13 @@ except Exception:
 
 
 # ── TextInputRealtimeModel ─────────────────────────────────
-# 解決 Gemini Live API 音頻上下文累積造成的延遲遞增問題。
-#
-# 問題原因：Gemini 接收原始音頻 → 音頻 token 隨對話時間累積
-#   → 回覆延遲從 1-2 秒遞增到 20-30 秒（已在所有 observability 資料中確認）
-#
-# 解法：攔截 push_audio / start_user_activity，不向 Gemini 傳送音頻，
-#   改由 STT（Deepgram）轉錄文字後，透過 send_client_content 傳入。
-#   文字 token 遠小於音頻 token，延遲可保持穩定。
-#
-# 完整信號流：
+# Moved to runtime/providers.py — the resolver now owns realtime LLM construction
+# (model/voice/forced latency settings). Behavior is unchanged; see the class
+# docstring there and agent_factory.on_user_turn_completed for the full signal flow:
 #   [語音] → Silero VAD → Deepgram STT → MultilingualModel EOU
 #         → on_user_turn_completed → session.generate_reply(user_input=text)
 #         → Gemini（文字輸入）→ 語音輸出
 # ───────────────────────────────────────────────────────────
-
-class TextInputRealtimeModel(google.realtime.RealtimeModel):
-    """封裝 RealtimeModel，攔截音頻推送，改為純文字輸入模式。"""
-
-    def session(self):
-        sess = super().session()
-        # 不向 Gemini 推送音頻（避免 audio token 累積導致延遲遞增）
-        sess.push_audio = lambda frame: None
-        # 不發送 activity_start/end 信號（無音頻時不需要活動信號）
-        sess.start_user_activity = lambda: None
-        return sess
 
 load_dotenv(".env")
 
@@ -184,32 +161,31 @@ load_dotenv(".env")
 DEFAULT_PROFILE = "car_inspection"
 
 # ── Agent 模式 ─────────────────────────────────────────────
-# AGENT_MODE 控制語音處理架構：
-#   "pipeline"  — STT → LLM → TTS 分離式管線（預設，使用 LiveKit Inference）
-#   "realtime"  — Google Gemini Live API 全端對端（audio-in → audio-out）
+# 控制語音處理架構：
+#   "pipeline"  — STT → LLM → TTS 分離式管線（使用 LiveKit Inference）
+#   "realtime"  — Gemini Live + 外部 STT 文字輸入（預設，TextInputRealtimeModel）
 #
-# 切換方式：
-#   AGENT_MODE=realtime uv run agent.py console -p car_inspection
-#   lk agent update-secrets --secrets "AGENT_MODE=realtime"
+# 優先序（高到低）：
+#   1. AGENT_MODE env（明確設定時 override）
+#   2. profile config 的 models.mode
+#   3. 內建預設 _DEFAULT_MODE
+#
+# 注意：env 偵測用 `"AGENT_MODE" in os.environ`，不可用 `.get(..., "realtime")`，
+# 否則 unset 會塌成 realtime，讓「env 未設 → 用 models.mode」這條路永遠走不到。
+# STT provider 選擇（AGENT_STT_PROVIDER / via）已下沉到 runtime/providers.py。
 # ───────────────────────────────────────────────────────────
-AGENT_MODE = os.environ.get("AGENT_MODE", "realtime")
+_DEFAULT_MODE = "realtime"
 
 
-# ── STT provider ──────────────────────────────────────────
-# AGENT_STT_PROVIDER 控制 Deepgram nova-2 STT 從哪裡取得：
-#   "inference" — 透過 LiveKit Inference gateway（預設，Cloud 部署用）
-#   "deepgram"  — 直接用 DEEPGRAM_API_KEY 連 Deepgram（本機 Try button 用，
-#                 避免吃到 free plan 的 STT concurrency quota）
-#
-# routes_test.py spawn local connect subprocess 時會注入
-# AGENT_STT_PROVIDER=deepgram；Cloud secrets 不應設此變數，
-# 以保留原本 LiveKit Inference 的 multi-provider / fallback 彈性。
-# ───────────────────────────────────────────────────────────
-def _build_stt():
-    provider = os.environ.get("AGENT_STT_PROVIDER", "inference").strip().lower()
-    if provider == "deepgram":
-        return deepgram.STT(model="nova-2", language="zh-TW")
-    return inference.STT(model="deepgram/nova-2", language="zh-TW")
+def _resolve_mode(profile: dict) -> str:
+    """Effective agent mode: AGENT_MODE env override > profile models.mode > default."""
+    if "AGENT_MODE" in os.environ:
+        return os.environ["AGENT_MODE"].strip().lower()
+    models = (profile or {}).get("models") or {}
+    mode = models.get("mode")
+    if mode:
+        return str(mode).strip().lower()
+    return _DEFAULT_MODE
 
 
 def _get_cli_profile_name() -> str:
@@ -268,7 +244,8 @@ def _get_runtime_profile_name(ctx: JobContext) -> str:
 CLI_PROFILE_NAME = _get_cli_profile_name()
 
 logger.info("Default profile: %s", CLI_PROFILE_NAME)
-logger.info("Agent mode: %s", AGENT_MODE)
+logger.info("Mode: AGENT_MODE env=%s, default=%s (per-profile models.mode applies when env unset)",
+            os.environ.get("AGENT_MODE", "<unset>"), _DEFAULT_MODE)
 logger.info("Available profiles: %s", ", ".join(list_profiles()))
 
 
@@ -276,8 +253,16 @@ async def entrypoint(ctx: JobContext):
     # ── 動態選擇 profile（支援 room metadata 切換）──
     profile_name = _get_runtime_profile_name(ctx)
     profile, db_profile_id = load_profile_with_id(profile_name)
-    PhoneAgent = create_agent_class(profile, mode=AGENT_MODE)
-    logger.info("Session using profile: %s (%s), mode: %s", profile.get("name"), profile_name, AGENT_MODE)
+
+    # Effective mode is per-profile (models.mode) with AGENT_MODE env override —
+    # resolved AFTER the profile loads, then threaded into both the agent class
+    # and the session build. No reliance on a module-global read at import time.
+    agent_mode = _resolve_mode(profile)
+    PhoneAgent = create_agent_class(profile, mode=agent_mode)
+    logger.info("Session using profile: %s (%s), mode: %s", profile.get("name"), profile_name, agent_mode)
+
+    # Resolve swappable model components + the selected model names (for cost).
+    resolved = resolve_session_components(profile, agent_mode)
 
     # ── DB session tracking ──
     db_session_id: str | None = None
@@ -291,11 +276,12 @@ async def entrypoint(ctx: JobContext):
                     db,
                     room_name=room_name,
                     profile_id=db_profile_id,
-                    agent_mode=AGENT_MODE,
+                    agent_mode=agent_mode,
+                    model_names=resolved.model_names,
                 )
                 db_session_id = db_sess.id
                 session_started_at = db_sess.started_at
-                logger.info("DB session created: %s", db_session_id)
+                logger.info("DB session created: %s (models=%s)", db_session_id, resolved.model_names)
         except Exception:
             logger.exception("Failed to create DB session")
 
@@ -305,77 +291,32 @@ async def entrypoint(ctx: JobContext):
         min_speech_duration=0.15,    # 預設 0.05s；過濾短暫雜音
     )
 
-    if AGENT_MODE == "realtime":
-        # ── Google Gemini Live API（全端對端 audio-in → audio-out）──
-        # 需要 GOOGLE_API_KEY 環境變數（不走 LiveKit Inference）
-        # Live API 專用模型（注意：gemini-2.5-flash 是 chat 模型，不支援 Live API）
-        # Gemini Live API 可用聲音（Nova 是 OpenAI 聲音，Gemini 不支援）：
-        #   女聲：Aoede, Kore, Laomedeia, Zephyr, Callirrhoe, Sulafat…
-        #   男聲：Puck, Charon, Fenrir, Rasalgethi, Sadaltager…
-        realtime_voice = os.environ.get("GOOGLE_REALTIME_VOICE", "Kore")
-        realtime_model = os.environ.get(
-            "GOOGLE_REALTIME_MODEL",
-            "gemini-2.5-flash-native-audio-preview-12-2025",  # 2.5：generate_reply() 正常
-            # "gemini-3.1-flash-live-preview"  # 3.1：plugin 1.5.1 的 generate_reply() 用
-            #   send_client_content，3.1 完全封鎖此 API → 任何情況都會 1007
-            #   待 plugin 改用 send_realtime_input 後再切回
-        )
-        logger.info("Realtime mode: model=%s, voice=%s", realtime_model, realtime_voice)
-
-        # 2.5：thinkingBudget=0 完全關閉 thinking → 最低延遲，等同 3.1 minimal 效果
-        # 3.1：改用 thinkingLevel="minimal"（3.1 不支援 thinkingBudget）
-        # 注意：3.1 仍不可用，generate_reply() 走 send_client_content，3.1 完全封鎖 → 1007
-        thinking_cfg = genai_types.ThinkingConfig(thinkingBudget=0)
-
-        # SIP Echo 解法：關閉 Gemini VAD，改由 LiveKit Silero VAD 控制
-        # 必須保持 disabled=True 以確保 SDK 不跳過 on_user_turn_completed 回調
-        # （SDK 在 turn_detection=True 時會直接 return，不觸發文字轉發流程）
+    if agent_mode == "realtime":
+        # ── Realtime（Gemini Live + 外部 STT 文字輸入）──
+        # LLM 與 STT 元件由 resolver 建好（resolved.llm 是 TextInputRealtimeModel，
+        # 強制套用 input_audio_transcription=None + automatic_activity_detection.disabled
+        # 等延遲規避設定；resolved.stt 是文字輸入來源）。
         #
-        # 架構：TextInputRealtimeModel 攔截音頻 → 只透過 STT 文字輸入 Gemini
-        # 解決 Gemini Live API 音頻 token 累積導致的延遲遞增（1s → 30s）
-        #
+        # SIP Echo 解法：關閉 Gemini VAD，改由 LiveKit Silero VAD 控制。
+        # turn_detection 必須保持外部 MultilingualModel，確保 SDK 不跳過
+        # on_user_turn_completed 回調（SDK 在 turn_detection=True 時會直接 return，
+        # 不觸發 agent_factory 的文字轉發流程）。
         # 官方文件：使用 LiveKit turn detection 時，需要額外的 streaming STT
         # https://docs.livekit.io/agents/models/realtime/plugins/gemini/#turn-detection
         session = AgentSession(
             vad=vad,
-            stt=_build_stt(),
+            stt=resolved.stt,
             turn_handling=TurnHandlingOptions(
                 turn_detection=MultilingualModel(),
             ),
-            llm=TextInputRealtimeModel(
-                model=realtime_model,
-                voice=realtime_voice,
-                temperature=0.8,
-                thinking_config=thinking_cfg,
-                input_audio_transcription=None,  # 關閉 Gemini 內部轉寫，改用外部 STT
-                realtime_input_config=genai_types.RealtimeInputConfig(
-                    automatic_activity_detection=genai_types.AutomaticActivityDetection(
-                        disabled=True,
-                    ),
-                ),
-            ),
+            llm=resolved.llm,
         )
     else:
-        # ── Pipeline 模式（STT → LLM → TTS，使用 LiveKit Inference）──
+        # ── Pipeline 模式（STT → LLM → TTS，profile-driven via resolver）──
         session = AgentSession(
-            llm=llm.FallbackAdapter(
-                [
-                    inference.LLM(model="google/gemini-3.1-flash-lite"),
-                    inference.LLM(model="openai/gpt-4.1-mini"),
-                ]
-            ),
-            stt=stt.FallbackAdapter(
-                [
-                    inference.STT(model="elevenlabs/scribe_v2_realtime", language="zh"),
-                    _build_stt(),
-                ]
-            ),
-            tts=tts.FallbackAdapter(
-                [
-                    inference.TTS(model="cartesia/sonic-3:9626c31c-bec5-4cca-baa8-f8ba9e84c8bc", language="zh"),
-                    inference.TTS(model="elevenlabs/eleven_multilingual_v2", language="zh"),
-                ]
-            ),
+            llm=resolved.llm,
+            stt=resolved.stt,
+            tts=resolved.tts,
             vad=vad,
             turn_detection=MultilingualModel(),
             preemptive_generation=True,
@@ -462,7 +403,9 @@ async def entrypoint(ctx: JobContext):
                             },
                         })
 
-                cost_result = compute_cost(summary, agent_mode=AGENT_MODE)
+                cost_result = compute_cost(
+                    summary, agent_mode=agent_mode, selected=resolved.model_names
+                )
                 # UsageCollector.get_summary() has no "duration" key; compute
                 # it from the wall clock so the UI shows real session length.
                 started_at = session_started_at
@@ -528,7 +471,7 @@ async def entrypoint(ctx: JobContext):
     except Exception:
         logger.exception(
             "session.start() failed — profile=%s mode=%s room=%s",
-            profile_name, AGENT_MODE,
+            profile_name, agent_mode,
             ctx.room.name if ctx.room else "None",
         )
         raise
