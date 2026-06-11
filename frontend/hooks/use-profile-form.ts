@@ -2,9 +2,23 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
+import { nanoid } from 'nanoid';
 import { toast } from 'sonner';
 import { profilesApi, testApi, toolsApi } from '@/lib/admin-api';
 import type { Profile } from '@/lib/admin-api';
+import {
+  type AgentGraph,
+  type EditorMode,
+  type GraphEdge,
+  type GraphNode,
+  type GraphNodeType,
+  NODE_TYPE_LABELS,
+  graphToPrompt,
+  promptToGraph,
+  validateGraph,
+} from '@/lib/agent-graph';
+
+export type { AgentGraph, EditorMode, GraphEdge, GraphNode, GraphNodeType };
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -66,6 +80,8 @@ export interface KnownConfig {
   human_operator_greeting?: string;
   instructions?: string;
   tools?: ToolEntry[];
+  graph?: AgentGraph;
+  editor_mode?: EditorMode;
 }
 
 // ── Constants ──────────────────────────────────────────────────────
@@ -85,6 +101,8 @@ export const KNOWN_KEYS = [
   'human_operator_greeting',
   'instructions',
   'tools',
+  'graph',
+  'editor_mode',
 ] as const;
 
 export const LANGUAGES = [
@@ -249,6 +267,18 @@ export interface UseProfileFormReturn {
   renameService: (oldKey: string, newKey: string) => void;
   updateService: (key: string, patch: Partial<ServiceConfig>) => void;
   removeService: (key: string) => void;
+  editorMode: EditorMode;
+  savedEditorMode: EditorMode;
+  setEditorMode: (mode: EditorMode) => void;
+  convertToGraph: () => void;
+  updateGlobalPrompt: (value: string) => void;
+  addNode: (type: Exclude<GraphNodeType, 'start'>) => void;
+  removeNode: (id: string) => void;
+  updateNode: (id: string, patch: Partial<GraphNode>) => void;
+  setNodePosition: (id: string, position: { x: number; y: number }) => void;
+  addEdge: (source: string, target: string) => void;
+  removeEdge: (id: string) => void;
+  updateEdge: (id: string, patch: Partial<GraphEdge>) => void;
   handleSave: () => Promise<void>;
   handleTry: () => Promise<void>;
   handleSaveAndTry: () => Promise<void>;
@@ -503,6 +533,110 @@ export function useProfileForm(): UseProfileFormReturn {
     });
   }, []);
 
+  // ── Graph actions ────────────────────────────────────────────────
+
+  const updateGraph = useCallback((updater: (g: AgentGraph) => AgentGraph) => {
+    setKnown((prev) => (prev.graph ? { ...prev, graph: updater(prev.graph) } : prev));
+  }, []);
+
+  const setEditorMode = useCallback((mode: EditorMode) => {
+    setKnown((prev) => ({ ...prev, editor_mode: mode }));
+  }, []);
+
+  const convertToGraph = useCallback(() => {
+    setKnown((prev) => ({
+      ...prev,
+      // A previously converted profile keeps its graph; conversion only happens once.
+      graph: prev.graph ?? promptToGraph(prev),
+      editor_mode: 'graph',
+    }));
+  }, []);
+
+  const updateGlobalPrompt = useCallback(
+    (value: string) => {
+      updateGraph((g) => ({ ...g, global_prompt: value }));
+    },
+    [updateGraph]
+  );
+
+  const addNode = useCallback(
+    (type: Exclude<GraphNodeType, 'start'>) => {
+      updateGraph((g) => {
+        const node: GraphNode = {
+          id: `${type}-${nanoid(6)}`,
+          type,
+          title: NODE_TYPE_LABELS[type],
+          prompt: '',
+          tools: [],
+          position: { x: 240 + (g.nodes.length % 4) * 60, y: 80 + g.nodes.length * 70 },
+        };
+        return { ...g, nodes: [...g.nodes, node] };
+      });
+    },
+    [updateGraph]
+  );
+
+  const removeNode = useCallback(
+    (id: string) => {
+      updateGraph((g) => ({
+        ...g,
+        nodes: g.nodes.filter((n) => n.id !== id),
+        edges: g.edges.filter((e) => e.source !== id && e.target !== id),
+      }));
+    },
+    [updateGraph]
+  );
+
+  const updateNode = useCallback(
+    (id: string, patch: Partial<GraphNode>) => {
+      updateGraph((g) => ({
+        ...g,
+        nodes: g.nodes.map((n) => (n.id === id ? { ...n, ...patch } : n)),
+      }));
+    },
+    [updateGraph]
+  );
+
+  const setNodePosition = useCallback(
+    (id: string, position: { x: number; y: number }) => {
+      updateGraph((g) => ({
+        ...g,
+        nodes: g.nodes.map((n) => (n.id === id ? { ...n, position } : n)),
+      }));
+    },
+    [updateGraph]
+  );
+
+  const addEdge = useCallback(
+    (source: string, target: string) => {
+      updateGraph((g) => ({
+        ...g,
+        edges: [
+          ...g.edges,
+          { id: `e-${nanoid(6)}`, source, target, trigger: 'user_turn', condition: '' },
+        ],
+      }));
+    },
+    [updateGraph]
+  );
+
+  const removeEdge = useCallback(
+    (id: string) => {
+      updateGraph((g) => ({ ...g, edges: g.edges.filter((e) => e.id !== id) }));
+    },
+    [updateGraph]
+  );
+
+  const updateEdge = useCallback(
+    (id: string, patch: Partial<GraphEdge>) => {
+      updateGraph((g) => ({
+        ...g,
+        edges: g.edges.map((e) => (e.id === id ? { ...e, ...patch } : e)),
+      }));
+    },
+    [updateGraph]
+  );
+
   const handleTry = useCallback(async () => {
     if (!profile || isNew) return;
     if (isDirty) {
@@ -544,7 +678,27 @@ export function useProfileForm(): UseProfileFormReturn {
       }
     }
 
-    const finalConfig = buildConfig({ ...known, name: known.name || displayName }, extraObj);
+    let knownToSave: KnownConfig = { ...known, name: known.name || displayName };
+    if (known.editor_mode === 'graph' && known.graph) {
+      const validation = validateGraph(
+        known.graph,
+        availableTools,
+        (known.tools || []).map((t) => t.name)
+      );
+      if (!validation.valid) {
+        toast.error(`Graph 驗證失敗：${validation.errors.map((e) => e.message).join('；')}`);
+        return;
+      }
+      for (const w of validation.warnings) {
+        toast.warning(w.message);
+      }
+      // Regenerate the fallback on every graph-mode save so the degraded path
+      // (Try/deploy before executor lands, SIP pinned profiles) never goes stale.
+      knownToSave = { ...knownToSave, instructions: graphToPrompt(known.graph) };
+      setKnown((prev) => ({ ...prev, instructions: knownToSave.instructions }));
+    }
+
+    const finalConfig = buildConfig(knownToSave, extraObj);
 
     setSaving(true);
     try {
@@ -584,7 +738,7 @@ export function useProfileForm(): UseProfileFormReturn {
     } finally {
       setSaving(false);
     }
-  }, [name, displayName, known, extraJson, isNew, id, currentSnapshot, router]);
+  }, [name, displayName, known, extraJson, isNew, id, currentSnapshot, router, availableTools]);
 
   const handleSaveAndTry = useCallback(async () => {
     await handleSave();
@@ -613,6 +767,15 @@ export function useProfileForm(): UseProfileFormReturn {
   );
 
   const qaList = useMemo(() => known.qa_data || [], [known.qa_data]);
+
+  const editorMode: EditorMode = known.editor_mode === 'graph' ? 'graph' : 'prompt';
+
+  // Last persisted mode — saving after a mode switch changes the live runtime
+  // strategy source, so the page gates that save behind an explicit confirm.
+  const savedEditorMode: EditorMode = useMemo(() => {
+    const persisted = (profile?.config as Record<string, unknown> | undefined)?.editor_mode;
+    return persisted === 'graph' ? 'graph' : 'prompt';
+  }, [profile]);
 
   return {
     profile,
@@ -651,6 +814,18 @@ export function useProfileForm(): UseProfileFormReturn {
     renameService,
     updateService,
     removeService,
+    editorMode,
+    savedEditorMode,
+    setEditorMode,
+    convertToGraph,
+    updateGlobalPrompt,
+    addNode,
+    removeNode,
+    updateNode,
+    setNodePosition,
+    addEdge,
+    removeEdge,
+    updateEdge,
     handleSave,
     handleTry,
     handleSaveAndTry,

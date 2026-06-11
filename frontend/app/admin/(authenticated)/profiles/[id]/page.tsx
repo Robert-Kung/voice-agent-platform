@@ -2,9 +2,12 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import dynamic from 'next/dynamic';
-import { Maximize2, Sparkles, X } from 'lucide-react';
+import { GitBranch, Maximize2, Sparkles, X } from 'lucide-react';
 import { buildFlowFromConfig } from '@/components/admin/agent-flow-builder';
 import type { FlowNodeType } from '@/components/admin/agent-flow-builder';
+import { CollapsibleSection } from '@/components/admin/collapsible-section';
+import type { GraphSelection } from '@/components/admin/graph-canvas';
+import { NodeInspector } from '@/components/admin/node-inspector';
 import { ProfileEditorHeader } from '@/components/admin/profile-editor-header';
 import { ProfileEditorLayout } from '@/components/admin/profile-editor-layout';
 import {
@@ -18,6 +21,8 @@ import {
 import { PromptEditor } from '@/components/admin/prompt-editor';
 import { useProfileForm } from '@/hooks/use-profile-form';
 
+const NO_SELECTION: GraphSelection = { nodeId: null, edgeId: null };
+
 // Lazy-load the flow builder
 const AgentFlowBuilder = dynamic(
   () => import('@/components/admin/agent-flow-builder').then((m) => m.AgentFlowBuilder),
@@ -29,10 +34,40 @@ const AgentFlowBuilder = dynamic(
   }
 );
 
+const GraphCanvas = dynamic(
+  () => import('@/components/admin/graph-canvas').then((m) => m.GraphCanvas),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="bg-card border-border h-full min-h-[480px] animate-pulse rounded-xl border" />
+    ),
+  }
+);
+
 export default function ProfileEditorV2Page() {
   const form = useProfileForm();
   const [showGenerateModal, setShowGenerateModal] = useState(false);
   const [panelOpen, setPanelOpen] = useState(false);
+  const [selection, setSelection] = useState<GraphSelection>(NO_SELECTION);
+  const [confirmSave, setConfirmSave] = useState<'save' | 'saveAndTry' | null>(null);
+
+  const isGraphMode = form.editorMode === 'graph' && !!form.known.graph;
+  // editor_mode is the runtime strategy-source switch, not a view preference:
+  // saving after a mode switch needs an explicit confirmation (review D5).
+  const modeChanged = !form.isNew && form.editorMode !== form.savedEditorMode;
+
+  const guardedSave = () => {
+    if (modeChanged) setConfirmSave('save');
+    else void form.handleSave();
+  };
+  const guardedSaveAndTry = () => {
+    if (modeChanged) setConfirmSave('saveAndTry');
+    else void form.handleSaveAndTry();
+  };
+
+  const clearSelectionFor = (kind: 'nodeId' | 'edgeId', id: string) => {
+    setSelection((s) => (s[kind] === id ? NO_SELECTION : s));
+  };
 
   if (form.loading) {
     return (
@@ -62,23 +97,82 @@ export default function ProfileEditorV2Page() {
             isNew={form.isNew}
             saving={form.saving}
             trying={form.trying}
-            onSave={form.handleSave}
+            onSave={guardedSave}
             onTry={form.handleTry}
-            onSaveAndTry={form.handleSaveAndTry}
+            onSaveAndTry={guardedSaveAndTry}
             onPanelToggle={() => setPanelOpen((o) => !o)}
+            modeControl={<EditorModeControl form={form} />}
           />
         }
         center={
-          <PromptEditor
+          isGraphMode ? (
+            <div className="flex h-full flex-col gap-3">
+              {/* Interim degradation banner until graph-runtime-executor lands */}
+              <div className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-600 dark:text-amber-400">
+                Graph 為設計來源；目前 Try / 部署仍由存檔時自動攤平的 instructions fallback
+                執行（graph 執行待 graph-runtime-executor 落地）。
+              </div>
+              <div className="min-h-0 flex-1">
+                <GraphCanvas
+                  graph={form.known.graph!}
+                  selection={selection}
+                  onSelect={setSelection}
+                  onAddNode={form.addNode}
+                  onRemoveNode={(id) => {
+                    form.removeNode(id);
+                    clearSelectionFor('nodeId', id);
+                  }}
+                  onRemoveEdge={(id) => {
+                    form.removeEdge(id);
+                    clearSelectionFor('edgeId', id);
+                  }}
+                  onConnect={form.addEdge}
+                  onNodeDragStop={form.setNodePosition}
+                />
+              </div>
+            </div>
+          ) : (
+            <div className="flex h-full flex-col gap-3">
+              {form.known.graph && (
+                <div className="border-border bg-foreground/5 text-foreground/60 rounded-md border px-3 py-2 text-xs">
+                  此 prompt 為最近一次 graph 攤平結果（非轉換前原文）；prompt
+                  模式下執行與編輯皆以此為準，graph 後續編輯不會反映於此。
+                </div>
+              )}
+              <div className="min-h-0 flex-1">
+                <PromptEditor
+                  form={form}
+                  onGenerateClick={() => setShowGenerateModal(true)}
+                  onSave={guardedSave}
+                />
+              </div>
+            </div>
+          )
+        }
+        rightPanel={
+          <RightPanel
             form={form}
-            onGenerateClick={() => setShowGenerateModal(true)}
-            onSave={form.handleSave}
+            isGraphMode={isGraphMode}
+            selection={selection}
+            onSelect={setSelection}
           />
         }
-        rightPanel={<RightPanel form={form} />}
         panelOpen={panelOpen}
         onPanelClose={() => setPanelOpen(false)}
       />
+
+      {/* Mode-switch save confirmation */}
+      {confirmSave && (
+        <ModeSwitchConfirmModal
+          targetMode={form.editorMode}
+          onCancel={() => setConfirmSave(null)}
+          onConfirm={() => {
+            const action = confirmSave === 'save' ? form.handleSave : form.handleSaveAndTry;
+            setConfirmSave(null);
+            void action();
+          }}
+        />
+      )}
 
       {/* AI Generate Modal */}
       {showGenerateModal && (
@@ -95,9 +189,111 @@ export default function ProfileEditorV2Page() {
   );
 }
 
+// ─── Editor mode control (header) ─────────────────────────────────
+
+function EditorModeControl({ form }: { form: ReturnType<typeof useProfileForm> }) {
+  if (!form.known.graph) {
+    return (
+      <button
+        type="button"
+        onClick={form.convertToGraph}
+        title="把現有 instructions 轉成單節點對話 graph（存檔時需確認切換執行來源）"
+        className="border-border text-foreground/60 hover:bg-foreground/5 hover:text-foreground hidden items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs md:flex"
+      >
+        <GitBranch size={13} />
+        轉成 Graph
+      </button>
+    );
+  }
+  return (
+    <div className="border-border hidden rounded-md border p-0.5 md:flex">
+      {(['prompt', 'graph'] as const).map((mode) => (
+        <button
+          key={mode}
+          type="button"
+          onClick={() => form.setEditorMode(mode)}
+          className={`rounded px-2.5 py-0.5 text-xs font-medium transition-colors ${
+            form.editorMode === mode
+              ? 'bg-primary text-primary-foreground'
+              : 'text-foreground/50 hover:text-foreground'
+          }`}
+        >
+          {mode === 'prompt' ? 'Prompt' : 'Graph'}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+// ─── Mode-switch save confirmation ────────────────────────────────
+
+function ModeSwitchConfirmModal({
+  targetMode,
+  onConfirm,
+  onCancel,
+}: {
+  targetMode: 'prompt' | 'graph';
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm"
+      onClick={(e) => e.target === e.currentTarget && onCancel()}
+    >
+      <div className="bg-background border-border w-full max-w-md rounded-xl border p-6 shadow-xl">
+        <h2 className="text-foreground mb-2 text-base font-semibold">切換執行策略來源</h2>
+        <p className="text-foreground/70 mb-3 text-sm leading-relaxed">
+          這次存檔會把線上 runtime 的策略來源切換為
+          <span className="font-semibold">{targetMode === 'graph' ? ' Graph' : ' Prompt'}</span>
+          ，不只是編輯器視圖。
+        </p>
+        {targetMode === 'prompt' && (
+          <p className="text-foreground/50 mb-3 text-xs leading-relaxed">
+            注意：Prompt 模式顯示的是最近一次 graph 攤平結果，不是轉換前的原文；之後的 graph
+            編輯也不會反映到 prompt。
+          </p>
+        )}
+        {targetMode === 'graph' && (
+          <p className="text-foreground/50 mb-3 text-xs leading-relaxed">
+            graph-runtime-executor 落地前，Try / 部署會執行由 graph 自動攤平的 instructions
+            fallback。
+          </p>
+        )}
+        <div className="flex items-center justify-end gap-2">
+          <button
+            type="button"
+            onClick={onCancel}
+            className="border-border hover:bg-foreground/5 rounded-md border px-4 py-1.5 text-sm"
+          >
+            取消
+          </button>
+          <button
+            type="button"
+            onClick={onConfirm}
+            className="bg-primary text-primary-foreground rounded-md px-4 py-1.5 text-sm font-medium hover:opacity-90"
+          >
+            確認並儲存
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Right Panel ──────────────────────────────────────────────────
 
-function RightPanel({ form }: { form: ReturnType<typeof useProfileForm> }) {
+function RightPanel({
+  form,
+  isGraphMode,
+  selection,
+  onSelect,
+}: {
+  form: ReturnType<typeof useProfileForm>;
+  isGraphMode: boolean;
+  selection: GraphSelection;
+  onSelect: (selection: GraphSelection) => void;
+}) {
   const { nodes, edges } = useMemo(() => buildFlowFromConfig(form.known), [form.known]);
   const [flowExpanded, setFlowExpanded] = useState(false);
 
@@ -110,11 +306,22 @@ function RightPanel({ form }: { form: ReturnType<typeof useProfileForm> }) {
     return () => window.removeEventListener('keydown', handler);
   }, [flowExpanded]);
 
+  // Node/edge selected on the canvas → inspector replaces the global panels.
+  if (isGraphMode && (selection.nodeId || selection.edgeId)) {
+    return (
+      <NodeInspector
+        form={form}
+        selection={selection}
+        onDeselect={() => onSelect({ nodeId: null, edgeId: null })}
+      />
+    );
+  }
+
   const handleNodeSelect = (_nodeId: string | null, nodeType: FlowNodeType | null) => {
     if (!nodeType) return;
     // Scroll to corresponding section
     const sectionMap: Record<string, string> = {
-      prompt: 'section-qa', // prompt is already in center
+      instructions: 'section-qa', // instructions is already in center
       qa_database: 'section-qa',
       service_hours: 'section-hours',
       human_handoff: 'section-handoff',
@@ -129,51 +336,76 @@ function RightPanel({ form }: { form: ReturnType<typeof useProfileForm> }) {
 
   return (
     <div className="space-y-0">
-      {/* Flow minimap at top */}
-      <div className="border-border mb-0 border-b pb-3">
-        <div className="flex items-center justify-between px-4 pt-2 pb-1">
-          <span className="text-foreground/50 text-xs font-medium tracking-wider uppercase">
-            Flow Overview
-          </span>
-          <button
-            type="button"
-            onClick={() => setFlowExpanded(true)}
-            title="展開全螢幕"
-            className="text-foreground/40 hover:text-foreground rounded p-1"
-          >
-            <Maximize2 size={12} />
-          </button>
-        </div>
-        <div className="min-h-[300px] px-2">
-          <AgentFlowBuilder nodes={nodes} edges={edges} onNodeSelect={handleNodeSelect} readOnly />
-        </div>
-      </div>
+      {/* Graph mode: global prompt shared by all nodes */}
+      {isGraphMode && (
+        <CollapsibleSection title="Global Prompt" id="section-global-prompt" defaultOpen>
+          <p className="text-foreground/50 mb-2 text-xs">
+            跨所有節點共用的角色、語氣與鐵則；與各節點 prompt 組合後生效。
+          </p>
+          <textarea
+            value={form.known.graph?.global_prompt ?? ''}
+            onChange={(e) => form.updateGlobalPrompt(e.target.value)}
+            rows={6}
+            placeholder="例如：你是電梯維修中心的語音客服，使用繁體中文，語氣冷靜務實…"
+            className="border-border bg-background text-foreground focus:ring-primary/40 w-full resize-y rounded-md border px-3 py-2 font-mono text-xs focus:ring-2 focus:outline-none"
+          />
+        </CollapsibleSection>
+      )}
 
-      {/* Fullscreen flow overlay */}
-      {flowExpanded && (
-        <div
-          className="bg-background fixed inset-0 z-50 flex flex-col"
-          onClick={(e) => e.target === e.currentTarget && setFlowExpanded(false)}
-        >
-          <div className="border-border flex items-center justify-between border-b px-4 py-2">
-            <span className="text-sm font-medium">Flow Overview</span>
-            <button
-              type="button"
-              onClick={() => setFlowExpanded(false)}
-              className="text-foreground/50 hover:text-foreground rounded p-1"
+      {/* Flow minimap at top (prompt mode only — graph mode edits on the center canvas) */}
+      {!isGraphMode && (
+        <>
+          <div className="border-border mb-0 border-b pb-3">
+            <div className="flex items-center justify-between px-4 pt-2 pb-1">
+              <span className="text-foreground/50 text-xs font-medium tracking-wider uppercase">
+                Flow Overview
+              </span>
+              <button
+                type="button"
+                onClick={() => setFlowExpanded(true)}
+                title="展開全螢幕"
+                className="text-foreground/40 hover:text-foreground rounded p-1"
+              >
+                <Maximize2 size={12} />
+              </button>
+            </div>
+            <div className="min-h-[300px] px-2">
+              <AgentFlowBuilder
+                nodes={nodes}
+                edges={edges}
+                onNodeSelect={handleNodeSelect}
+                readOnly
+              />
+            </div>
+          </div>
+
+          {/* Fullscreen flow overlay */}
+          {flowExpanded && (
+            <div
+              className="bg-background fixed inset-0 z-50 flex flex-col"
+              onClick={(e) => e.target === e.currentTarget && setFlowExpanded(false)}
             >
-              <X size={18} />
-            </button>
-          </div>
-          <div className="flex-1">
-            <AgentFlowBuilder
-              nodes={nodes}
-              edges={edges}
-              onNodeSelect={handleNodeSelect}
-              readOnly
-            />
-          </div>
-        </div>
+              <div className="border-border flex items-center justify-between border-b px-4 py-2">
+                <span className="text-sm font-medium">Flow Overview</span>
+                <button
+                  type="button"
+                  onClick={() => setFlowExpanded(false)}
+                  className="text-foreground/50 hover:text-foreground rounded p-1"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+              <div className="flex-1">
+                <AgentFlowBuilder
+                  nodes={nodes}
+                  edges={edges}
+                  onNodeSelect={handleNodeSelect}
+                  readOnly
+                />
+              </div>
+            </div>
+          )}
+        </>
       )}
 
       {/* Collapsible sections */}

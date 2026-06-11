@@ -1,0 +1,186 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`buildFlowFromConfig legacy projection (regression) > full legacy config projects unchanged 1`] = `
+{
+  "edges": [
+    {
+      "animated": true,
+      "id": "e-prompt-core",
+      "source": "prompt",
+      "target": "agent-core",
+    },
+    {
+      "animated": true,
+      "id": "e-qa-database-core",
+      "source": "qa-database",
+      "target": "agent-core",
+    },
+    {
+      "animated": true,
+      "id": "e-service-hours-core",
+      "source": "service-hours",
+      "target": "agent-core",
+    },
+    {
+      "animated": true,
+      "id": "e-human-handoff-core",
+      "source": "human-handoff",
+      "target": "agent-core",
+    },
+    {
+      "animated": true,
+      "id": "e-core-tool-get_current_time",
+      "source": "agent-core",
+      "target": "tool-get_current_time",
+    },
+    {
+      "animated": true,
+      "id": "e-core-tool-create_ticket",
+      "source": "agent-core",
+      "target": "tool-create_ticket",
+    },
+  ],
+  "nodes": [
+    {
+      "data": {
+        "label": "Agent",
+        "type": "instructions",
+      },
+      "id": "agent-core",
+      "position": {
+        "x": 400,
+        "y": 200,
+      },
+      "type": "agentCore",
+    },
+    {
+      "data": {
+        "enabled": true,
+        "label": "Instructions",
+        "type": "instructions",
+      },
+      "id": "prompt",
+      "position": {
+        "x": 80,
+        "y": 60,
+      },
+      "type": "flowNode",
+    },
+    {
+      "data": {
+        "config": {
+          "count": 1,
+          "mode": "inline",
+        },
+        "enabled": true,
+        "label": "QA Database (inline)",
+        "type": "qa_database",
+      },
+      "id": "qa-database",
+      "position": {
+        "x": 80,
+        "y": 150,
+      },
+      "type": "flowNode",
+    },
+    {
+      "data": {
+        "enabled": true,
+        "label": "Service Hours",
+        "type": "service_hours",
+      },
+      "id": "service-hours",
+      "position": {
+        "x": 80,
+        "y": 240,
+      },
+      "type": "flowNode",
+    },
+    {
+      "data": {
+        "enabled": true,
+        "label": "Human Handoff",
+        "type": "human_handoff",
+      },
+      "id": "human-handoff",
+      "position": {
+        "x": 80,
+        "y": 330,
+      },
+      "type": "flowNode",
+    },
+    {
+      "data": {
+        "config": {
+          "description": undefined,
+        },
+        "enabled": true,
+        "label": "get_current_time",
+        "type": "builtin_tool",
+      },
+      "id": "tool-get_current_time",
+      "position": {
+        "x": 700,
+        "y": 80,
+      },
+      "type": "flowNode",
+    },
+    {
+      "data": {
+        "config": {
+          "description": "建單",
+        },
+        "enabled": true,
+        "label": "create_ticket",
+        "type": "http_tool",
+      },
+      "id": "tool-create_ticket",
+      "position": {
+        "x": 700,
+        "y": 170,
+      },
+      "type": "flowNode",
+    },
+  ],
+}
+`;
+
+exports[`buildFlowFromConfig legacy projection (regression) > minimal legacy config projects unchanged 1`] = `
+{
+  "edges": [
+    {
+      "animated": true,
+      "id": "e-prompt-core",
+      "source": "prompt",
+      "target": "agent-core",
+    },
+  ],
+  "nodes": [
+    {
+      "data": {
+        "label": "Agent",
+        "type": "instructions",
+      },
+      "id": "agent-core",
+      "position": {
+        "x": 400,
+        "y": 200,
+      },
+      "type": "agentCore",
+    },
+    {
+      "data": {
+        "enabled": false,
+        "label": "Instructions",
+        "type": "instructions",
+      },
+      "id": "prompt",
+      "position": {
+        "x": 80,
+        "y": 60,
+      },
+      "type": "flowNode",
+    },
+  ],
+}
+`;

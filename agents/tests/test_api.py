@@ -104,6 +104,61 @@ class TestProfilesAPI:
         assert r.status_code == 200
         assert r.json()["is_active"] is False
 
+    def test_graph_config_roundtrips_intact(self, client):
+        # graph-agent-builder: config is free-form JSON, so the graph block +
+        # editor_mode must round-trip with no migration and no field loss.
+        graph = {
+            "schema_version": 1,
+            "global_prompt": "使用繁體中文",
+            "nodes": [
+                {
+                    "id": "start",
+                    "type": "start",
+                    "title": "接聽",
+                    "prompt": "打招呼",
+                    "tools": ["create_ticket"],
+                    "position": {"x": 80, "y": 160},
+                },
+                {
+                    "id": "transfer",
+                    "type": "handoff",
+                    "title": "轉接",
+                    "prompt": "",
+                    "tools": [],
+                    "position": {"x": 480, "y": 160},
+                },
+            ],
+            "edges": [
+                {
+                    "id": "e1",
+                    "source": "start",
+                    "target": "transfer",
+                    "trigger": "tool_result",
+                    "condition": "建單失敗",
+                    "label": "失敗轉接",
+                }
+            ],
+        }
+        r = client.post("/api/profiles", json={
+            "name": "graph_roundtrip",
+            "display_name": "Graph RT",
+            "config": {
+                "instructions": "fallback flatten",
+                "editor_mode": "graph",
+                "graph": graph,
+                "tools": [],
+            },
+        })
+        assert r.status_code == 201
+        profile_id = r.json()["id"]
+
+        r = client.get(f"/api/profiles/{profile_id}")
+        assert r.status_code == 200
+        config = r.json()["config"]
+        assert config["editor_mode"] == "graph"
+        assert config["graph"] == graph
+        assert config["graph"]["schema_version"] == 1
+
 
 class TestSessionsAPI:
     def test_list_empty(self, client):

@@ -16,6 +16,7 @@ interface ProfileEditorHeaderProps {
   onTry: () => void;
   onSaveAndTry?: () => void;
   onPanelToggle?: () => void;
+  modeControl?: React.ReactNode;
 }
 
 /**
@@ -34,6 +35,7 @@ export function ProfileEditorHeader({
   onTry,
   onSaveAndTry,
   onPanelToggle,
+  modeControl,
 }: ProfileEditorHeaderProps) {
   const [showConfirm, setShowConfirm] = useState(false);
 
@@ -61,7 +63,8 @@ export function ProfileEditorHeader({
         )}
       </div>
 
-      {/* Center: Stack chips */}
+      {/* Center: mode control + Stack chips */}
+      {modeControl}
       <div className="hidden items-center gap-2 md:flex">
         <span className="bg-foreground/5 border-border text-foreground/60 inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-[11px] whitespace-nowrap">
           Stack: deployment-defined

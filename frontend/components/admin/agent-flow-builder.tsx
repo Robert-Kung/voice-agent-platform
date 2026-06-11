@@ -1,7 +1,17 @@
 'use client';
 
 import { useCallback, useMemo } from 'react';
-import { BrainCircuit, Clock, Database, Globe, MessageSquare, Phone, Wrench } from 'lucide-react';
+import {
+  BrainCircuit,
+  Clock,
+  Database,
+  Globe,
+  MessageSquare,
+  Phone,
+  Play,
+  Square,
+  Wrench,
+} from 'lucide-react';
 import {
   Background,
   BackgroundVariant,
@@ -20,16 +30,23 @@ import {
   useNodesState,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
+import type { AgentGraph } from '@/lib/agent-graph';
 import { cn } from '@/lib/shadcn/utils';
 
 // ─── Types ────────────────────────────────────────────────────────
+// 'instructions' is the hub-and-spoke spoke for the legacy projection (renamed
+// from 'prompt' to free that name for the conversation-graph prompt node).
 export type FlowNodeType =
-  | 'prompt'
+  | 'instructions'
   | 'qa_database'
   | 'service_hours'
   | 'human_handoff'
   | 'builtin_tool'
-  | 'http_tool';
+  | 'http_tool'
+  | 'start'
+  | 'prompt'
+  | 'end'
+  | 'handoff';
 
 export interface FlowNodeData {
   label: string;
@@ -49,31 +66,43 @@ interface AgentFlowBuilderProps {
 }
 
 // ─── Node Icons ───────────────────────────────────────────────────
-const NODE_ICONS: Record<FlowNodeType, React.ComponentType<{ className?: string }>> = {
-  prompt: MessageSquare,
+export const NODE_ICONS: Record<FlowNodeType, React.ComponentType<{ className?: string }>> = {
+  instructions: MessageSquare,
   qa_database: Database,
   service_hours: Clock,
   human_handoff: Phone,
   builtin_tool: Wrench,
   http_tool: Globe,
+  start: Play,
+  prompt: MessageSquare,
+  end: Square,
+  handoff: Phone,
 };
 
-const NODE_COLORS: Record<FlowNodeType, string> = {
-  prompt: 'border-chart-1/50 bg-chart-1/10',
+export const NODE_COLORS: Record<FlowNodeType, string> = {
+  instructions: 'border-chart-1/50 bg-chart-1/10',
   qa_database: 'border-chart-2/50 bg-chart-2/10',
   service_hours: 'border-chart-3/50 bg-chart-3/10',
   human_handoff: 'border-chart-4/50 bg-chart-4/10',
   builtin_tool: 'border-chart-5/50 bg-chart-5/10',
   http_tool: 'border-primary/50 bg-primary/10',
+  start: 'border-chart-2/50 bg-chart-2/10',
+  prompt: 'border-chart-1/50 bg-chart-1/10',
+  end: 'border-border bg-foreground/5',
+  handoff: 'border-chart-4/50 bg-chart-4/10',
 };
 
-const NODE_ICON_COLORS: Record<FlowNodeType, string> = {
-  prompt: 'text-chart-1',
+export const NODE_ICON_COLORS: Record<FlowNodeType, string> = {
+  instructions: 'text-chart-1',
   qa_database: 'text-chart-2',
   service_hours: 'text-chart-3',
   human_handoff: 'text-chart-4',
   builtin_tool: 'text-chart-5',
   http_tool: 'text-primary',
+  start: 'text-chart-2',
+  prompt: 'text-chart-1',
+  end: 'text-foreground/60',
+  handoff: 'text-chart-4',
 };
 
 // ─── Custom Node Component ────────────────────────────────────────
@@ -152,7 +181,33 @@ export function buildFlowFromConfig(config: {
   services?: Record<string, unknown>;
   human_operator?: { enabled?: boolean };
   tools?: Array<{ name: string; endpoint?: string; description?: string }>;
+  graph?: AgentGraph;
 }): { nodes: Node<FlowNodeData>[]; edges: Edge[] } {
+  // Profiles with a graph block render the conversation graph directly;
+  // everything below stays the legacy hub-and-spoke projection (regression-locked).
+  if (config.graph && config.graph.nodes.length > 0) {
+    return {
+      nodes: config.graph.nodes.map((n) => ({
+        id: n.id,
+        type: 'flowNode' as const,
+        position: n.position,
+        data: {
+          label: n.title || n.id,
+          type: n.type as FlowNodeType,
+          enabled: true,
+          config: { prompt: n.prompt, tools: n.tools },
+        },
+      })),
+      edges: config.graph.edges.map((e) => ({
+        id: e.id,
+        source: e.source,
+        target: e.target,
+        animated: true,
+        label: e.label || (e.trigger === 'tool_result' ? '工具結果' : undefined),
+      })),
+    };
+  }
+
   const nodes: Node<FlowNodeData>[] = [];
   const edges: Edge[] = [];
 
@@ -162,7 +217,7 @@ export function buildFlowFromConfig(config: {
     id: coreId,
     type: 'agentCore',
     position: { x: 400, y: 200 },
-    data: { label: 'Agent', type: 'prompt' },
+    data: { label: 'Agent', type: 'instructions' },
   });
 
   let leftY = 60;
@@ -177,7 +232,7 @@ export function buildFlowFromConfig(config: {
     position: { x: LEFT_X, y: leftY },
     data: {
       label: 'Instructions',
-      type: 'prompt',
+      type: 'instructions',
       enabled: !!config.instructions,
     },
   });
