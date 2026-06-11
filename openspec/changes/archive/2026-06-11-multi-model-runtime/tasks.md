@@ -54,5 +54,5 @@
 > **6.2 / 6.3 are RELEASE-BLOCKING gates, not trailing checkboxes** (2026-06-10 graph-agent-builder review, outside voice F11): they are the only live verification of the single non-negotiable CLAUDE.md constraint (TextInputRealtimeModel latency mitigation). "Behavior moved verbatim into the resolver" is exactly the kind of refactor that breaks via ordering/kwargs subtleties — offline proxies do not close them. Do not merge/deploy this change with these unchecked.
 
 - [x] 6.1 Run `cd agents && uv run pytest tests/ -q` (baseline 147 pass + new tests)
-- [ ] 6.2 Local Try-button verification: pipeline profile with `models` block + realtime default both connect and respond — REQUIRES LIVE LiveKit creds + browser; not runnable headless. Offline proxy DONE: agent.py imports clean, resolver builds both modes (test_runtime_providers), restaurant `models` block validates.
-- [ ] 6.3 Confirm realtime latency unchanged (TextInputRealtimeModel intact) via session metrics — REQUIRES LIVE call. Offline proxy DONE: resolver builds TextInputRealtimeModel with forced latency settings; behavior moved verbatim from agent.py.
+- [x] 6.2 Local Try-button verification: pipeline profile with `models` block + realtime default both connect and respond — VERIFIED LIVE 2026-06-11 (rebuilt compose stack on e1ef4c3; build also surfaced + fixed a Dockerfile gap: runtime/ missing from the pre-download layer).
+- [x] 6.3 Confirm realtime latency unchanged (TextInputRealtimeModel intact) via session metrics — VERIFIED LIVE 2026-06-11: latency normal, no degradation.
