@@ -20,6 +20,7 @@ import {
 } from '@/components/admin/profile-sections';
 import { PromptEditor } from '@/components/admin/prompt-editor';
 import { useProfileForm } from '@/hooks/use-profile-form';
+import { graphToPrompt, normalizeGraph } from '@/lib/agent-graph';
 
 const NO_SELECTION: GraphSelection = { nodeId: null, edgeId: null };
 
@@ -56,12 +57,25 @@ export default function ProfileEditorV2Page() {
   // saving after a mode switch needs an explicit confirmation (review D5).
   const modeChanged = !form.isNew && form.editorMode !== form.savedEditorMode;
 
+  // A graph-mode save overwrites `instructions` with the flatten. When the
+  // current instructions are not the flatten of the last-persisted graph, they
+  // were hand-edited in prompt mode — confirm before silently destroying that.
+  const overwritesHandEditedInstructions = useMemo(() => {
+    if (!isGraphMode || form.isNew) return false;
+    const persistedGraph = normalizeGraph(
+      (form.profile?.config as Record<string, unknown> | undefined)?.graph
+    );
+    if (!persistedGraph) return false;
+    return (form.known.instructions ?? '').trim() !== graphToPrompt(persistedGraph).trim();
+  }, [isGraphMode, form.isNew, form.profile, form.known.instructions]);
+
+  const needsSaveConfirm = modeChanged || overwritesHandEditedInstructions;
   const guardedSave = () => {
-    if (modeChanged) setConfirmSave('save');
+    if (needsSaveConfirm) setConfirmSave('save');
     else void form.handleSave();
   };
   const guardedSaveAndTry = () => {
-    if (modeChanged) setConfirmSave('saveAndTry');
+    if (needsSaveConfirm) setConfirmSave('saveAndTry');
     else void form.handleSaveAndTry();
   };
 
@@ -161,10 +175,12 @@ export default function ProfileEditorV2Page() {
         onPanelClose={() => setPanelOpen(false)}
       />
 
-      {/* Mode-switch save confirmation */}
+      {/* Save confirmation (mode switch / hand-edited instructions overwrite) */}
       {confirmSave && (
-        <ModeSwitchConfirmModal
+        <SaveConfirmModal
           targetMode={form.editorMode}
+          modeChanged={modeChanged}
+          overwritesHandEdited={overwritesHandEditedInstructions}
           onCancel={() => setConfirmSave(null)}
           onConfirm={() => {
             const action = confirmSave === 'save' ? form.handleSave : form.handleSaveAndTry;
@@ -225,14 +241,18 @@ function EditorModeControl({ form }: { form: ReturnType<typeof useProfileForm> }
   );
 }
 
-// ─── Mode-switch save confirmation ────────────────────────────────
+// ─── Save confirmation (mode switch / hand-edit overwrite) ────────
 
-function ModeSwitchConfirmModal({
+function SaveConfirmModal({
   targetMode,
+  modeChanged,
+  overwritesHandEdited,
   onConfirm,
   onCancel,
 }: {
   targetMode: 'prompt' | 'graph';
+  modeChanged: boolean;
+  overwritesHandEdited: boolean;
   onConfirm: () => void;
   onCancel: () => void;
 }) {
@@ -242,19 +262,29 @@ function ModeSwitchConfirmModal({
       onClick={(e) => e.target === e.currentTarget && onCancel()}
     >
       <div className="bg-background border-border w-full max-w-md rounded-xl border p-6 shadow-xl">
-        <h2 className="text-foreground mb-2 text-base font-semibold">切換執行策略來源</h2>
-        <p className="text-foreground/70 mb-3 text-sm leading-relaxed">
-          這次存檔會把線上 runtime 的策略來源切換為
-          <span className="font-semibold">{targetMode === 'graph' ? ' Graph' : ' Prompt'}</span>
-          ，不只是編輯器視圖。
-        </p>
-        {targetMode === 'prompt' && (
+        <h2 className="text-foreground mb-2 text-base font-semibold">
+          {modeChanged ? '切換執行策略來源' : '確認覆蓋 instructions'}
+        </h2>
+        {modeChanged && (
+          <p className="text-foreground/70 mb-3 text-sm leading-relaxed">
+            這次存檔會把線上 runtime 的策略來源切換為
+            <span className="font-semibold">{targetMode === 'graph' ? ' Graph' : ' Prompt'}</span>
+            ，不只是編輯器視圖。
+          </p>
+        )}
+        {overwritesHandEdited && (
+          <p className="mb-3 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs leading-relaxed text-amber-600 dark:text-amber-400">
+            目前的 instructions 與上次 graph 攤平結果不同（曾在 prompt 模式手動編輯過）。Graph
+            模式存檔會以最新攤平結果覆蓋這些手改內容，無法復原。
+          </p>
+        )}
+        {modeChanged && targetMode === 'prompt' && (
           <p className="text-foreground/50 mb-3 text-xs leading-relaxed">
             注意：Prompt 模式顯示的是最近一次 graph 攤平結果，不是轉換前的原文；之後的 graph
             編輯也不會反映到 prompt。
           </p>
         )}
-        {targetMode === 'graph' && (
+        {modeChanged && targetMode === 'graph' && (
           <p className="text-foreground/50 mb-3 text-xs leading-relaxed">
             graph-runtime-executor 落地前，Try / 部署會執行由 graph 自動攤平的 instructions
             fallback。

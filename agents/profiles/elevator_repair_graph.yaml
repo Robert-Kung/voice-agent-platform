@@ -239,7 +239,7 @@ tools:
     與 urgency 依實際事故情境正確判斷；同時有多種狀況時選最高安全等級。
   endpoint: https://elevator.rouqikong.com/elevator/report
   method: POST
-  auth_header: Bearer 91c0a9d43efc7c71fd6f7d01a0145fc8
+  auth_header: Bearer ${ELEVATOR_API_KEY}
   timeout_seconds: 10
   parameters:
   - name: building_name
