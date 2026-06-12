@@ -49,5 +49,5 @@
 - [x] 7.2 Unit-test `promptToGraph` (conversion correctness incl. handoff node) and `graphToPrompt` (flatten output, save-regeneration), including edge cases: empty tools, partial `human_operator`, special characters in instructions
 - [x] 7.3 Unit-test `validateGraph`: each error/warning case, reachability (disconnected cycle = error), legal tool set union incl. AUTO_MOUNTED_TOOLS, availableTools-load-failure skip
 - [x] 7.4 **REGRESSION (critical)**: snapshot test that `buildFlowFromConfig` output for legacy (no-graph) configs is unchanged after the task 3.5 rewrite — only existing behavior this change touches; currently zero coverage
-- [ ] 7.5 Frontend build passes (DONE); browser QA (PENDING): add/connect/delete nodes, edit edge trigger/condition, node inspector incl. start-node welcome projection, convert-to-graph + mode-switch confirm round trip, legacy profile still renders preview
+- [x] 7.5 Frontend build passes; browser QA done 2026-06-12（/qa，報告 `.gstack/qa-reports/qa-report-localhost-3004-2026-06-12.md`）：11 scenarios pass、0 issues、0 console errors。drag-to-connect 因 synthetic-event 限制僅由 unit tests 覆蓋
 - [x] 7.6 Confirm a saved graph profile round-trips through the API (`config_json`) intact with no DB migration, `schema_version: 1` preserved
