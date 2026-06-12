@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import type { HttpMethod, ParamType, UseProfileFormReturn } from '@/hooks/use-profile-form';
 import { HTTP_METHODS, PARAM_TYPES } from '@/hooks/use-profile-form';
+import { AUTO_MOUNTED_TOOL_NAMES } from '@/lib/agent-graph';
 import { CollapsibleSection } from '../collapsible-section';
 
 const inputClass =
@@ -51,7 +52,7 @@ export function ToolsSection({ form }: ToolsSectionProps) {
           ) : (
             <div className="grid grid-cols-1 gap-1.5">
               {availableTools
-                .filter((n) => n !== 'lookup_qa' && n !== 'transfer_to_human')
+                .filter((n) => !AUTO_MOUNTED_TOOL_NAMES.includes(n))
                 .map((toolName) => {
                   const checked = builtinSelected.has(toolName);
                   return (

@@ -309,11 +309,7 @@ function RightPanel({
   // Node/edge selected on the canvas → inspector replaces the global panels.
   if (isGraphMode && (selection.nodeId || selection.edgeId)) {
     return (
-      <NodeInspector
-        form={form}
-        selection={selection}
-        onDeselect={() => onSelect({ nodeId: null, edgeId: null })}
-      />
+      <NodeInspector form={form} selection={selection} onDeselect={() => onSelect(NO_SELECTION)} />
     );
   }
 

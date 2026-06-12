@@ -27,6 +27,31 @@ describe('buildFlowFromConfig legacy projection (regression)', () => {
     expect(buildFlowFromConfig(fullLegacyConfig)).toMatchSnapshot();
   });
 
+  it('full legacy config keeps hand-verified pre-change structure', () => {
+    // Structural assertions hand-checked against the pre-rewrite implementation,
+    // since the snapshot itself was regenerated for the FlowNodeType rename.
+    const { nodes, edges } = buildFlowFromConfig(fullLegacyConfig);
+    expect(nodes.map((n) => n.id)).toEqual([
+      'agent-core',
+      'prompt',
+      'qa-database',
+      'service-hours',
+      'human-handoff',
+      'tool-get_current_time',
+      'tool-create_ticket',
+    ]);
+    expect(nodes.find((n) => n.id === 'agent-core')?.position).toEqual({ x: 400, y: 200 });
+    expect(nodes.find((n) => n.id === 'prompt')?.position).toEqual({ x: 80, y: 60 });
+    expect(edges.map((e) => `${e.source}->${e.target}`)).toEqual([
+      'prompt->agent-core',
+      'qa-database->agent-core',
+      'service-hours->agent-core',
+      'human-handoff->agent-core',
+      'agent-core->tool-get_current_time',
+      'agent-core->tool-create_ticket',
+    ]);
+  });
+
   it('minimal legacy config projects unchanged', () => {
     expect(buildFlowFromConfig(minimalLegacyConfig)).toMatchSnapshot();
   });
@@ -83,5 +108,14 @@ describe('buildFlowFromConfig graph projection', () => {
       graph: { schema_version: 1, global_prompt: '', nodes: [], edges: [] },
     });
     expect(nodes.map((n) => n.id)).toContain('agent-core');
+  });
+
+  it('malformed graph block neither crashes nor blocks the legacy fallback', () => {
+    const malformed = { nodes: [{ id: 'start', type: 'start' }], edges: [{ id: 'e' }] };
+    expect(() =>
+      buildFlowFromConfig({ instructions: 'x', graph: malformed as never })
+    ).not.toThrow();
+    const broken = buildFlowFromConfig({ instructions: 'x', graph: {} as never });
+    expect(broken.nodes.map((n) => n.id)).toContain('agent-core');
   });
 });

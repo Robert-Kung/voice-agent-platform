@@ -7,18 +7,17 @@ import { toast } from 'sonner';
 import { profilesApi, testApi, toolsApi } from '@/lib/admin-api';
 import type { Profile } from '@/lib/admin-api';
 import {
+  AUTO_MOUNTED_TOOL_NAMES,
   type AgentGraph,
   type EditorMode,
   type GraphEdge,
   type GraphNode,
   type GraphNodeType,
   NODE_TYPE_LABELS,
-  graphToPrompt,
+  normalizeGraph,
+  prepareGraphSave,
   promptToGraph,
-  validateGraph,
 } from '@/lib/agent-graph';
-
-export type { AgentGraph, EditorMode, GraphEdge, GraphNode, GraphNodeType };
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -136,7 +135,7 @@ const DELETED_TOOL_NAMES = new Set([
   'calculate_price',
   'replay_last_prompt',
 ]);
-const AUTO_MOUNTED_TOOLS = new Set(['lookup_qa', 'transfer_to_human']);
+const AUTO_MOUNTED_TOOLS = new Set(AUTO_MOUNTED_TOOL_NAMES);
 
 // ── Helpers ────────────────────────────────────────────────────────
 
@@ -205,6 +204,19 @@ export function cleanLegacyTools(known: KnownConfig): KnownConfig {
   }
   if (!changed) return known;
   return { ...known, tools: cleaned };
+}
+
+// Load-boundary sanitizer: config_json is free-form, so a hand-edited or
+// API-written graph block can violate the AgentGraph shape every consumer
+// (canvas, flatten, validator) assumes. Unusable graphs are dropped entirely —
+// the profile then behaves as if it had no graph instead of bricking the page.
+export function normalizeKnownGraph(known: KnownConfig): KnownConfig {
+  if (known.graph === undefined) return known;
+  const normalized = normalizeGraph(known.graph);
+  const out = { ...known };
+  if (normalized) out.graph = normalized;
+  else delete out.graph;
+  return out;
 }
 
 export function buildConfig(
@@ -279,7 +291,7 @@ export interface UseProfileFormReturn {
   addEdge: (source: string, target: string) => void;
   removeEdge: (id: string) => void;
   updateEdge: (id: string, patch: Partial<GraphEdge>) => void;
-  handleSave: () => Promise<void>;
+  handleSave: () => Promise<boolean>;
   handleTry: () => Promise<void>;
   handleSaveAndTry: () => Promise<void>;
 }
@@ -355,7 +367,7 @@ export function useProfileForm(): UseProfileFormReturn {
       .get(id)
       .then((p) => {
         const { known: raw, extra } = splitConfig(p.config || {});
-        const k = cleanLegacyTools(migrateLegacyHumanOperator(raw));
+        const k = normalizeKnownGraph(cleanLegacyTools(migrateLegacyHumanOperator(raw)));
         if (!k.tools) k.tools = [];
         const ej = Object.keys(extra).length ? JSON.stringify(extra, null, 2) : '{}';
         setProfile(p);
@@ -637,24 +649,28 @@ export function useProfileForm(): UseProfileFormReturn {
     [updateGraph]
   );
 
-  const handleTry = useCallback(async () => {
-    if (!profile || isNew) return;
-    if (isDirty) {
-      toast.error('有未儲存變更。先儲存後再 Try（Try 跑的是 DB 最新版本）。');
-      return;
-    }
+  const startTry = useCallback(async (profileName: string) => {
     setTrying(true);
     try {
-      const { room } = await testApi.start(profile.name);
+      const { room } = await testApi.start(profileName);
       window.open(`/?room=${encodeURIComponent(room)}`, '_blank');
     } catch (e) {
       toast.error(`無法啟動測試 agent: ${(e as Error).message}`);
     } finally {
       setTrying(false);
     }
-  }, [profile, isNew, isDirty]);
+  }, []);
 
-  const handleSave = useCallback(async () => {
+  const handleTry = useCallback(async () => {
+    if (!profile || isNew) return;
+    if (isDirty) {
+      toast.error('有未儲存變更。先儲存後再 Try（Try 跑的是 DB 最新版本）。');
+      return;
+    }
+    await startTry(profile.name);
+  }, [profile, isNew, isDirty, startTry]);
+
+  const handleSave = useCallback(async (): Promise<boolean> => {
     let extraObj: Record<string, unknown>;
     try {
       const parsed = extraJson.trim() ? JSON.parse(extraJson) : {};
@@ -664,38 +680,32 @@ export function useProfileForm(): UseProfileFormReturn {
       extraObj = parsed as Record<string, unknown>;
     } catch (e) {
       toast.error(`Advanced JSON 解析失敗: ${(e as Error).message}`);
-      return;
+      return false;
     }
 
     if (isNew) {
       if (!NAME_PATTERN.test(name)) {
         toast.error('Profile name 必須是小寫字母開頭，僅含 a-z, 0-9, _');
-        return;
+        return false;
       }
       if (!displayName.trim()) {
         toast.error('Display Name 不可為空');
-        return;
+        return false;
       }
     }
 
     let knownToSave: KnownConfig = { ...known, name: known.name || displayName };
-    if (known.editor_mode === 'graph' && known.graph) {
-      const validation = validateGraph(
-        known.graph,
-        availableTools,
-        (known.tools || []).map((t) => t.name)
-      );
-      if (!validation.valid) {
-        toast.error(`Graph 驗證失敗：${validation.errors.map((e) => e.message).join('；')}`);
-        return;
-      }
-      for (const w of validation.warnings) {
+    const graphSave = prepareGraphSave(known, availableTools);
+    if (graphSave.action === 'blocked') {
+      toast.error(`Graph 驗證失敗：${graphSave.errors.map((e) => e.message).join('；')}`);
+      return false;
+    }
+    if (graphSave.action === 'regenerated') {
+      for (const w of graphSave.warnings) {
         toast.warning(w.message);
       }
-      // Regenerate the fallback on every graph-mode save so the degraded path
-      // (Try/deploy before executor lands, SIP pinned profiles) never goes stale.
-      knownToSave = { ...knownToSave, instructions: graphToPrompt(known.graph) };
-      setKnown((prev) => ({ ...prev, instructions: knownToSave.instructions }));
+      knownToSave = { ...knownToSave, instructions: graphSave.instructions };
+      setKnown((prev) => ({ ...prev, instructions: graphSave.instructions }));
     }
 
     const finalConfig = buildConfig(knownToSave, extraObj);
@@ -718,7 +728,7 @@ export function useProfileForm(): UseProfileFormReturn {
         });
         setProfile(updated);
         const { known: raw, extra } = splitConfig(updated.config || {});
-        const k = cleanLegacyTools(migrateLegacyHumanOperator(raw));
+        const k = normalizeKnownGraph(cleanLegacyTools(migrateLegacyHumanOperator(raw)));
         if (!k.tools) k.tools = [];
         const ej = Object.keys(extra).length ? JSON.stringify(extra, null, 2) : '{}';
         setKnown(k);
@@ -735,16 +745,20 @@ export function useProfileForm(): UseProfileFormReturn {
       }
     } catch (e) {
       toast.error(`儲存失敗: ${(e as Error).message}`);
+      return false;
     } finally {
       setSaving(false);
     }
+    return true;
   }, [name, displayName, known, extraJson, isNew, id, currentSnapshot, router, availableTools]);
 
   const handleSaveAndTry = useCallback(async () => {
-    await handleSave();
-    // small delay to let the save settle
-    setTimeout(() => handleTry(), 500);
-  }, [handleSave, handleTry]);
+    // Gate on save success (a blocked graph validation or API error must not
+    // launch Try), and start directly — handleTry's isDirty is a stale closure here.
+    const ok = await handleSave();
+    if (!ok || !profile || isNew) return;
+    await startTry(profile.name);
+  }, [handleSave, profile, isNew, startTry]);
 
   // ── Computed ─────────────────────────────────────────────────────
 

@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect } from 'react';
+import { BrainCircuit } from 'lucide-react';
 import {
   Background,
   BackgroundVariant,
@@ -19,7 +20,7 @@ import {
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import type { AgentGraph, GraphNodeType } from '@/lib/agent-graph';
-import { NODE_TYPE_LABELS, edgeTrigger } from '@/lib/agent-graph';
+import { NODE_TYPE_LABELS, TOOL_RESULT_EDGE_LABEL, edgeTrigger } from '@/lib/agent-graph';
 import { cn } from '@/lib/shadcn/utils';
 import { NODE_COLORS, NODE_ICONS, NODE_ICON_COLORS } from './agent-flow-builder';
 
@@ -52,7 +53,7 @@ interface ConvNodeData {
 }
 
 function ConversationNode({ data, selected }: NodeProps<Node<ConvNodeData>>) {
-  const Icon = NODE_ICONS[data.nodeType];
+  const Icon = NODE_ICONS[data.nodeType] ?? BrainCircuit;
   return (
     <div
       className={cn(
@@ -73,7 +74,7 @@ function ConversationNode({ data, selected }: NodeProps<Node<ConvNodeData>>) {
         <div className="min-w-0">
           <div className="truncate text-xs font-semibold">{data.title}</div>
           <div className="text-muted-foreground text-[10px]">
-            {NODE_TYPE_LABELS[data.nodeType]}
+            {NODE_TYPE_LABELS[data.nodeType] ?? data.nodeType}
             {data.toolCount > 0 && ` · ${data.toolCount} tools`}
           </div>
         </div>
@@ -91,12 +92,17 @@ function ConversationNode({ data, selected }: NodeProps<Node<ConvNodeData>>) {
 
 const nodeTypes = { convNode: ConversationNode };
 
+const CONDITION_HINT_MAX = 14;
+
 function toFlowNodes(graph: AgentGraph, selection: GraphSelection): Node<ConvNodeData>[] {
   return graph.nodes.map((n) => ({
     id: n.id,
     type: 'convNode',
     position: n.position,
     selected: selection.nodeId === n.id,
+    // The start node cannot be recreated from the palette, so React Flow's
+    // Delete key must not be able to destroy it (the inspector already refuses).
+    deletable: n.type !== 'start',
     data: { title: n.title || n.id, nodeType: n.type, toolCount: n.tools.length },
   }));
 }
@@ -104,18 +110,18 @@ function toFlowNodes(graph: AgentGraph, selection: GraphSelection): Node<ConvNod
 function toFlowEdges(graph: AgentGraph, selection: GraphSelection): Edge[] {
   return graph.edges.map((e) => {
     const isToolResult = edgeTrigger(e) === 'tool_result';
-    const conditionHint = e.condition.trim()
-      ? e.condition.trim().length > 14
-        ? `${e.condition.trim().slice(0, 14)}…`
-        : e.condition.trim()
-      : '';
+    const condition = e.condition.trim();
+    const conditionHint =
+      condition.length > CONDITION_HINT_MAX
+        ? `${condition.slice(0, CONDITION_HINT_MAX)}…`
+        : condition;
     return {
       id: e.id,
       source: e.source,
       target: e.target,
       animated: true,
       selected: selection.edgeId === e.id,
-      label: e.label || conditionHint || (isToolResult ? '工具結果' : undefined),
+      label: e.label || conditionHint || (isToolResult ? TOOL_RESULT_EDGE_LABEL : undefined),
       style: isToolResult ? { strokeDasharray: '6 3' } : undefined,
     };
   });
@@ -172,7 +178,11 @@ function GraphCanvasInner({
         onConnect={handleConnect}
         onNodesDelete={handleNodesDelete}
         onEdgesDelete={handleEdgesDelete}
-        onNodeDragStop={(_, node) => onNodeDragStop(node.id, node.position)}
+        onNodeDragStop={(_, __, draggedNodes) => {
+          // Third argument carries every node in the drag (multi-select drags
+          // move more than the anchor); committing only `node` loses positions.
+          for (const n of draggedNodes) onNodeDragStop(n.id, n.position);
+        }}
         onNodeClick={(_, node) => onSelect({ nodeId: node.id, edgeId: null })}
         onEdgeClick={(_, edge) => onSelect({ nodeId: null, edgeId: edge.id })}
         onPaneClick={() => onSelect({ nodeId: null, edgeId: null })}

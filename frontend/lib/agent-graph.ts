@@ -63,6 +63,64 @@ export function edgeTrigger(edge: GraphEdge): EdgeTrigger {
   return edge.trigger === 'tool_result' ? 'tool_result' : 'user_turn';
 }
 
+export const TOOL_RESULT_EDGE_LABEL = '工具結果';
+
+// ── normalizeGraph (load-boundary sanitizer) ───────────────────────
+
+// config_json is free-form: hand-edited YAML or direct API writes can produce a
+// graph block missing any field. Everything downstream (canvas, flatten,
+// validator) assumes the full shape, so the load boundary coerces it here.
+// Returns undefined for anything unusable (no/empty nodes) — the editor then
+// treats the profile as having no graph at all instead of rendering a dead end.
+export function normalizeGraph(raw: unknown): AgentGraph | undefined {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return undefined;
+  const g = raw as Record<string, unknown>;
+  if (!Array.isArray(g.nodes)) return undefined;
+
+  const str = (v: unknown, fallback = ''): string => (typeof v === 'string' ? v : fallback);
+  const num = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
+
+  const nodes: GraphNode[] = g.nodes
+    .filter((n): n is Record<string, unknown> => typeof n === 'object' && n !== null)
+    .map((n, i) => {
+      const pos =
+        typeof n.position === 'object' && n.position !== null
+          ? (n.position as Record<string, unknown>)
+          : {};
+      return {
+        id: str(n.id, `node-${i}`),
+        // Unknown types survive normalization so validateGraph can flag them;
+        // renderers fall back to a default icon/label.
+        type: str(n.type, 'prompt') as GraphNodeType,
+        title: str(n.title),
+        prompt: str(n.prompt),
+        tools: Array.isArray(n.tools)
+          ? n.tools.filter((t): t is string => typeof t === 'string')
+          : [],
+        position: { x: num(pos.x), y: num(pos.y) },
+      };
+    });
+  if (nodes.length === 0) return undefined;
+
+  const edges: GraphEdge[] = (Array.isArray(g.edges) ? g.edges : [])
+    .filter((e): e is Record<string, unknown> => typeof e === 'object' && e !== null)
+    .map((e, i) => ({
+      id: str(e.id, `edge-${i}`),
+      source: str(e.source),
+      target: str(e.target),
+      ...(typeof e.trigger === 'string' ? { trigger: e.trigger as EdgeTrigger } : {}),
+      condition: str(e.condition),
+      ...(typeof e.label === 'string' && e.label ? { label: e.label } : {}),
+    }));
+
+  return {
+    schema_version: typeof g.schema_version === 'number' ? g.schema_version : GRAPH_SCHEMA_VERSION,
+    global_prompt: str(g.global_prompt),
+    nodes,
+    edges,
+  };
+}
+
 // ── promptToGraph (migration) ──────────────────────────────────────
 
 export interface PromptToGraphSource {
@@ -173,13 +231,58 @@ export function graphToPrompt(graph: AgentGraph): string {
   return lines.join('\n').trimEnd() + '\n';
 }
 
+// ── prepareGraphSave (save-gate orchestration, pure for testability) ──
+
+export interface PrepareGraphSaveInput {
+  graph?: AgentGraph;
+  editor_mode?: EditorMode;
+  tools?: Array<{ name: string }>;
+  human_operator?: { enabled?: boolean };
+}
+
+export type PrepareGraphSaveResult =
+  | { action: 'passthrough' }
+  | { action: 'blocked'; errors: GraphIssue[]; warnings: GraphIssue[] }
+  | { action: 'regenerated'; instructions: string; warnings: GraphIssue[] };
+
+// Graph-mode saves must (a) block on structural errors and (b) regenerate the
+// `instructions` fallback so the degraded path (Try/deploy/SIP) never goes stale.
+export function prepareGraphSave(
+  known: PrepareGraphSaveInput,
+  availableTools: string[]
+): PrepareGraphSaveResult {
+  if (known.editor_mode !== 'graph' || !known.graph) return { action: 'passthrough' };
+  const validation = validateGraph(
+    known.graph,
+    availableTools,
+    (known.tools ?? []).map((t) => t.name),
+    { handoffEnabled: known.human_operator?.enabled ?? false }
+  );
+  if (!validation.valid) {
+    return { action: 'blocked', errors: validation.errors, warnings: validation.warnings };
+  }
+  return {
+    action: 'regenerated',
+    instructions: graphToPrompt(known.graph),
+    warnings: validation.warnings,
+  };
+}
+
 // ── validateGraph (frontend UX feedback only; runtime gate is the backend
 //    validator owned by graph-runtime-executor) ─────────────────────
+
+export interface ValidateGraphOptions {
+  // Pass the profile's human_operator.enabled when known: a handoff node whose
+  // flatten instructs transfer_to_human is a stall/hallucination trap when the
+  // tool is never mounted.
+  handoffEnabled?: boolean;
+}
 
 export function validateGraph(
   graph: AgentGraph,
   availableTools: string[],
-  configToolNames: string[] = []
+  configToolNames: string[] = [],
+  opts: ValidateGraphOptions = {}
 ): GraphValidation {
   const errors: GraphIssue[] = [];
   const warnings: GraphIssue[] = [];
@@ -196,6 +299,29 @@ export function validateGraph(
         message: `節點「${node.title || node.id}」的 type 非法：${node.type}`,
       });
     }
+  }
+
+  const edgeIds = new Set<string>();
+  for (const edge of graph.edges) {
+    if (edgeIds.has(edge.id)) {
+      // updateEdge/removeEdge key on edge.id — duplicates silently corrupt edits.
+      errors.push({ code: 'duplicate_edge_id', message: `邊 id 重複：${edge.id}` });
+    }
+    edgeIds.add(edge.id);
+    if (edge.source === edge.target && edge.source) {
+      warnings.push({
+        code: 'self_loop',
+        message: `邊 ${edge.id} 的起點與終點是同一節點（自我迴圈）`,
+      });
+    }
+  }
+
+  if (opts.handoffEnabled === false && graph.nodes.some((n) => n.type === 'handoff')) {
+    warnings.push({
+      code: 'handoff_disabled',
+      message:
+        'graph 含轉真人節點，但 Handoff（human_operator）未啟用——執行時無 transfer_to_human 工具可呼叫',
+    });
   }
 
   const startNodes = graph.nodes.filter((n) => n.type === 'start');

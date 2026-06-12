@@ -31,6 +31,7 @@ import {
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import type { AgentGraph } from '@/lib/agent-graph';
+import { TOOL_RESULT_EDGE_LABEL, edgeTrigger, normalizeGraph } from '@/lib/agent-graph';
 import { cn } from '@/lib/shadcn/utils';
 
 // ─── Types ────────────────────────────────────────────────────────
@@ -185,9 +186,11 @@ export function buildFlowFromConfig(config: {
 }): { nodes: Node<FlowNodeData>[]; edges: Edge[] } {
   // Profiles with a graph block render the conversation graph directly;
   // everything below stays the legacy hub-and-spoke projection (regression-locked).
-  if (config.graph && config.graph.nodes.length > 0) {
+  // normalizeGraph guards callers that pass raw (non-form-hook) config.
+  const graph = normalizeGraph(config.graph);
+  if (graph) {
     return {
-      nodes: config.graph.nodes.map((n) => ({
+      nodes: graph.nodes.map((n) => ({
         id: n.id,
         type: 'flowNode' as const,
         position: n.position,
@@ -198,12 +201,12 @@ export function buildFlowFromConfig(config: {
           config: { prompt: n.prompt, tools: n.tools },
         },
       })),
-      edges: config.graph.edges.map((e) => ({
+      edges: graph.edges.map((e) => ({
         id: e.id,
         source: e.source,
         target: e.target,
         animated: true,
-        label: e.label || (e.trigger === 'tool_result' ? '工具結果' : undefined),
+        label: e.label || (edgeTrigger(e) === 'tool_result' ? TOOL_RESULT_EDGE_LABEL : undefined),
       })),
     };
   }

@@ -2,7 +2,12 @@
 
 import { Trash2 } from 'lucide-react';
 import type { UseProfileFormReturn } from '@/hooks/use-profile-form';
-import { EDGE_TRIGGERS, NODE_TYPE_LABELS, edgeTrigger } from '@/lib/agent-graph';
+import {
+  AUTO_MOUNTED_TOOL_NAMES,
+  EDGE_TRIGGERS,
+  NODE_TYPE_LABELS,
+  edgeTrigger,
+} from '@/lib/agent-graph';
 import type { GraphSelection } from './graph-canvas';
 
 const inputClass =
@@ -53,10 +58,13 @@ function NodePanel({
     .filter((t) => !!t.endpoint)
     .map((t) => t.name)
     .filter(Boolean);
-  const builtinNames = availableTools.filter((n) => n !== 'lookup_qa' && n !== 'transfer_to_human');
+  const builtinNames = availableTools.filter((n) => !AUTO_MOUNTED_TOOL_NAMES.includes(n));
+  // Auto-mounted tools are legal references (validateGraph agrees) but absent
+  // from the attachable lists; render them with a badge instead of as orphans.
+  const autoMountedReferenced = node.tools.filter((t) => AUTO_MOUNTED_TOOL_NAMES.includes(t));
   // Referenced names outside the attachable lists (e.g. a deleted HTTP tool) stay
   // visible so the user can detach them deliberately — validateGraph warns, never auto-removes.
-  const knownNames = new Set([...builtinNames, ...httpToolNames]);
+  const knownNames = new Set([...builtinNames, ...httpToolNames, ...AUTO_MOUNTED_TOOL_NAMES]);
   const orphanNames = node.tools.filter((t) => !knownNames.has(t));
 
   const toggleNodeTool = (name: string) => {
@@ -147,12 +155,22 @@ function NodePanel({
               onToggle={() => toggleNodeTool(name)}
             />
           ))}
+          {autoMountedReferenced.map((name) => (
+            <ToolCheckbox
+              key={name}
+              name={name}
+              checked
+              badge="自動掛載"
+              onToggle={() => toggleNodeTool(name)}
+            />
+          ))}
           {orphanNames.map((name) => (
             <ToolCheckbox
               key={name}
               name={name}
               checked
-              orphan
+              badge="找不到此工具定義"
+              badgeTone="warn"
               onToggle={() => toggleNodeTool(name)}
             />
           ))}
@@ -182,12 +200,14 @@ function NodePanel({
 function ToolCheckbox({
   name,
   checked,
-  orphan,
+  badge,
+  badgeTone,
   onToggle,
 }: {
   name: string;
   checked: boolean;
-  orphan?: boolean;
+  badge?: string;
+  badgeTone?: 'warn';
   onToggle: () => void;
 }) {
   return (
@@ -198,7 +218,13 @@ function ToolCheckbox({
     >
       <input type="checkbox" checked={checked} onChange={onToggle} className="size-3" />
       <span className="font-mono">{name}</span>
-      {orphan && <span className="text-[10px] text-amber-500">找不到此工具定義</span>}
+      {badge && (
+        <span
+          className={`text-[10px] ${badgeTone === 'warn' ? 'text-amber-500' : 'text-foreground/40'}`}
+        >
+          {badge}
+        </span>
+      )}
     </label>
   );
 }
