@@ -6,14 +6,39 @@ import logging
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
+from agent_tools import get_available_tools
 from api.deps import get_db, require_admin
 from api.schemas import ProfileCreate, ProfileOut, ProfileUpdate
 from db import profile_store
 from db.models import Profile
+from runtime.graph import validate_profile_config
 
 logger = logging.getLogger("api.profiles")
 
 router = APIRouter(prefix="/api/profiles", tags=["profiles"])
+
+
+def _assert_graph_saveable(config: dict | None) -> None:
+    """Backend hard validation for graph-mode saves (graph-runtime-validation spec).
+
+    The frontend `validateGraph` is UX-only and bypassable by direct API writes,
+    so structural errors AND the graph+realtime mode conflict are enforced here.
+    Passthrough (None result) for prompt-mode profiles or those with no graph block.
+    """
+    if not config:
+        return
+    declared_mode = (config.get("models") or {}).get("mode")
+    result = validate_profile_config(config, get_available_tools(), mode=declared_mode)
+    if result is None or result.valid:
+        return
+    raise HTTPException(
+        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+        detail={
+            "message": "graph 結構驗證未通過，無法存檔",
+            "errors": [{"code": e.code, "message": e.message} for e in result.errors],
+            "warnings": [{"code": w.code, "message": w.message} for w in result.warnings],
+        },
+    )
 
 
 def _to_out(profile: Profile) -> ProfileOut:
@@ -56,6 +81,8 @@ def create_profile_endpoint(
             detail=f"Profile '{payload.name}' already exists",
         )
 
+    _assert_graph_saveable(payload.config)
+
     profile = profile_store.create_profile(
         db,
         name=payload.name,
@@ -95,6 +122,7 @@ def update_profile_endpoint(
     update_data = payload.model_dump(exclude_unset=True)
     changed_fields = sorted(update_data.keys())
     if "config" in update_data:
+        _assert_graph_saveable(update_data["config"])
         update_data["config_json"] = update_data.pop("config")
 
     profile = profile_store.update_profile(db, profile_id, **update_data)

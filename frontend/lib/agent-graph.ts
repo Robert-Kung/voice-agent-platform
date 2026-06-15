@@ -397,6 +397,24 @@ export function validateGraph(
     unconditionalSeen.add(key);
   }
 
+  // tool_result edge from a node with no domain tool → dead transition. The
+  // runtime wraps a node's domain tools to hand off after they return; a node
+  // sourcing a tool_result edge but listing no domain tool (empty, or only
+  // auto-mounted) has nothing to wrap, so that transition can never fire.
+  const toolResultSources = new Set(
+    graph.edges.filter((e) => edgeTrigger(e) === 'tool_result').map((e) => e.source)
+  );
+  for (const node of graph.nodes) {
+    if (!toolResultSources.has(node.id)) continue;
+    const domainTools = node.tools.filter((t) => !AUTO_MOUNTED_TOOL_NAMES.includes(t));
+    if (domainTools.length === 0) {
+      warnings.push({
+        code: 'tool_result_no_tool',
+        message: `節點「${node.title || node.id}」有 tool_result 出邊但沒有 domain 工具——該轉移永遠不會觸發`,
+      });
+    }
+  }
+
   // Dangling tool references. Skip when the builtin list failed to load (empty)
   // to avoid false warnings. Legal set = config.tools ∪ builtins ∪ auto-mounted.
   if (availableTools.length > 0) {

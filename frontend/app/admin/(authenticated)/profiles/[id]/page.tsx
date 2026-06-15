@@ -222,21 +222,31 @@ function EditorModeControl({ form }: { form: ReturnType<typeof useProfileForm> }
     );
   }
   return (
-    <div className="border-border hidden rounded-md border p-0.5 md:flex">
-      {(['prompt', 'graph'] as const).map((mode) => (
-        <button
-          key={mode}
-          type="button"
-          onClick={() => form.setEditorMode(mode)}
-          className={`rounded px-2.5 py-0.5 text-xs font-medium transition-colors ${
-            form.editorMode === mode
-              ? 'bg-primary text-primary-foreground'
-              : 'text-foreground/50 hover:text-foreground'
-          }`}
+    <div className="hidden items-center gap-2 md:flex">
+      <div className="border-border flex rounded-md border p-0.5">
+        {(['prompt', 'graph'] as const).map((mode) => (
+          <button
+            key={mode}
+            type="button"
+            onClick={() => form.setEditorMode(mode)}
+            className={`rounded px-2.5 py-0.5 text-xs font-medium transition-colors ${
+              form.editorMode === mode
+                ? 'bg-primary text-primary-foreground'
+                : 'text-foreground/50 hover:text-foreground'
+            }`}
+          >
+            {mode === 'prompt' ? 'Prompt' : 'Graph'}
+          </button>
+        ))}
+      </div>
+      {form.editorMode === 'graph' && (
+        <span
+          title="Graph 執行僅在 pipeline 部署生效。realtime 部署會 fallback 到攤平的 instructions（realtime 下 node 切換會被 Gemini Live 拒絕/忽略）。"
+          className="text-amber-600/80 dark:text-amber-400/80 rounded border border-amber-500/30 bg-amber-500/10 px-1.5 py-0.5 text-[11px] font-medium"
         >
-          {mode === 'prompt' ? 'Prompt' : 'Graph'}
-        </button>
-      ))}
+          需 pipeline 部署
+        </span>
+      )}
     </div>
   );
 }

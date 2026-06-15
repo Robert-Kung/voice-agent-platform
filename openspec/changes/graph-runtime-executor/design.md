@@ -62,7 +62,7 @@ validator 先做的**真正理由是「它是 gate 的共同依賴」**——exe
 
 graph 執行僅 pipeline，且這是**完整生產路徑**——profile 設 `models.mode: pipeline` 即可部署上 SIP，不是 demo-only。realtime 下 graph 執行今天 broken（見 Context），故 graph 與 realtime 在 config 層互斥，分兩層落實：
 
-- **save-time 阻擋（主機制）**：validator 對 `editor_mode: graph` + `models.mode: realtime` 發 blocking error → API 422；前端編輯器在 graph mode 時 disable realtime 切換。此組合根本選不出來，是顯式契約而非靜默降級。
+- **save-time 阻擋（主機制）**：validator 對 `editor_mode: graph` + `models.mode: realtime` 發 blocking error → API 422；前端在 graph mode 顯示「需 pipeline 部署」提示（agent mode 在 profile 編輯器不可改，由部署 env 決定）。此組合根本選不出來，是顯式契約而非靜默降級。
 - **runtime 兜底（仍須保留）**：deployment 級 `AGENT_MODE=realtime` env 優先於 profile（CLAUDE.md），仍可能讓 graph profile 落到 realtime。此誤配 edge case 降級跑攤平 `instructions` + 大聲 warning。**為何不掛電話**：`ctx.delete_room()` 技術上能掛斷 SIP，但既有 policy（CLAUDE.md / graph-agent-schema）明定「對話策略壞掉不 fail loud」——SIP profile 由 secret 綁死、無任何 UI banner，掛斷 = 來電者被秒掛、零信號的靜默生產事故。寧可降級講完。
 
 `create_agent_class` 分流：
@@ -88,7 +88,7 @@ node 若宣告 model spec，組裝該 node Agent 時呼叫 `agents/runtime/provi
 - **[LLM 不呼叫轉移工具 → 卡在 node]** → user_turn 轉移仰賴 LLM 判斷。緩解：instructions 明列轉移規則與條件；無條件邊在 prompt 中強指示。殘餘風險接受（與 prompt-mode 對話跑飛的風險同級）。
 - **[多 Agent 切換的 stale-instruction bleed]** → 每次 handoff SDK 預設帶完整 history。真正的失效模式**不是 token 膨脹**（電話對話幾分鐘、token 自然有界、成本非問題），而是 focused 的下游 node 收到完整 history 後，LLM 仍受上一個 node 指示污染、繼續做舊階段的事或重答已結束話題。v1 用 SDK 預設行為；observability 要觀測的是「轉移後 LLM 是否仍被舊 node 指示污染」，而非 token 曲線。裁剪策略待真實長對話資料後再議（盲調截斷可能砍掉下游 node 合法需要的上文）。
 - **[後端/前端 validator 規則漂移]** → 兩套 validator 同規則但不同語言，易 drift。緩解：兩邊以同一份「規則清單」為準（spec 的 scenario），各自配對等測試；改規則時兩邊一起改列入 review checklist。
-- **[realtime profile 仍以 fallback 跑]** → graph-mode profile 在 realtime 下跑攤平 instructions，使用者可能誤以為 graph 生效。緩解：log 明示；UI 標示留待 realtime spike。
+- **[realtime profile 仍以 fallback 跑]** → graph-mode profile 在 realtime 下跑攤平 instructions，使用者可能誤以為 graph 生效。緩解：runtime warning log 明示；前端 graph mode 顯示「需 pipeline 部署」提示（agent mode 不可在編輯器改，故無法在存檔時硬擋此誤配，僅後端對顯式 `models.mode: realtime` 回 422）。
 
 ## Migration Plan
 

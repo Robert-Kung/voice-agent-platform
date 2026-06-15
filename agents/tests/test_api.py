@@ -160,6 +160,81 @@ class TestProfilesAPI:
         assert config["graph"]["schema_version"] == 1
 
 
+class TestGraphSaveValidation:
+    """graph-runtime-validation: backend hard validation on graph-mode saves."""
+
+    @staticmethod
+    def _start_only_graph(extra_nodes=None, edges=None):
+        nodes = [
+            {"id": "start", "type": "start", "title": "入口", "prompt": "打招呼",
+             "tools": [], "position": {"x": 0, "y": 0}},
+        ]
+        nodes.extend(extra_nodes or [])
+        return {"schema_version": 1, "global_prompt": "", "nodes": nodes, "edges": edges or []}
+
+    def test_invalid_graph_save_422(self, client):
+        # No start node → blocking structural error.
+        bad_graph = {
+            "schema_version": 1, "global_prompt": "", "edges": [],
+            "nodes": [{"id": "a", "type": "prompt", "title": "A", "prompt": "",
+                       "tools": [], "position": {"x": 0, "y": 0}}],
+        }
+        r = client.post("/api/profiles", json={
+            "name": "bad_graph", "display_name": "Bad",
+            "config": {"instructions": "fb", "editor_mode": "graph", "graph": bad_graph, "tools": []},
+        })
+        assert r.status_code == 422
+        codes = {e["code"] for e in r.json()["detail"]["errors"]}
+        assert "no_start" in codes
+
+    def test_graph_realtime_conflict_422(self, client):
+        r = client.post("/api/profiles", json={
+            "name": "graph_rt", "display_name": "GraphRT",
+            "config": {
+                "instructions": "fb", "editor_mode": "graph",
+                "graph": self._start_only_graph(),
+                "models": {"mode": "realtime"}, "tools": [],
+            },
+        })
+        assert r.status_code == 422
+        codes = {e["code"] for e in r.json()["detail"]["errors"]}
+        assert "graph_realtime_conflict" in codes
+
+    def test_valid_graph_pipeline_saves(self, client):
+        r = client.post("/api/profiles", json={
+            "name": "graph_pipe", "display_name": "GraphPipe",
+            "config": {
+                "instructions": "fb", "editor_mode": "graph",
+                "graph": self._start_only_graph(),
+                "models": {"mode": "pipeline"}, "tools": [],
+            },
+        })
+        assert r.status_code == 201
+
+    def test_prompt_mode_save_bypasses_graph_validation(self, client):
+        # editor_mode absent (prompt): even a structurally broken graph block is
+        # not validated — it is retained but inert.
+        r = client.post("/api/profiles", json={
+            "name": "prompt_mode", "display_name": "Prompt",
+            "config": {
+                "instructions": "hi", "tools": [],
+                "graph": {"nodes": [{"id": "a", "type": "prompt"}]},  # no start, but prompt mode
+            },
+        })
+        assert r.status_code == 201
+
+    def test_update_to_invalid_graph_422(self, client):
+        r = client.post("/api/profiles", json={"name": "upd_graph", "display_name": "U"})
+        pid = r.json()["id"]
+        r = client.patch(f"/api/profiles/{pid}", json={
+            "config": {
+                "instructions": "fb", "editor_mode": "graph",
+                "graph": self._start_only_graph(), "models": {"mode": "realtime"},
+            },
+        })
+        assert r.status_code == 422
+
+
 class TestSessionsAPI:
     def test_list_empty(self, client):
         r = client.get("/api/sessions")

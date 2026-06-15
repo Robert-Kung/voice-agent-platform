@@ -14,14 +14,17 @@ Agent Factory — 從 DB 或 YAML profile 動態建立 LiveKit Voice Agent
 - Tier 3（HTTP tool）：YAML tools 區塊宣告（待實作）
 """
 
+import functools
 import json
 import logging
 import pathlib
+import re
 
 import yaml
 
-from livekit.agents import Agent, StopResponse
+from livekit.agents import Agent, StopResponse, function_tool
 from agent_tools import TOOL_REGISTRY, build_tools_for_agent, get_available_tools
+from runtime.graph import edge_trigger, normalize_graph, validate_graph
 
 logger = logging.getLogger("agent-factory")
 
@@ -277,3 +280,227 @@ def create_agent_class(profile: dict, mode: str = "pipeline"):
     )
 
     return DynamicPhoneAgent
+
+
+# ── Graph execution (graph-execution capability) ───────────
+#
+# graph-mode profiles assemble one Agent instance per node and wire edge
+# transitions as SDK-native handoffs (a function tool returning the target Agent;
+# generation.py:make_tool_output). v1 is pipeline-only — the runtime gate
+# (build_root_agent) only reaches this path when editor_mode == 'graph', the
+# backend validator passes, AND the effective mode is pipeline.
+
+
+def _transition_tool_name(target_id: str) -> str:
+    """Stable, schema-safe tool name for an edge into target_id."""
+    return f"goto_{re.sub(r'[^0-9A-Za-z_]+', '_', target_id)}"
+
+
+def _compose_global_preamble(profile: dict, graph: dict) -> str:
+    """global_prompt + globally-injected QA/services, prepended to every node
+    (graph-execution: global capabilities stay at the global level, not per node)."""
+    parts: list[str] = []
+    gp = (graph.get("global_prompt") or "").strip()
+    if gp:
+        parts.append(gp)
+    qa_data = profile.get("qa_data", [])
+    if _qa_mode(profile) == "inline" and qa_data:
+        parts.append(_render_qa_block(qa_data).strip())
+    services = profile.get("services", {})
+    if services:
+        parts.append(_render_services_block(services).strip())
+    return "\n\n".join(p for p in parts if p)
+
+
+def _build_node_instructions(preamble: str, node: dict, user_edges: list[dict]) -> str:
+    """Compose a node Agent's instructions: global preamble + focused node prompt
+    + explicit transition guidance for its user_turn edges."""
+    parts: list[str] = []
+    if preamble:
+        parts.append(preamble)
+    if (node.get("prompt") or "").strip():
+        parts.append(node["prompt"].strip())
+    if user_edges:
+        lines = ["[轉移規則] 對話進行中，符合下列情況時呼叫對應工具進入下一階段（依序判斷，先命中者生效）："]
+        for e in user_edges:
+            cond = (e.get("condition") or "").strip()
+            when = f"當「{cond}」" if cond else "準備好（無條件）時"
+            lines.append(f"- {when} → 呼叫 {_transition_tool_name(e['target'])}")
+        parts.append("\n".join(lines))
+    return "\n\n".join(parts)
+
+
+def _make_transition_tool(registry: dict, target_id: str, condition: str):
+    """A user_turn handoff tool: returning the target Agent triggers the SDK handoff."""
+    cond = (condition or "").strip()
+    desc = (
+        f"當以下情況成立時呼叫，進入下一對話階段：{cond}"
+        if cond
+        else "準備好進入下一對話階段時呼叫（無條件轉移）。"
+    )
+
+    @function_tool(name=_transition_tool_name(target_id), description=desc)
+    async def _goto(self):
+        return registry[target_id]
+
+    return _goto
+
+
+def _wrap_domain_tool_for_handoff(tool, registry: dict, target_id: str):
+    """Wrap a domain tool so it returns (result, target_agent): the LLM speaks the
+    tool result, then the SDK hands off to the target (tool_result transition).
+    functools.wraps preserves the original parameter schema via __wrapped__."""
+    raw = tool._func
+
+    @functools.wraps(raw)
+    async def _wrapped(self, *args, **kwargs):
+        result = await raw(self, *args, **kwargs)
+        return (result, registry[target_id])
+
+    return function_tool(_wrapped, name=tool.info.name, description=tool.info.description)
+
+
+def _make_node_agent_class(node_instructions: str, node_type: str, welcome: str, tool_attrs: dict):
+    """Build an Agent subclass for one node. start nodes greet on enter (pipeline
+    only); other nodes rely on the handoff continuation to keep talking."""
+
+    class NodeAgent(Agent):
+        def __init__(self) -> None:
+            super().__init__(instructions=node_instructions)
+
+        async def on_enter(self) -> None:
+            if node_type == "start":
+                await self.session.say(welcome)
+
+    for name, method in tool_attrs.items():
+        setattr(NodeAgent, name, method)
+    NodeAgent.__name__ = "NodeAgent"
+    NodeAgent.__qualname__ = "NodeAgent"
+    return NodeAgent
+
+
+def build_graph_root_agent(profile: dict, mode: str, graph: dict) -> Agent:
+    """Assemble a validated graph into wired Agent instances; return the start node's.
+
+    Caller (build_root_agent) guarantees the graph passed structural validation and
+    mode == 'pipeline'. Tools resolve through the profile's existing three-tier
+    mounting; per-node model specs are an interface point (v1 inherits session model).
+    """
+    preamble = _compose_global_preamble(profile, graph)
+    nodes = graph["nodes"]
+    edges = graph["edges"]
+    welcome = profile.get("welcome_message", "您好，請問有什麼可以為您服務的？")
+
+    # Profile-declared domain tools, built once, selected per node by name.
+    all_domain_tools = build_tools_for_agent(profile)
+    qa_tool = None
+    if _qa_mode(profile) == "tool" and profile.get("qa_data"):
+        qa_tool = TOOL_REGISTRY["lookup_qa"](profile, {})
+    handoff_tool = None
+    if _human_operator_enabled(profile):
+        ho_config = profile.get("human_operator", {}) if isinstance(profile.get("human_operator"), dict) else {}
+        handoff_tool = TOOL_REGISTRY["transfer_to_human"](profile, ho_config)
+
+    # Shared registry: transition tools resolve targets at call time, so forward
+    # references across cycles are fine as long as it's fully populated before any call.
+    registry: dict[str, Agent] = {}
+    node_classes: dict[str, type] = {}
+
+    for node in nodes:
+        node_id = node["id"]
+        out_edges = [e for e in edges if e["source"] == node_id]
+        user_edges = [e for e in out_edges if edge_trigger(e) == "user_turn"]
+        toolresult_edges = [e for e in out_edges if edge_trigger(e) == "tool_result"]
+
+        tool_attrs: dict = {}
+        # Node's declared domain tools (subset of profile tools by name).
+        for tname in node.get("tools", []):
+            if tname in all_domain_tools:
+                tool_attrs[tname] = all_domain_tools[tname]
+        # Auto-mounted lookup_qa on every node when in QA tool mode.
+        if qa_tool is not None:
+            tool_attrs["lookup_qa"] = qa_tool
+        # handoff node: mount transfer_to_human; its prompt acts as the greeting.
+        if node.get("type") == "handoff" and handoff_tool is not None:
+            tool_attrs["transfer_to_human"] = handoff_tool
+
+        # tool_result transitions: wrap this node's domain tools to hand off after
+        # returning (v1 unconditional; first tool_result edge by array order wins).
+        if toolresult_edges:
+            target = toolresult_edges[0]["target"]
+            for tname in list(tool_attrs.keys()):
+                if tname in ("lookup_qa", "transfer_to_human"):
+                    continue  # don't hijack global/handoff tools
+                tool_attrs[tname] = _wrap_domain_tool_for_handoff(tool_attrs[tname], registry, target)
+
+        # user_turn transitions.
+        for e in user_edges:
+            tool_attrs[_transition_tool_name(e["target"])] = _make_transition_tool(
+                registry, e["target"], e.get("condition", "")
+            )
+
+        # Per-node model (multi-model OQ4): interface point only in v1.
+        if node.get("model"):
+            logger.info("Node '%s' declares a model spec (v1: using session-level model)", node_id)
+
+        node_instructions = _build_node_instructions(preamble, node, user_edges)
+        node_classes[node_id] = _make_node_agent_class(
+            node_instructions, node.get("type", "prompt"), welcome, tool_attrs
+        )
+
+    for node_id, cls in node_classes.items():
+        registry[node_id] = cls()
+
+    start_id = next(n["id"] for n in nodes if n["type"] == "start")
+    logger.info(
+        "Graph assembled for '%s': %d nodes, %d edges, start=%s",
+        profile.get("name", "?"), len(nodes), len(edges), start_id,
+    )
+    return registry[start_id]
+
+
+def _select_graph_strategy(profile: dict, mode: str) -> tuple[bool, str]:
+    """Runtime gate decision: (use_graph, reason). Never raises — a bad graph
+    falls back to the flatten `instructions` (graph-execution: no fail-loud)."""
+    if profile.get("editor_mode") != "graph":
+        return False, "editor_mode != graph"
+    if mode != "pipeline":
+        return False, f"mode={mode}（graph 執行僅 pipeline）"
+    graph = normalize_graph(profile.get("graph"))
+    if graph is None:
+        return False, "no usable graph block"
+    config_tools = [t.get("name") for t in profile.get("tools", []) if isinstance(t, dict) and t.get("name")]
+    # mode is always 'pipeline' here (the realtime early-return above guards it), so
+    # the validator's graph_realtime_conflict rule only ever fires on the API save
+    # path — at runtime, realtime is handled by the early-return, not this validator.
+    result = validate_graph(
+        graph, get_available_tools(), config_tools,
+        handoff_enabled=_human_operator_enabled(profile), mode=mode,
+    )
+    if not result.valid:
+        return False, "graph validation failed: " + ",".join(e.code for e in result.errors)
+    return True, "ok"
+
+
+def build_root_agent(profile: dict, mode: str = "pipeline") -> Agent:
+    """Entry point for the session's root Agent (graph-execution strategy gate).
+
+    Returns a graph's start-node Agent when the profile is graph-mode, valid, and
+    pipeline; otherwise the single-instructions agent. Graph assembly failures fall
+    back to instructions with a loud warning rather than dropping the call.
+    """
+    use_graph, reason = _select_graph_strategy(profile, mode)
+    if use_graph:
+        try:
+            graph = normalize_graph(profile.get("graph"))
+            return build_graph_root_agent(profile, mode, graph)
+        except Exception:
+            logger.exception("Graph assembly failed for '%s'; falling back to instructions",
+                             profile.get("name", "?"))
+            reason = "graph assembly raised"
+    if profile.get("editor_mode") == "graph":
+        logger.warning(
+            "Graph-mode profile '%s' running flatten-instructions fallback: %s",
+            profile.get("name", "?"), reason,
+        )
+    return create_agent_class(profile, mode)()

@@ -45,7 +45,7 @@ The backend validator SHALL enforce the same structural rule set as the frontend
 
 ### Requirement: Graph and realtime mode are mutually exclusive
 
-The backend validator SHALL treat the combination of `editor_mode: graph` and an effective realtime mode (`models.mode: realtime`) as a blocking error, because graph node execution requires mid-session instruction swaps that the Gemini Live realtime backend either rejects (1007 after the first model turn) or silently ignores. The frontend editor SHALL reflect this by disabling the realtime mode selection while a profile is in graph mode (UX feedback only; the backend block is the enforced gate). Graph execution under pipeline mode is a full production path and SHALL NOT be flagged.
+The backend validator SHALL treat the combination of `editor_mode: graph` and an explicit realtime mode (`models.mode: realtime`) as a blocking error, because graph node execution requires mid-session instruction swaps that the Gemini Live realtime backend either rejects (1007 after the first model turn) or silently ignores. The agent mode is not editable in the profile editor (it is determined by deployment env / the profile's `models.mode`), so the frontend SHALL surface a graph-mode hint that execution requires pipeline deployment (UX feedback only; the backend block is the enforced gate). Graph execution under pipeline mode is a full production path and SHALL NOT be flagged.
 
 #### Scenario: Graph mode with realtime is a blocking error
 

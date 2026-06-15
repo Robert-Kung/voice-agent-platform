@@ -93,6 +93,24 @@ LiveKit Agents 的 worker 用 multi-process 模型：`entrypoint()` 是在 SDK f
 child_env = {**os.environ, "AGENT_STT_PROVIDER": "deepgram", "AGENT_PROFILE": profile}
 ```
 
+### Graph 執行架構（graph-runtime-executor）
+
+`editor_mode: graph` 的 profile 可把對話 graph 直接在 runtime 跑起來，而非只用攤平的 `instructions`。入口是 `agent_factory.build_root_agent(profile, mode)`（`agent.py entrypoint` 在 `session.start` 前呼叫），內含**策略來源 gate**：
+
+```
+editor_mode == 'graph' AND 後端 validate_graph().valid AND effective_mode == 'pipeline'
+  → build_graph_root_agent：每個 node 一個 Agent instance，回傳 start node
+否則
+  → create_agent_class(...)()：現有單一 instructions 路徑（fallback，不 raise）
+```
+
+關鍵約束：
+- **graph 與 realtime 互斥**：graph 執行**僅 pipeline**。realtime 下 node 切換要 mid-session 換 instructions，會被 Gemini Live 1007 拒絕（native-audio）或靜默忽略（flash-live）。save 時 `editor_mode: graph` + `models.mode: realtime` 由 `routes_profiles` 回 422；runtime 誤配（env `AGENT_MODE=realtime` 蓋過）降級跑 flatten `instructions` + warning，**絕不掛電話**。
+- **edge 轉移 = SDK 原生 handoff**：function tool 回傳 target node 的 Agent instance 即觸發 handoff（`generation.py make_tool_output`）。`user_turn` 邊 → 生成 `goto_<target>` 工具，description 帶 NL condition，LLM 判斷後呼叫。`tool_result` 邊 → 包裝 node domain tool 回傳 `(result, target_agent)`（`functools.wraps` 保留參數 schema），LLM 講完結果即 handoff，v1 一律無條件。
+- **後端 validator 是唯一真相**：`runtime/graph.py validate_graph` 規則集對齊前端 `frontend/lib/agent-graph.ts validateGraph`（前端僅 UX，可被直接打 API 繞過）。改任一邊的結構規則時兩邊一起改。
+- **全域能力注入 global 層**：`global_prompt` + QA inline + services hours 組成 preamble，前置到每個 node；`transfer_to_human` 只掛在 `handoff` node（非全域）。
+- **per-node 模型**：`Agent(llm=/tts=/stt=)` 可接，v1 只留介面點（node 宣告 model spec 時 log + 用 session 模型），未實作 per-node 切換。
+
 ## 部署
 
 - LiveKit Cloud：`lk agent deploy`，`AGENT_PROFILE` env 控制預設 profile

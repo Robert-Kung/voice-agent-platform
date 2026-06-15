@@ -266,7 +266,8 @@ describe('validateGraph warnings', () => {
   it('unconditional user_turn + tool_result on same source do not warn', () => {
     const g = makeGraph({
       nodes: [
-        { id: 'start', type: 'start', title: 'S', prompt: '', tools: [], position: { x: 0, y: 0 } },
+        // domain tool present so the tool_result edge has something to wrap.
+        { id: 'start', type: 'start', title: 'S', prompt: '', tools: ['get_current_time'], position: { x: 0, y: 0 } },
         { id: 'a', type: 'prompt', title: 'A', prompt: '', tools: [], position: { x: 0, y: 0 } },
       ],
       edges: [
@@ -275,6 +276,19 @@ describe('validateGraph warnings', () => {
       ],
     });
     expect(validateGraph(g, BUILTINS).warnings).toEqual([]);
+  });
+
+  it('tool_result edge from a node with no domain tool warns (dead transition)', () => {
+    const g = makeGraph({
+      nodes: [
+        { id: 'start', type: 'start', title: 'S', prompt: '', tools: [], position: { x: 0, y: 0 } },
+        { id: 'a', type: 'prompt', title: 'A', prompt: '', tools: [], position: { x: 0, y: 0 } },
+      ],
+      edges: [{ id: 'e1', source: 'start', target: 'a', condition: '', trigger: 'tool_result' }],
+    });
+    const v = validateGraph(g, BUILTINS);
+    expect(v.valid).toBe(true);
+    expect(v.warnings.map((w) => w.code)).toContain('tool_result_no_tool');
   });
 
   it('auto-mounted tools are not dangling even though absent from config.tools', () => {

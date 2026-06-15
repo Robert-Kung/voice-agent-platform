@@ -17,7 +17,7 @@ from livekit.plugins import noise_cancellation, silero
 from livekit.plugins.turn_detector.multilingual import MultilingualModel
 from livekit.agents import metrics, MetricsCollectedEvent, AgentStateChangedEvent
 
-from agent_factory import load_profile_with_id, create_agent_class, list_profiles
+from agent_factory import load_profile_with_id, build_root_agent, list_profiles
 from runtime.providers import resolve_session_components
 
 logger = logging.getLogger("agent")
@@ -271,7 +271,10 @@ async def entrypoint(ctx: JobContext):
     # resolved AFTER the profile loads, then threaded into both the agent class
     # and the session build. No reliance on a module-global read at import time.
     agent_mode = _resolve_mode(profile)
-    PhoneAgent = create_agent_class(profile, mode=agent_mode)
+    # build_root_agent applies the graph-execution strategy gate: a graph-mode +
+    # valid + pipeline profile assembles into wired node Agents, otherwise the
+    # single-instructions agent (graph failures fall back, never drop the call).
+    root_agent = build_root_agent(profile, mode=agent_mode)
     logger.info("Session using profile: %s (%s), mode: %s", profile.get("name"), profile_name, agent_mode)
 
     # Resolve swappable model components + the selected model names (for cost).
@@ -473,7 +476,7 @@ async def entrypoint(ctx: JobContext):
 
     try:
         await session.start(
-            agent=PhoneAgent(),
+            agent=root_agent,
             room=ctx.room,
             room_options=room_io.RoomOptions(
                 audio_input=room_io.AudioInputOptions(
