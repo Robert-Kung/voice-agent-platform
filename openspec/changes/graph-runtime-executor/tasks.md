@@ -52,3 +52,11 @@
 - [x] 7.3 **棄案紀錄**：曾以 transition tool `collected_info` 參數 + system note 注入 `chat_ctx` / 旁路 `[資訊延續]不得重問` directive 嘗試帶 slot——實測被節點自身 prompt（「問齊不可略過」）壓過，且越界蓋使用者 prompt，已全數 revert，改由 7.2（帶整段對話）+ 7.4（prompt 微調）解決
 - [x] 7.4 **profile prompt 微調**（`elevator_repair_graph`）：global 拿掉「務必問齊」改為「已得知的不重問、只補缺」+ 加每次一到兩句的簡短規則（降延遲）；start 節點收斂為「只分類、不收集欄位」；emergency/normal 節點改為「沿用已知、只補缺漏」。DB 與 YAML 同步
 - [ ] 7.5 重測 live 語音 e2e（5.2）：緊急情境 → handoff 後不卡、不重問已給欄位 → 建單 → 立即轉接（人工 Try）
+
+## 8. 第二輪 code review（子 Agent，針對 history-seeding 變更）
+
+- [x] 8.1 子 Agent review commit `0904911`：核心修復正確、247 tests green；history-seeding 安全（`exclude_invalid_function_calls` 清掉 dangling `goto_*` call、instructions 走固定 ID 不外洩、重入冪等）；棄案 band-aid 已清乾淨。Verdict: safe to archive
+- [x] 8.2 **SHOULD-FIX**：`tool_result` handoff 講兩次（normal→closing 覆述工單號 + closing on_enter 又生成）。以 prompt 層解決——closing 節點改「不覆述工單號、只問是否還有其他需求」，成為獨立非冗餘的一句（守住 executor 只帶對話、prompt 管內容的邊界）
+- [x] 8.3 **fallback 文案同步**：攤平 `instructions:` 區塊（fallback-only）原仍是舊「務必問齊/不可略過」字眼，與調過的 graph prompt 不一致——逐段對齊（global brevity、start 只分類、emergency/normal 沿用已知、closing 不覆述）
+- [ ] 8.4 **殘項（defer）**：`end` 節點 on_enter 走 generate_reply 生一句廢話而非掛電話（v1 可接受，未實作 end-node hang-up）
+- [ ] 8.5 **殘項（defer）**：executor 層的 `tool_result` 進入點仍無條件 generate_reply——目前靠 prompt 避免冗餘；若未來 graph profile 變多，考慮讓 on_enter 感知「經 tool_result 進入」而抑制重複生成
