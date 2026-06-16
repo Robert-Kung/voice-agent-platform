@@ -44,3 +44,11 @@
 - [x] 6.2 **#3 nit**：runtime gate 的 `validate_graph(mode=...)` 永遠是 pipeline，加註解澄清 conflict 規則只在 save 路徑生效
 - [ ] 6.3 **#2 殘項（defer）**：node 同時有條件式 + 無條件 tool_result 出邊時，array-order 靜默選一、`ambiguous_unconditional` 不涵蓋——罕見，待真實案例
 - [ ] 6.4 **#5 殘項（defer）**：補一條顯式測試命名「user_turn + tool_result 同 node 工具 key 不衝突」的不變式（目前由 fixture 隱含覆蓋）
+
+## 7. Live QA 修復（瀏覽器 Try 實測）
+
+- [x] 7.1 **handoff 後靜默**：user_turn 轉移只回傳 target Agent（無 reply_required），新節點不主動接話、乾等來電者。非 start 節點 `on_enter` 呼叫 `session.generate_reply()`，handoff 後立即續話
+- [x] 7.2 **目標節點看不到對話（根因）**：`Agent.__init__` 對未傳 `chat_ctx` 的 agent 一律 `ChatContext.empty()`，SDK handoff **不會**自動把對話帶進新節點 → 目標節點全盲、從頭重問。修法：非 start 節點 `on_enter` 先 `await self.update_chat_ctx(self.session.history)` 把 session 累積對話灌入。職責邊界：executor 只負責把對話帶過去，**「問什麼/不重問什麼」由 profile prompt 決定**
+- [x] 7.3 **棄案紀錄**：曾以 transition tool `collected_info` 參數 + system note 注入 `chat_ctx` / 旁路 `[資訊延續]不得重問` directive 嘗試帶 slot——實測被節點自身 prompt（「問齊不可略過」）壓過，且越界蓋使用者 prompt，已全數 revert，改由 7.2（帶整段對話）+ 7.4（prompt 微調）解決
+- [x] 7.4 **profile prompt 微調**（`elevator_repair_graph`）：global 拿掉「務必問齊」改為「已得知的不重問、只補缺」+ 加每次一到兩句的簡短規則（降延遲）；start 節點收斂為「只分類、不收集欄位」；emergency/normal 節點改為「沿用已知、只補缺漏」。DB 與 YAML 同步
+- [ ] 7.5 重測 live 語音 e2e（5.2）：緊急情境 → handoff 後不卡、不重問已給欄位 → 建單 → 立即轉接（人工 Try）

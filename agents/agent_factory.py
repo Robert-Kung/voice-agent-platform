@@ -331,7 +331,11 @@ def _build_node_instructions(preamble: str, node: dict, user_edges: list[dict]) 
 
 
 def _make_transition_tool(registry: dict, target_id: str, condition: str):
-    """A user_turn handoff tool: returning the target Agent triggers the SDK handoff."""
+    """A user_turn handoff tool: returning the target Agent triggers the SDK handoff.
+
+    The target node sees the conversation so far because each node seeds the running
+    session history on enter; whether to re-ask a given field is left to the node's
+    own prompt, not enforced here."""
     cond = (condition or "").strip()
     desc = (
         f"當以下情況成立時呼叫，進入下一對話階段：{cond}"
@@ -361,8 +365,9 @@ def _wrap_domain_tool_for_handoff(tool, registry: dict, target_id: str):
 
 
 def _make_node_agent_class(node_instructions: str, node_type: str, welcome: str, tool_attrs: dict):
-    """Build an Agent subclass for one node. start nodes greet on enter (pipeline
-    only); other nodes rely on the handoff continuation to keep talking."""
+    """Build an Agent subclass for one node. start nodes greet with the welcome
+    message; other nodes auto-continue on enter so a handoff doesn't leave the
+    caller in silence waiting for the new node to speak."""
 
     class NodeAgent(Agent):
         def __init__(self) -> None:
@@ -371,6 +376,15 @@ def _make_node_agent_class(node_instructions: str, node_type: str, welcome: str,
         async def on_enter(self) -> None:
             if node_type == "start":
                 await self.session.say(welcome)
+                return
+            # Each node Agent is built with an empty chat_ctx and the SDK does NOT
+            # auto-seed it on handoff, so without this the node can't see anything the
+            # caller already said and re-asks from scratch. Carry the running session
+            # conversation in before generating.
+            await self.update_chat_ctx(self.session.history)
+            # A user_turn handoff returns only the target Agent (no reply_required), so
+            # we kick the reply ourselves or the node stays silent until the caller speaks.
+            self.session.generate_reply()
 
     for name, method in tool_attrs.items():
         setattr(NodeAgent, name, method)

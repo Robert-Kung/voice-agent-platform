@@ -19,16 +19,19 @@ human_operator:
   tool_description: 當緊急事件觸發時，或是使用者需要，客服無法解決時直接轉接真人。
 qa_mode: inline
 editor_mode: graph
+# graph 執行僅 pipeline（graph + realtime 互斥，save 時 validator 422）
+models:
+  mode: pipeline
 graph:
   schema_version: 1
-  global_prompt: '你是電梯維修電話語音客服 AI，使用繁體中文，語氣冷靜、簡潔、不閒聊。
+  global_prompt: '你是電梯維修電話語音客服 AI，使用繁體中文，語氣冷靜、簡潔、不閒聊。每次回覆控制在一到兩句，一次只問一個問題。
 
 
     【工具規則（最高優先）】
 
     未呼叫工具前，不得說已建單或已轉接；只能依工具結果回覆。
 
-    建單必填欄位：building_name、elevator_id、description、contact_phone、issue_type、urgency，務必問齊才呼叫。
+    建單必填欄位：building_name、elevator_id、description、contact_phone、issue_type、urgency。已從對話中得知的欄位一律沿用、不得重複詢問；只補問仍缺少的，到齊後才呼叫工具。
 
     description 使用來電者原話，不可改寫或摘要。
 
@@ -47,7 +50,7 @@ graph:
   - id: start
     type: start
     title: 接聽與分流
-    prompt: 判斷來電屬於哪一類：緊急事故、一般故障報修、或非報修諮詢。只問必要的釐清問題，不提供維修建議。
+    prompt: 你唯一的任務是判斷來電屬於哪一類：緊急事故、一般故障報修、或非報修諮詢。最多問一個釐清問題即可分流，不要在此收集建單欄位、不提供維修建議。
     tools: []
     position:
       x: 60
@@ -55,7 +58,7 @@ graph:
   - id: emergency
     type: prompt
     title: 緊急報修
-    prompt: 快速問齊 building_name、elevator_id、description（原話）、contact_phone，皆必填、不可略過。不需複誦確認，問齊後直接呼叫 create_maintenance_ticket（urgency=EMERGENCY）。
+    prompt: 先採用對話中已得知的欄位、不要重問；只補問仍缺少的 building_name、elevator_id、description（原話）、contact_phone。不需複誦確認，欄位到齊後立即呼叫 create_maintenance_ticket（urgency=EMERGENCY）。
     tools:
     - create_maintenance_ticket
     position:
@@ -64,7 +67,7 @@ graph:
   - id: normal
     type: prompt
     title: 一般報修
-    prompt: 蒐集必填欄位（description 用來電者原話）。複誦確認，使用者明確說「對／正確／沒錯」後，立即呼叫 create_maintenance_ticket，不可用語言代替工具呼叫。
+    prompt: 先採用對話中已得知的欄位、不要重問；只補問仍缺少的必填欄位（description 用來電者原話）。欄位到齊後簡短複誦一次，使用者說「對／正確／沒錯」即呼叫 create_maintenance_ticket，不可用語言代替工具呼叫。
     tools:
     - create_maintenance_ticket
     position:
