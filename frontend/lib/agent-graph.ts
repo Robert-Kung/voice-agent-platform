@@ -355,6 +355,16 @@ export function validateGraph(
         message: `邊 ${edge.id} 的 trigger 非法：${edge.trigger}`,
       });
     }
+    // v1 treats all tool_result transitions as unconditional, so a non-empty
+    // condition is ignored at runtime. edgeTrigger coerces undefined →
+    // user_turn, matching the backend's edge_trigger so a missing trigger with
+    // a condition does not warn. Parity: runtime/graph.py tool_result_condition.
+    if (edgeTrigger(edge) === 'tool_result' && edge.condition.trim()) {
+      warnings.push({
+        code: 'tool_result_condition',
+        message: `邊 ${edge.id} 為 tool_result 且帶 condition——v1 不支援條件式 tool_result，執行時一律當無條件轉移，condition 會被忽略`,
+      });
+    }
   }
 
   // Reachability from start (BFS) — a disconnected cycle must not pass a mere
