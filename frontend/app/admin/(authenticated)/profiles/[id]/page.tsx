@@ -77,7 +77,11 @@ export default function ProfileEditorV2Page() {
   const declaredMode: 'pipeline' | 'realtime' = useMemo(() => {
     try {
       const m = (JSON.parse(form.extraJson) as { models?: { mode?: unknown } }).models?.mode;
-      return m === 'pipeline' ? 'pipeline' : 'realtime';
+      // Mirror the backend's coercion (agent.py: str(...).strip().lower()) so a
+      // capitalized models.mode shows the same banner the runtime will honor.
+      return typeof m === 'string' && m.trim().toLowerCase() === 'pipeline'
+        ? 'pipeline'
+        : 'realtime';
     } catch {
       return 'realtime';
     }
