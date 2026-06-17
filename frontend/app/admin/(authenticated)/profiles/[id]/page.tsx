@@ -69,6 +69,24 @@ export default function ProfileEditorV2Page() {
     return (form.known.instructions ?? '').trim() !== graphToPrompt(persistedGraph).trim();
   }, [isGraphMode, form.isNew, form.profile, form.known.instructions]);
 
+  // Execution path is implied by the profile-declared mode (models.mode, default
+  // realtime). pipeline → graph runs natively; realtime → degrades to the
+  // flattened instructions (graph branches don't drive the conversation). This is
+  // the *declared* mode only — a deployment-layer AGENT_MODE env can override the
+  // actual runtime path, so copy must not assert the runtime path as certain.
+  const declaredMode: 'pipeline' | 'realtime' = useMemo(() => {
+    try {
+      const m = (JSON.parse(form.extraJson) as { models?: { mode?: unknown } }).models?.mode;
+      // Mirror the backend's coercion (agent.py: str(...).strip().lower()) so a
+      // capitalized models.mode shows the same banner the runtime will honor.
+      return typeof m === 'string' && m.trim().toLowerCase() === 'pipeline'
+        ? 'pipeline'
+        : 'realtime';
+    } catch {
+      return 'realtime';
+    }
+  }, [form.extraJson]);
+
   const needsSaveConfirm = modeChanged || overwritesHandEditedInstructions;
   const guardedSave = () => {
     if (needsSaveConfirm) setConfirmSave('save');
@@ -121,11 +139,19 @@ export default function ProfileEditorV2Page() {
         center={
           isGraphMode ? (
             <div className="flex h-full flex-col gap-3">
-              {/* Interim degradation banner until graph-runtime-executor lands */}
-              <div className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-600 dark:text-amber-400">
-                Graph 為設計來源；目前 Try / 部署仍由存檔時自動攤平的 instructions fallback
-                執行（graph 執行待 graph-runtime-executor 落地）。
-              </div>
+              {/* Execution-status banner, conditional on the profile-declared mode. */}
+              {declaredMode === 'pipeline' ? (
+                <div className="text-foreground/60 border-border bg-foreground/5 rounded-md border px-3 py-2 text-xs">
+                  此 profile 宣告 pipeline 模式：部署後 graph 由 runtime 原生執行（每個節點一個
+                  Agent，依轉移規則切換）。實際執行路徑仍可被部署層的 <code>AGENT_MODE</code> 覆蓋。
+                </div>
+              ) : (
+                <div className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-600 dark:text-amber-400">
+                  此 profile 宣告 realtime 模式：graph 的節點分支不會驅動對話——改由存檔時自動攤平的
+                  單一 instructions 執行。Graph 原生執行僅在 pipeline
+                  模式有效。實際執行路徑仍可被部署層的 <code>AGENT_MODE</code> 覆蓋。
+                </div>
+              )}
               <div className="min-h-0 flex-1">
                 <GraphCanvas
                   graph={form.known.graph!}
@@ -179,6 +205,7 @@ export default function ProfileEditorV2Page() {
       {confirmSave && (
         <SaveConfirmModal
           targetMode={form.editorMode}
+          declaredMode={declaredMode}
           modeChanged={modeChanged}
           overwritesHandEdited={overwritesHandEditedInstructions}
           onCancel={() => setConfirmSave(null)}
@@ -242,7 +269,7 @@ function EditorModeControl({ form }: { form: ReturnType<typeof useProfileForm> }
       {form.editorMode === 'graph' && (
         <span
           title="Graph 執行僅在 pipeline 部署生效。realtime 部署會 fallback 到攤平的 instructions（realtime 下 node 切換會被 Gemini Live 拒絕/忽略）。"
-          className="text-amber-600/80 dark:text-amber-400/80 rounded border border-amber-500/30 bg-amber-500/10 px-1.5 py-0.5 text-[11px] font-medium"
+          className="rounded border border-amber-500/30 bg-amber-500/10 px-1.5 py-0.5 text-[11px] font-medium text-amber-600/80 dark:text-amber-400/80"
         >
           需 pipeline 部署
         </span>
@@ -255,12 +282,14 @@ function EditorModeControl({ form }: { form: ReturnType<typeof useProfileForm> }
 
 function SaveConfirmModal({
   targetMode,
+  declaredMode,
   modeChanged,
   overwritesHandEdited,
   onConfirm,
   onCancel,
 }: {
   targetMode: 'prompt' | 'graph';
+  declaredMode: 'pipeline' | 'realtime';
   modeChanged: boolean;
   overwritesHandEdited: boolean;
   onConfirm: () => void;
@@ -296,8 +325,9 @@ function SaveConfirmModal({
         )}
         {modeChanged && targetMode === 'graph' && (
           <p className="text-foreground/50 mb-3 text-xs leading-relaxed">
-            graph-runtime-executor 落地前，Try / 部署會執行由 graph 自動攤平的 instructions
-            fallback。
+            {declaredMode === 'pipeline'
+              ? '此 profile 宣告 pipeline 模式：部署後 graph 由 runtime 原生執行。實際執行路徑仍可被部署層的 AGENT_MODE 覆蓋。'
+              : '此 profile 宣告 realtime 模式：graph 的節點分支不會驅動對話，改由自動攤平的 instructions 執行；graph 原生執行僅在 pipeline 模式有效。實際執行路徑仍可被部署層的 AGENT_MODE 覆蓋。'}
           </p>
         )}
         <div className="flex items-center justify-end gap-2">

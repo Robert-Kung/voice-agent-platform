@@ -267,7 +267,14 @@ describe('validateGraph warnings', () => {
     const g = makeGraph({
       nodes: [
         // domain tool present so the tool_result edge has something to wrap.
-        { id: 'start', type: 'start', title: 'S', prompt: '', tools: ['get_current_time'], position: { x: 0, y: 0 } },
+        {
+          id: 'start',
+          type: 'start',
+          title: 'S',
+          prompt: '',
+          tools: ['get_current_time'],
+          position: { x: 0, y: 0 },
+        },
         { id: 'a', type: 'prompt', title: 'A', prompt: '', tools: [], position: { x: 0, y: 0 } },
       ],
       edges: [
@@ -289,6 +296,77 @@ describe('validateGraph warnings', () => {
     const v = validateGraph(g, BUILTINS);
     expect(v.valid).toBe(true);
     expect(v.warnings.map((w) => w.code)).toContain('tool_result_no_tool');
+  });
+
+  // ── tool_result_condition (backend parity: runtime/graph.py) ───────
+  it('tool_result edge with a non-empty condition warns', () => {
+    const g = makeGraph({
+      nodes: [
+        {
+          id: 'start',
+          type: 'start',
+          title: 'S',
+          prompt: '',
+          tools: ['t'],
+          position: { x: 0, y: 0 },
+        },
+        { id: 'a', type: 'prompt', title: 'A', prompt: '', tools: [], position: { x: 0, y: 0 } },
+      ],
+      edges: [
+        { id: 'e1', source: 'start', target: 'a', condition: '建單成功', trigger: 'tool_result' },
+      ],
+    });
+    expect(validateGraph(g, BUILTINS).warnings.map((w) => w.code)).toContain(
+      'tool_result_condition'
+    );
+  });
+
+  it('tool_result edge with an empty condition does not warn', () => {
+    const g = makeGraph({
+      nodes: [
+        {
+          id: 'start',
+          type: 'start',
+          title: 'S',
+          prompt: '',
+          tools: ['t'],
+          position: { x: 0, y: 0 },
+        },
+        { id: 'a', type: 'prompt', title: 'A', prompt: '', tools: [], position: { x: 0, y: 0 } },
+      ],
+      edges: [{ id: 'e1', source: 'start', target: 'a', condition: '   ', trigger: 'tool_result' }],
+    });
+    expect(validateGraph(g, BUILTINS).warnings.map((w) => w.code)).not.toContain(
+      'tool_result_condition'
+    );
+  });
+
+  it('missing trigger (coerced to user_turn) with a condition does not warn', () => {
+    const g = makeGraph({
+      nodes: [
+        { id: 'start', type: 'start', title: 'S', prompt: '', tools: [], position: { x: 0, y: 0 } },
+        { id: 'a', type: 'prompt', title: 'A', prompt: '', tools: [], position: { x: 0, y: 0 } },
+      ],
+      edges: [{ id: 'e1', source: 'start', target: 'a', condition: '建單成功' }],
+    });
+    expect(validateGraph(g, BUILTINS).warnings.map((w) => w.code)).not.toContain(
+      'tool_result_condition'
+    );
+  });
+
+  it('user_turn edge with a condition does not warn', () => {
+    const g = makeGraph({
+      nodes: [
+        { id: 'start', type: 'start', title: 'S', prompt: '', tools: [], position: { x: 0, y: 0 } },
+        { id: 'a', type: 'prompt', title: 'A', prompt: '', tools: [], position: { x: 0, y: 0 } },
+      ],
+      edges: [
+        { id: 'e1', source: 'start', target: 'a', condition: '使用者要報修', trigger: 'user_turn' },
+      ],
+    });
+    expect(validateGraph(g, BUILTINS).warnings.map((w) => w.code)).not.toContain(
+      'tool_result_condition'
+    );
   });
 
   it('auto-mounted tools are not dangling even though absent from config.tools', () => {
