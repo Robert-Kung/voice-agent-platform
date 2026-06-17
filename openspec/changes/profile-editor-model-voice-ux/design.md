@@ -38,6 +38,8 @@ Realtime tab 的 LLM 只給 Gemini Live 變體（封裝後），不提供非 Gem
 ### D4. graph×realtime 互斥：UI 主動警告 + 後端 422 為準
 `editor_mode: graph` 且選 Realtime tab 時，前端就地顯示 blocking-intent 警告（graph 僅 pipeline）。**不**在前端硬擋存檔——後端 422 才是唯一真相（前端可被繞過）。422 回來時把錯誤呈現為「graph×realtime 互斥」而非泛用 save error。這延續既有「前端 validateGraph 僅 UX」的職責邊界。
 
+**與已 ship 的 `graph-editor-execution-status-fix` banner 的對齊（re-review 2026-06-17）**：該 fix 的中央 banner 在 graph 模式依 `models.mode` 條件化——pipeline 顯示原生執行、realtime 顯示「降級攤平」。但 graph profile **存不了 realtime**（422），所以 in-editor 選 Realtime 的真相是「不可存」而非「會降級」。本 change 落地引擎 tabs 後，graph + realtime 的 in-editor 狀態由本 D4 的 exclusivity 警告**取代**（非疊加）那條降級 banner；降級文案只保留給「部署層 `AGENT_MODE` env 覆蓋一個已存成 pipeline 的 graph profile」這條 deploy-time 路徑。spec 對齊：本 change 補一份 `graph-editor-ux` 的 MODIFIED delta 把這個優先序寫進「Deployment-aware execution status」scenario，owner 收斂到本 capability 的「Graph and realtime exclusivity feedback」。
+
 ### D5 / D6 → 已拆至 `graph-editor-execution-status-fix`（autoplan D-T3）
 過期 banner（依 profile 宣告 mode 條件化、結果優先文案、註明 `AGENT_MODE` 可覆蓋）與 `validateGraph` 的 `tool_result_condition` parity warning 屬純 hygiene、與本 feature 無耦合，已切到獨立 change 先 ship。本 change 不再含這兩項。
 

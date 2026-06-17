@@ -47,12 +47,17 @@ The UI SHALL present the engine mode as two tabs — **Realtime (Speech-to-Speec
 
 ### Requirement: Engine-mode change is a strategy change requiring confirmation
 
-Because `models.mode` selects the runtime engine (cost profile, latency profile, and whether a graph executes natively), changing the engine mode SHALL be treated as a runtime-strategy change on save, consistent with the `editor_mode` switch. Saving a profile whose `models.mode` changed since load SHALL require an explicit confirmation stating that the save changes the live runtime engine.
+Because `models.mode` selects the runtime engine (cost profile, latency profile, and whether a graph executes natively), changing the engine mode SHALL be treated as a runtime-strategy change on save, consistent with the `editor_mode` switch. Saving a profile whose `models.mode` changed since load SHALL require an explicit confirmation stating that the save changes the live runtime engine. This confirmation SHALL reuse the existing `editor_mode` save-confirmation surface (the `SaveConfirmModal`): when both `editor_mode` and `models.mode` changed in one save, the editor SHALL present a SINGLE combined confirmation listing both strategy changes, not two stacked dialogs.
 
 #### Scenario: Mode change requires save confirmation
 
 - **WHEN** the user changes the engine mode tab and saves
 - **THEN** a confirmation is shown stating the save changes the live runtime engine (cost/latency/graph-execution), and the save proceeds only on confirm
+
+#### Scenario: Combined confirmation when both strategy switches changed
+
+- **WHEN** the user has changed both `editor_mode` and `models.mode` since load and saves
+- **THEN** a single confirmation is shown that lists both the strategy-source change (`editor_mode`) and the engine change (`models.mode`), and the save proceeds only on confirm — the user is not asked to confirm twice
 
 ### Requirement: Model-list and default source of truth
 
@@ -85,6 +90,8 @@ The Realtime tab SHALL communicate the realtime-mode constraints inline: the rea
 ### Requirement: Graph and realtime exclusivity feedback
 
 When a profile is in `editor_mode: graph`, the editor SHALL communicate that graph execution runs only in pipeline mode and SHALL prevent or clearly warn against pairing it with `models.mode: realtime` before save. The backend remains the authoritative gate (save returns 422 for `editor_mode: graph` + `models.mode: realtime`); the UI SHALL surface this constraint proactively rather than only surfacing the backend rejection.
+
+This requirement is the authoritative owner of the in-editor graph×realtime messaging: when a graph profile has `models.mode: realtime` selected in the editor, the editor SHALL show this exclusivity warning (the combination is unsavable) and SHALL NOT show the `graph-editor-ux` "Deployment-aware execution status" degradation framing — that framing is reserved for describing the deployment-layer `AGENT_MODE` env override of an already-saved (pipeline-declared) graph profile.
 
 #### Scenario: Graph profile warns on realtime mode selection
 

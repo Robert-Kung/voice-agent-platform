@@ -12,7 +12,7 @@
 - [ ] 2.1 Stack 設定元件：Realtime / Pipeline 兩 tab，選 tab 設 `models.mode`；Pipeline tab 顯示 STT/TTS/LLM provider+model selector，Realtime tab 顯示 realtime model/voice/thinking
 - [ ] 2.2 **入口（D-T2）**：header Stack summary chip 點開該面板（popover/panel），非塞右側折疊區末端
 - [ ] 2.3 Realtime 限制就地呈現：LLM 僅 Gemini Live 變體（封裝後）、known-dead 變體不可選、不提供非 Gemini realtime provider；inline 說明 `TextInputRealtimeModel` 延遲規避
-- [ ] 2.4 `models.mode` 變更視為**策略變更**：存檔前 confirm（比照 editor_mode 既有 confirm modal），文案說明改的是 runtime 引擎（成本/延遲/graph 執行）
+- [ ] 2.4 `models.mode` 變更視為**策略變更**：存檔前 confirm（沿用 editor_mode 既有 `SaveConfirmModal`），文案說明改的是 runtime 引擎（成本/延遲/graph 執行）。editor_mode 與 models.mode 同時變更時為**單一合併確認**（列出兩項變更、不疊兩個 modal）
 
 ## 3. 語音設定
 
@@ -21,7 +21,7 @@
 
 ## 4. graph×realtime 互斥回饋
 
-- [ ] 4.1 `editor_mode: graph` 且選 Realtime tab 時就地顯示 blocking-intent 警告（graph 僅 pipeline、存檔會被 422）；**不**前端硬擋存檔
+- [ ] 4.1 `editor_mode: graph` 且選 Realtime tab 時就地顯示 blocking-intent 警告（graph 僅 pipeline、存檔會被 422）；**不**前端硬擋存檔。此狀態下**取代**（非疊加）`graph-editor-execution-status-fix` 既有的降級 banner realtime 分支——in-editor realtime = 不可存，降級文案只留給部署層 `AGENT_MODE` 覆蓋情況（見本 change 的 `graph-editor-ux` MODIFIED delta）
 - [ ] 4.2 後端回 422 時把錯誤就地呈現為「graph×realtime 互斥」（engine-mode 控制附近）、保留未存編輯
 - [ ] 4.3 後端**硬性非目標**把關：不改 `validate_models_block` / runtime；前端必須符合既有契約（能被現有 validator 拒=前端 bug）。唯一後端新增是 1.3 唯讀 endpoint
 

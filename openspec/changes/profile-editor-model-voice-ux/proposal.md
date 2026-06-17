@@ -16,6 +16,9 @@ Graph 三部曲（`multi-model-runtime` / `graph-agent-builder` / `graph-runtime
 ### New Capabilities
 - `profile-editor-stack-ux`: profile 編輯器的模型 / 語音設定 UI 與 global-as-base-layer 資訊架構——引擎模式（realtime / pipeline）tab 切換（mode 變更需 confirm）、per-mode provider+model 欄位、compiled-default（標 inherited/pinned）顯示、模式限制與 graph×realtime 互斥的存檔前回饋、語音設定（realtime free-form / pipeline TTS）、互動狀態、model-list 單一真相（唯讀 endpoint）、以及 global 常駐底層 + graph 疊加層的版面呈現。讀寫既有 `models` 區塊。
 
+### Modified Capabilities
+- `graph-editor-ux`: 引擎 tabs 讓 `models.mode` 可在 UI 編輯後，graph + realtime 的 in-editor 狀態（不可存、422）與已 ship 的「Deployment-aware execution status」降級 banner 重疊。本 change 補一條 MODIFIED delta，把該 scenario 的 realtime 優先序收斂——in-editor realtime 由 `profile-editor-stack-ux` 的 exclusivity 警告接手，降級文案只留給部署層 `AGENT_MODE` env 覆蓋的 deploy-time 路徑。
+
 ## Impact
 
 - **Frontend（主要）**：
