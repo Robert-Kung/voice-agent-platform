@@ -53,7 +53,7 @@ services:
         LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET}
         AGENT_NAME: ${AGENT_NAME:-}
     ports:
-      - "3004:3000"
+      - "127.0.0.1:3004:3000"
     env_file:
       - .env
     environment:
