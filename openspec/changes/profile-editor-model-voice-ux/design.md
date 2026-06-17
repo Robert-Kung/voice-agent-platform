@@ -35,8 +35,10 @@ Graph 三部曲已 archive，runtime 端能力齊備：`multi-model-runtime` 讓
 ### D3. realtime 限制在 UI 層硬約束，後端仍是真相
 Realtime tab 的 LLM 只給 Gemini Live 變體（封裝後），不提供非 Gemini realtime provider；known-dead 變體不可選。這對齊 `model-provider-runtime`「realtime 非 Gemini 直接 reject」與 `profile-model-config` 的 Gemini Live variant allowlist。前端做就地約束純為 UX，存檔時後端 Pydantic（含 variant allowlist）仍是強制 gate。
 
-### D4. graph×realtime 互斥：UI 主動警告 + 後端 422 為準
-`editor_mode: graph` 且選 Realtime tab 時，前端就地顯示 blocking-intent 警告（graph 僅 pipeline）。**不**在前端硬擋存檔——後端 422 才是唯一真相（前端可被繞過）。422 回來時把錯誤呈現為「graph×realtime 互斥」而非泛用 save error。這延續既有「前端 validateGraph 僅 UX」的職責邊界。
+### D4. graph×realtime 互斥：editor_mode 硬性 gate 引擎選擇（決議 2026-06-17）
+`editor_mode: graph` 時，**Realtime tab 直接 disabled/locked**（inline 說明 graph 需 pipeline），realtime 在 UI 上不可達、Pipeline 是唯一可選引擎。這是**輸入層 affordance，不是前端 save-gate**——後端 422 仍是唯一真相、涵蓋 API/YAML 繞過路徑，前端不攔截 save 假驗證（延續「前端 validateGraph 僅 UX」的職責邊界）。轉 graph 時若原本是 realtime，跳 confirm 並於確認時把 `models.mode` 切成 pipeline，不留 graph+realtime 不可存狀態。422 仍會在繞過情況回來，就地呈現為「graph×realtime 互斥」而非泛用 save error。
+
+> 取捨：先前草案是「軟性警告（可選到再跳警告）」。改硬性鎖 tab，因為讓使用者選到一個必被 422 拒的組合再警告，體驗比直接鎖差；鎖 tab 屬輸入引導、不違背後端為真相。
 
 **與已 ship 的 `graph-editor-execution-status-fix` banner 的對齊（re-review 2026-06-17）**：該 fix 的中央 banner 在 graph 模式依 `models.mode` 條件化——pipeline 顯示原生執行、realtime 顯示「降級攤平」。但 graph profile **存不了 realtime**（422），所以 in-editor 選 Realtime 的真相是「不可存」而非「會降級」。本 change 落地引擎 tabs 後，graph + realtime 的 in-editor 狀態由本 D4 的 exclusivity 警告**取代**（非疊加）那條降級 banner；降級文案只保留給「部署層 `AGENT_MODE` env 覆蓋一個已存成 pipeline 的 graph profile」這條 deploy-time 路徑。spec 對齊：本 change 補一份 `graph-editor-ux` 的 MODIFIED delta 把這個優先序寫進「Deployment-aware execution status」scenario，owner 收斂到本 capability 的「Graph and realtime exclusivity feedback」。
 

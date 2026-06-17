@@ -89,19 +89,26 @@ The Realtime tab SHALL communicate the realtime-mode constraints inline: the rea
 
 ### Requirement: Graph and realtime exclusivity feedback
 
-When a profile is in `editor_mode: graph`, the editor SHALL communicate that graph execution runs only in pipeline mode and SHALL prevent or clearly warn against pairing it with `models.mode: realtime` before save. The backend remains the authoritative gate (save returns 422 for `editor_mode: graph` + `models.mode: realtime`); the UI SHALL surface this constraint proactively rather than only surfacing the backend rejection.
+Because graph execution runs only in pipeline mode, the editor SHALL gate the engine selection by `editor_mode` rather than letting the user select the invalid combination and only warning afterward. When a profile is in `editor_mode: graph`, the Realtime tab SHALL be presented as disabled/locked with an inline reason (graph execution requires pipeline deployment), so `models.mode: realtime` is not reachable through the UI while graph is active; Pipeline is the only selectable engine. This is **input affordance, not a frontend save-gate** — the backend remains the authoritative gate (save returns 422 for `editor_mode: graph` + `models.mode: realtime`) for any path that bypasses the UI (direct API / YAML), and the frontend SHALL NOT intercept the save to fake-validate.
 
-This requirement is the authoritative owner of the in-editor graph×realtime messaging: when a graph profile has `models.mode: realtime` selected in the editor, the editor SHALL show this exclusivity warning (the combination is unsavable) and SHALL NOT show the `graph-editor-ux` "Deployment-aware execution status" degradation framing — that framing is reserved for describing the deployment-layer `AGENT_MODE` env override of an already-saved (pipeline-declared) graph profile.
+When the user converts a profile that is currently `models.mode: realtime` to `graph` mode, the editor SHALL surface a confirmation that graph requires pipeline and, on confirm, switch `models.mode` to `pipeline` as part of the conversion, rather than silently producing an unsavable graph+realtime state.
 
-#### Scenario: Graph profile warns on realtime mode selection
+This requirement is the authoritative owner of the in-editor graph×realtime relationship: while `editor_mode: graph`, realtime is gated out (locked tab), and the editor SHALL NOT show the `graph-editor-ux` "Deployment-aware execution status" degradation framing for a graph profile — that framing is reserved for describing the deployment-layer `AGENT_MODE` env override of an already-saved (pipeline-declared) graph profile.
 
-- **WHEN** a profile in `editor_mode: graph` has the Realtime tab selected (`models.mode: realtime`)
-- **THEN** the editor surfaces a blocking-intent warning that graph execution requires pipeline deployment and that saving this combination will be rejected by the backend
+#### Scenario: Realtime tab locked in graph mode
 
-#### Scenario: Backend rejection surfaced clearly
+- **WHEN** a profile is in `editor_mode: graph`
+- **THEN** the Realtime engine tab is disabled/locked with an inline reason (graph requires pipeline), Pipeline is the only selectable engine, and `models.mode: realtime` cannot be selected through the UI
 
-- **WHEN** the user saves a `editor_mode: graph` + `models.mode: realtime` combination and the backend returns 422
-- **THEN** the editor presents the rejection as the graph×realtime exclusivity constraint, not a generic save error
+#### Scenario: Converting a realtime profile to graph switches to pipeline
+
+- **WHEN** the user converts a profile whose `models.mode` is `realtime` to `graph` mode and confirms
+- **THEN** `models.mode` is switched to `pipeline` as part of the conversion, so the editor never holds an unsavable `editor_mode: graph` + `models.mode: realtime` state
+
+#### Scenario: Backend rejection surfaced clearly (bypass defense)
+
+- **WHEN** a `editor_mode: graph` + `models.mode: realtime` combination nonetheless reaches save (e.g. via direct API/YAML that bypassed the locked tab) and the backend returns 422
+- **THEN** the editor presents the rejection as the graph×realtime exclusivity constraint, not a generic save error, and retains the unsaved edits
 
 ### Requirement: Voice settings panel
 

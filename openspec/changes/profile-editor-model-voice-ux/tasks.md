@@ -21,9 +21,10 @@
 
 ## 4. graph×realtime 互斥回饋
 
-- [ ] 4.1 `editor_mode: graph` 且選 Realtime tab 時就地顯示 blocking-intent 警告（graph 僅 pipeline、存檔會被 422）；**不**前端硬擋存檔。此狀態下**取代**（非疊加）`graph-editor-execution-status-fix` 既有的降級 banner realtime 分支——in-editor realtime = 不可存，降級文案只留給部署層 `AGENT_MODE` 覆蓋情況（見本 change 的 `graph-editor-ux` MODIFIED delta）
-- [ ] 4.2 後端回 422 時把錯誤就地呈現為「graph×realtime 互斥」（engine-mode 控制附近）、保留未存編輯
-- [ ] 4.3 後端**硬性非目標**把關：不改 `validate_models_block` / runtime；前端必須符合既有契約（能被現有 validator 拒=前端 bug）。唯一後端新增是 1.3 唯讀 endpoint
+- [ ] 4.1 `editor_mode: graph` 時 **Realtime tab disabled/locked**（inline 原因：graph 需 pipeline），realtime UI 不可達、Pipeline 唯一可選；屬輸入 affordance 非前端 save-gate。此狀態下 graph 模式**不顯示** `graph-editor-execution-status-fix` 的降級 banner realtime 分支——降級文案只留給部署層 `AGENT_MODE` 覆蓋（見本 change 的 `graph-editor-ux` MODIFIED delta）
+- [ ] 4.2 轉 graph 時若原本 `models.mode: realtime`：跳 confirm，確認時把 `models.mode` 切成 pipeline，不留 graph+realtime 不可存狀態
+- [ ] 4.3 後端回 422（繞過 locked tab 的 API/YAML 路徑）時就地呈現為「graph×realtime 互斥」（engine-mode 控制附近）、保留未存編輯
+- [ ] 4.4 後端**硬性非目標**把關：不改 `validate_models_block` / runtime；前端必須符合既有契約（能被現有 validator 拒=前端 bug）。唯一後端新增是 1.3 唯讀 endpoint
 
 ## 5. Global-as-base-layer IA
 
