@@ -16,5 +16,5 @@
 
 - [x] 3.1 vitest 全綠（validateGraph 新 warning 案例）
 - [x] 3.2 frontend build 通過；後端 `cd agents && uv run pytest tests/ -q` 不受影響（本 change 不動後端）
-- [ ] 3.3 瀏覽器 QA：graph 模式 banner 依 mode 正確（不再出現「待 executor 落地」）；pipeline vs realtime 文案各自正確
+- [x] 3.3 瀏覽器 QA：graph 模式 banner 依 mode 正確（不再出現「待 executor 落地」）；pipeline vs realtime 文案各自正確
 - [x] 3.4 `openspec validate graph-editor-execution-status-fix --strict` 通過
