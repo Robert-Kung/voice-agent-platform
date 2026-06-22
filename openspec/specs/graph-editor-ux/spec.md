@@ -99,8 +99,8 @@ The editor SHALL support both `prompt` and `graph` modes and SHALL allow switchi
 
 #### Scenario: Deployment-aware execution status
 
-- **WHEN** a graph-mode profile is tried or deployed
-- **THEN** the editor indicates the execution path **implied by the profile-declared mode** (`models.mode`): pipeline implies the graph executes natively (graph-runtime-executor), realtime implies degradation to the auto-regenerated flattened `instructions` — leading with the user-facing consequence (in realtime the graph branches will not drive the conversation) before the mechanism, and noting a deployment-layer `AGENT_MODE` override can change the actual runtime path. The editor SHALL NOT unconditionally claim a fallback or reference graph execution as "not yet landed", and SHALL NOT assert the actual runtime path as certain (it only knows the profile-declared mode).
+- **WHEN** a graph-mode profile is tried or deployed — necessarily declaring `models.mode: pipeline`, because the graph×realtime combination cannot be saved (the backend returns 422; the in-editor realtime-tab case is governed by "Graph and realtime exclusivity feedback" in `profile-editor-stack-ux`, NOT by this scenario)
+- **THEN** the editor indicates the graph executes natively in pipeline (graph-runtime-executor), and notes that a deployment-layer `AGENT_MODE` override can force realtime at deploy time — in which case the graph branches will not drive the conversation and execution degrades to the auto-regenerated flattened `instructions` — leading with that consequence before the mechanism. The editor SHALL NOT unconditionally claim a fallback or reference graph execution as "not yet landed", and SHALL NOT assert the actual runtime path as certain (it knows only the declared mode and that an env override can change it).
 
 ### Requirement: Graph structure validation feedback
 
