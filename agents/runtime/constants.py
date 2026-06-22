@@ -47,6 +47,34 @@ REALTIME_MODEL_ALLOWLIST = {
 # TextInputRealtimeModel architecture (design D3).
 REALTIME_LLM_PROVIDERS = {"google", "gemini"}
 
+# Compiled built-in defaults (backfill). Kept here (import-light) rather than in
+# providers.py so both the runtime resolver AND the read-only model-defaults
+# endpoint read ONE source — a hardcoded second copy is the drift bug this
+# change's source-of-truth requirement exists to prevent. These are plain dicts
+# (no plugin imports); providers.py imports them and runs them through the same
+# build path, so a profile WITHOUT a models block stays byte-for-byte identical
+# (regression: tests/test_runtime_providers.py default-resolution asserts).
+DEFAULT_PIPELINE_LLM = [
+    {"provider": "google", "model": "gemini-3.1-flash-lite", "via": VIA_INFERENCE},
+    {"provider": "openai", "model": "gpt-4.1-mini", "via": VIA_INFERENCE},
+]
+DEFAULT_PIPELINE_STT = [
+    {"provider": "elevenlabs", "model": "scribe_v2_realtime", "via": VIA_INFERENCE, "language": "zh"},
+    {"provider": "deepgram", "model": "nova-2", "via": VIA_INFERENCE, "language": "zh-TW"},
+]
+DEFAULT_PIPELINE_TTS = [
+    {"provider": "cartesia", "model": "sonic-3:9626c31c-bec5-4cca-baa8-f8ba9e84c8bc", "via": VIA_INFERENCE, "language": "zh"},
+    {"provider": "elevenlabs", "model": "eleven_multilingual_v2", "via": VIA_INFERENCE, "language": "zh"},
+]
+DEFAULT_REALTIME_STT = {"provider": "deepgram", "model": "nova-2", "via": VIA_INFERENCE, "language": "zh-TW"}
+
+# Realtime model/voice compiled defaults. A deployment-layer env override
+# (GOOGLE_REALTIME_MODEL / GOOGLE_REALTIME_VOICE) can shadow these at runtime —
+# the model-defaults endpoint surfaces them as the *compiled* default, not a
+# guaranteed runtime-effective value (see profile-editor-stack-ux spec D2).
+DEFAULT_REALTIME_MODEL = "gemini-2.5-flash-native-audio-preview-12-2025"
+DEFAULT_REALTIME_VOICE = "Kore"
+
 
 class SpecError(ValueError):
     """Raised when a model spec is malformed or names an unsupported combo."""

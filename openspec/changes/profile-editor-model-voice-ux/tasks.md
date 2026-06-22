@@ -2,45 +2,45 @@
 
 ## 1. 表單狀態與資料來源
 
-- [ ] 1.1 `useProfileForm`：補 `models` 區塊讀寫 actions（set mode / llm / stt / tts / realtime 子欄位）；`buildConfig` / `splitConfig` round-trip `models` 完整、`isDirty` 納入新欄位
-- [ ] 1.2 引擎 tab 切換 **keep-but-don't-clear**：切到另一 mode 不清除前一 mode 的 `models` 子區塊；vitest round-trip（切過去再切回，realtime 與 stt/tts/llm 子區塊都保留）
-- [ ] 1.3 **model-list / 預設單一真相（D-T1）**：實作唯讀 `GET /api/admin/model-defaults`，回傳編譯預設模型名 + 合法 provider/model/realtime 變體清單（來源對齊後端 `KNOWN_DIRECT_PROVIDERS` + realtime 變體 allowlist + pipeline 編譯預設）。此為唯一允許的後端新增（純唯讀、無 runtime 行為）
-- [ ] 1.4 前端消費該 endpoint；compiled-default helper：`models` 缺欄位時顯示編譯預設（標 **inherited** vs **pinned**），**不**寫入 config；標注部署 env（`GOOGLE_REALTIME_*`）可覆蓋——顯示值非保證 runtime-effective
+- [x] 1.1 `useProfileForm`：補 `models` 區塊讀寫 actions（set mode / llm / stt / tts / realtime 子欄位）；`buildConfig` / `splitConfig` round-trip `models` 完整、`isDirty` 納入新欄位
+- [x] 1.2 引擎 tab 切換 **keep-but-don't-clear**：切到另一 mode 不清除前一 mode 的 `models` 子區塊；vitest round-trip（切過去再切回，realtime 與 stt/tts/llm 子區塊都保留）
+- [x] 1.3 **model-list / 預設單一真相（D-T1）**：實作唯讀 `GET /api/admin/model-defaults`，回傳編譯預設模型名 + 合法 provider/model/realtime 變體清單（來源對齊後端 `KNOWN_DIRECT_PROVIDERS` + realtime 變體 allowlist + pipeline 編譯預設）。此為唯一允許的後端新增（純唯讀、無 runtime 行為）
+- [x] 1.4 前端消費該 endpoint；compiled-default helper：`models` 缺欄位時顯示編譯預設（標 **inherited** vs **pinned**），**不**寫入 config；標注部署 env（`GOOGLE_REALTIME_*`）可覆蓋——顯示值非保證 runtime-effective
 
 ## 2. 模型選擇 UI（引擎模式 tabs）
 
-- [ ] 2.1 Stack 設定元件：Realtime / Pipeline 兩 tab，選 tab 設 `models.mode`；Pipeline tab 顯示 STT/TTS/LLM provider+model selector，Realtime tab 顯示 realtime model/voice/thinking
-- [ ] 2.2 **入口（D-T2）**：header Stack summary chip 點開該面板（popover/panel），非塞右側折疊區末端
-- [ ] 2.3 Realtime 限制就地呈現：LLM 僅 Gemini Live 變體（封裝後）、known-dead 變體不可選、不提供非 Gemini realtime provider；inline 說明 `TextInputRealtimeModel` 延遲規避
-- [ ] 2.4 `models.mode` 變更視為**策略變更**：存檔前 confirm（沿用 editor_mode 既有 `SaveConfirmModal`），文案說明改的是 runtime 引擎（成本/延遲/graph 執行）。editor_mode 與 models.mode 同時變更時為**單一合併確認**（列出兩項變更、不疊兩個 modal）
+- [x] 2.1 Stack 設定元件：Realtime / Pipeline 兩 tab，選 tab 設 `models.mode`；Pipeline tab 顯示 STT/TTS/LLM provider+model selector，Realtime tab 顯示 realtime model/voice/thinking
+- [x] 2.2 **入口（D-T2）**：header Stack summary chip 點開該面板（popover/panel），非塞右側折疊區末端
+- [x] 2.3 Realtime 限制就地呈現：LLM 僅 Gemini Live 變體（封裝後）、known-dead 變體不可選、不提供非 Gemini realtime provider；inline 說明 `TextInputRealtimeModel` 延遲規避
+- [x] 2.4 `models.mode` 變更視為**策略變更**：存檔前 confirm（沿用 editor_mode 既有 `SaveConfirmModal`），文案說明改的是 runtime 引擎（成本/延遲/graph 執行）。editor_mode 與 models.mode 同時變更時為**單一合併確認**（列出兩項變更、不疊兩個 modal）
 
 ## 3. 語音設定
 
-- [ ] 3.1 語音欄位精確對應：realtime→`models.realtime.voice`（v1 free-form 輸入，可帶 suggestions）、pipeline→`models.tts`（provider/model selector，voice 編在 model id）；round-trip 正確
-- [ ] 3.2 **不**做 metadata catalog / 試聽（本 repo 無 voice catalog 來源，spec 不暗示有 metadata）；speed/language 不支援時 hide/disable
+- [x] 3.1 語音欄位精確對應：realtime→`models.realtime.voice`（v1 free-form 輸入，可帶 suggestions）、pipeline→`models.tts`（provider/model selector，voice 編在 model id）；round-trip 正確
+- [x] 3.2 **不**做 metadata catalog / 試聽（本 repo 無 voice catalog 來源，spec 不暗示有 metadata）；speed/language 不支援時 hide/disable
 
 ## 4. graph×realtime 互斥回饋
 
-- [ ] 4.1 `editor_mode: graph` 時 **Realtime tab disabled/locked**（inline 原因：graph 需 pipeline），realtime UI 不可達、Pipeline 唯一可選；屬輸入 affordance 非前端 save-gate。此狀態下 graph 模式**不顯示** `graph-editor-execution-status-fix` 的降級 banner realtime 分支——降級文案只留給部署層 `AGENT_MODE` 覆蓋（見本 change 的 `graph-editor-ux` MODIFIED delta）
-- [ ] 4.2 轉 graph 時若原本 `models.mode: realtime`：跳 confirm，確認時把 `models.mode` 切成 pipeline，不留 graph+realtime 不可存狀態
-- [ ] 4.3 後端回 422（繞過 locked tab 的 API/YAML 路徑）時就地呈現為「graph×realtime 互斥」（engine-mode 控制附近）、保留未存編輯
-- [ ] 4.4 後端**硬性非目標**把關：不改 `validate_models_block` / runtime；前端必須符合既有契約（能被現有 validator 拒=前端 bug）。唯一後端新增是 1.3 唯讀 endpoint
+- [x] 4.1 `editor_mode: graph` 時 **Realtime tab disabled/locked**（inline 原因：graph 需 pipeline），realtime UI 不可達、Pipeline 唯一可選；屬輸入 affordance 非前端 save-gate。此狀態下 graph 模式**不顯示** `graph-editor-execution-status-fix` 的降級 banner realtime 分支——降級文案只留給部署層 `AGENT_MODE` 覆蓋（見本 change 的 `graph-editor-ux` MODIFIED delta）
+- [x] 4.2 轉 graph 時若原本 `models.mode: realtime`：跳 confirm，確認時把 `models.mode` 切成 pipeline，不留 graph+realtime 不可存狀態
+- [x] 4.3 後端回 422（繞過 locked tab 的 API/YAML 路徑）時就地呈現為「graph×realtime 互斥」（engine-mode 控制附近）、保留未存編輯
+- [x] 4.4 後端**硬性非目標**把關：不改 `validate_models_block` / runtime；前端必須符合既有契約（能被現有 validator 拒=前端 bug）。唯一後端新增是 1.3 唯讀 endpoint
 
 ## 5. Global-as-base-layer IA
 
-- [ ] 5.1 用**版面 affordance**（常駐「global 適用全域」容器，或 graph canvas 包在「branching layer」框內）呈現 global 常駐底層、graph 為疊加分支層——非純文案
-- [ ] 5.2 mode 切換處說明：prompt 模式（單一全域）適合單流程 agent，graph 在同一 global 上加多分支
-- [ ] 5.3 global config（含模型/語音 stack）跨 prompt↔graph 轉換/還原不變；補測試
+- [x] 5.1 用**版面 affordance**（常駐「global 適用全域」容器，或 graph canvas 包在「branching layer」框內）呈現 global 常駐底層、graph 為疊加分支層——非純文案
+- [x] 5.2 mode 切換處說明：prompt 模式（單一全域）適合單流程 agent，graph 在同一 global 上加多分支
+- [x] 5.3 global config（含模型/語音 stack）跨 prompt↔graph 轉換/還原不變；補測試
 
 ## 6. 互動狀態
 
-- [ ] 6.1 realtime LLM 受限/disabled 可見態（非 Gemini 不提供、dead 變體不可選且有原因，非無故鎖死）
-- [ ] 6.2 新欄位 dirty 態走既有 `isDirty`；若清單改 fetch 則補 loading / fetch-error 態（不靜默渲染空 picker）
+- [x] 6.1 realtime LLM 受限/disabled 可見態（非 Gemini 不提供、dead 變體不可選且有原因，非無故鎖死）
+- [x] 6.2 新欄位 dirty 態走既有 `isDirty`；若清單改 fetch 則補 loading / fetch-error 態（不靜默渲染空 picker）
 
 ## 7. 測試與驗證
 
-- [ ] 7.1 vitest 全綠：models round-trip、tab 切換 keep-but-don't-clear、compiled-default helper、model-list 與後端常數 contract 測試（防漂移）、realtime 變體 ↔ cost rate 同步
-- [ ] 7.2 `cd agents && uv run pytest tests/ -q` 全綠（僅新增唯讀 endpoint，既有 147+ 不受影響）
-- [ ] 7.3 frontend build 通過
-- [ ] 7.4 瀏覽器 QA：Stack chip 開面板；引擎 tab 切換寫對 `models.mode` 且非破壞；Realtime 限制生效；mode 變更 confirm；語音 round-trip；graph+realtime 存檔被 422 並就地呈現；global affordance 在兩模式可見；prompt↔graph 切換不回歸
-- [ ] 7.5 `openspec validate profile-editor-model-voice-ux --strict` 通過
+- [x] 7.1 vitest 全綠：models round-trip、tab 切換 keep-but-don't-clear、compiled-default helper、model-list 與後端常數 contract 測試（防漂移）、realtime 變體 ↔ cost rate 同步
+- [x] 7.2 `cd agents && uv run pytest tests/ -q` 全綠（僅新增唯讀 endpoint，既有 147+ 不受影響）
+- [x] 7.3 frontend build 通過
+- [x] 7.4 瀏覽器 QA：Stack chip 開面板；引擎 tab 切換寫對 `models.mode` 且非破壞；Realtime 限制生效；mode 變更 confirm；語音 round-trip；graph+realtime 存檔被 422 並就地呈現；global affordance 在兩模式可見；prompt↔graph 切換不回歸
+- [x] 7.5 `openspec validate profile-editor-model-voice-ux --strict` 通過

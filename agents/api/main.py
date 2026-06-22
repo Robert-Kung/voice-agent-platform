@@ -10,6 +10,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 
 from api.routes_deploy import router as deploy_router
+from api.routes_model_defaults import router as model_defaults_router
 from api.routes_profiles import router as profiles_router
 from api.routes_sessions import router as sessions_router
 from api.routes_stats import router as stats_router
@@ -153,6 +154,7 @@ app.include_router(sessions_router)
 app.include_router(stats_router)
 app.include_router(tools_router)
 app.include_router(deploy_router)
+app.include_router(model_defaults_router)
 
 # Test router can spawn agent subprocesses on the API host. Only mount it when
 # explicitly enabled — never in production. routes_test.py also enforces this

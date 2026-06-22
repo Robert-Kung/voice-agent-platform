@@ -27,6 +27,12 @@ from livekit.plugins import deepgram, google
 from google.genai import types as genai_types
 
 from runtime.constants import (
+    DEFAULT_PIPELINE_LLM,
+    DEFAULT_PIPELINE_STT,
+    DEFAULT_PIPELINE_TTS,
+    DEFAULT_REALTIME_MODEL,
+    DEFAULT_REALTIME_STT,
+    DEFAULT_REALTIME_VOICE,
     REALTIME_LLM_PROVIDERS,
     REALTIME_MODEL_ALLOWLIST,
     SpecError,
@@ -55,23 +61,17 @@ class TextInputRealtimeModel(google.realtime.RealtimeModel):
 
 
 # ── Built-in defaults (backfill) ───────────────────────────
-# Expressed as specs and run through the same build path, so a profile WITHOUT a
-# models block produces a session byte-for-byte identical to the pre-change
-# hard-coded lists (regression test 5.4). The deepgram STT spec stays via:inference
-# here; AGENT_STT_PROVIDER=deepgram flips it to direct per-spec (see _apply_stt_override).
-_DEFAULT_PIPELINE_LLM = [
-    {"provider": "google", "model": "gemini-3.1-flash-lite", "via": VIA_INFERENCE},
-    {"provider": "openai", "model": "gpt-4.1-mini", "via": VIA_INFERENCE},
-]
-_DEFAULT_PIPELINE_STT = [
-    {"provider": "elevenlabs", "model": "scribe_v2_realtime", "via": VIA_INFERENCE, "language": "zh"},
-    {"provider": "deepgram", "model": "nova-2", "via": VIA_INFERENCE, "language": "zh-TW"},
-]
-_DEFAULT_PIPELINE_TTS = [
-    {"provider": "cartesia", "model": "sonic-3:9626c31c-bec5-4cca-baa8-f8ba9e84c8bc", "via": VIA_INFERENCE, "language": "zh"},
-    {"provider": "elevenlabs", "model": "eleven_multilingual_v2", "via": VIA_INFERENCE, "language": "zh"},
-]
-_DEFAULT_REALTIME_STT = {"provider": "deepgram", "model": "nova-2", "via": VIA_INFERENCE, "language": "zh-TW"}
+# Default specs now live in runtime.constants (import-light, single source shared
+# with the model-defaults endpoint). Local aliases keep the call sites below
+# unchanged; they're expressed as specs and run through the same build path, so a
+# profile WITHOUT a models block produces a session byte-for-byte identical to the
+# pre-change behavior (regression: tests/test_runtime_providers.py). The deepgram
+# STT spec stays via:inference here; AGENT_STT_PROVIDER=deepgram flips it to direct
+# per-spec (see _apply_stt_override).
+_DEFAULT_PIPELINE_LLM = DEFAULT_PIPELINE_LLM
+_DEFAULT_PIPELINE_STT = DEFAULT_PIPELINE_STT
+_DEFAULT_PIPELINE_TTS = DEFAULT_PIPELINE_TTS
+_DEFAULT_REALTIME_STT = DEFAULT_REALTIME_STT
 
 
 def _model_id(spec: dict) -> str:
@@ -160,7 +160,7 @@ def build_realtime_llm(realtime: dict):
         )
 
     model = realtime.get("model") or os.environ.get(
-        "GOOGLE_REALTIME_MODEL", "gemini-2.5-flash-native-audio-preview-12-2025"
+        "GOOGLE_REALTIME_MODEL", DEFAULT_REALTIME_MODEL
     )
     if model not in REALTIME_MODEL_ALLOWLIST:
         # Don't hard-fail the env escape hatch, but make a bad profile-pinned
@@ -170,7 +170,7 @@ def build_realtime_llm(realtime: dict):
             "proceeding but this variant may 1007 mid-session.",
             model, sorted(REALTIME_MODEL_ALLOWLIST),
         )
-    voice = realtime.get("voice") or os.environ.get("GOOGLE_REALTIME_VOICE", "Kore")
+    voice = realtime.get("voice") or os.environ.get("GOOGLE_REALTIME_VOICE", DEFAULT_REALTIME_VOICE)
     thinking_budget = realtime.get("thinking_budget", 0)
 
     logger.info("Realtime mode: model=%s, voice=%s, thinking_budget=%s", model, voice, thinking_budget)

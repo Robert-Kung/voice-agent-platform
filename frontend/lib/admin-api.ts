@@ -7,6 +7,7 @@
 //
 // Backend FastAPI URL is configured server-side via ADMIN_API_URL — see
 // frontend/app/api/admin-proxy/[...path]/route.ts.
+import type { ModelCatalog } from './model-catalog';
 
 const API_BASE = '/api/admin-proxy';
 
@@ -153,6 +154,12 @@ export const profilesApi = {
 
 export const toolsApi = {
   list: () => request<{ tools: string[] }>('/api/tools').then((r) => r.tools),
+};
+
+// ── Model defaults (read-only source of truth) ─────────────
+
+export const modelDefaultsApi = {
+  get: () => request<ModelCatalog>('/api/model-defaults'),
 };
 
 // ── Sessions ───────────────────────────────────────────────

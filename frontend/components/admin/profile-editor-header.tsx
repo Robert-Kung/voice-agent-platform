@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
-import { ArrowLeft, Info, SlidersHorizontal } from 'lucide-react';
+import { ArrowLeft, Layers, SlidersHorizontal } from 'lucide-react';
 
 interface ProfileEditorHeaderProps {
   displayName: string;
@@ -17,6 +17,10 @@ interface ProfileEditorHeaderProps {
   onSaveAndTry?: () => void;
   onPanelToggle?: () => void;
   modeControl?: React.ReactNode;
+  /** Short profile-declared stack summary (e.g. "Realtime · Gemini Live"). */
+  stackSummary?: string;
+  /** Open the model/voice stack settings panel (D7 — chip is the entry point). */
+  onStackClick?: () => void;
 }
 
 /**
@@ -36,6 +40,8 @@ export function ProfileEditorHeader({
   onSaveAndTry,
   onPanelToggle,
   modeControl,
+  stackSummary,
+  onStackClick,
 }: ProfileEditorHeaderProps) {
   const [showConfirm, setShowConfirm] = useState(false);
 
@@ -66,15 +72,15 @@ export function ProfileEditorHeader({
       {/* Center: mode control + Stack chips */}
       {modeControl}
       <div className="hidden items-center gap-2 md:flex">
-        <span className="bg-foreground/5 border-border text-foreground/60 inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-[11px] whitespace-nowrap">
-          Stack: deployment-defined
-          <span
-            className="text-foreground/40 inline-flex"
-            title="Stack (pipeline/realtime, LLM/STT/TTS) 由部署 env 決定，Profile 不可改"
-          >
-            <Info size={12} />
-          </span>
-        </span>
+        <button
+          type="button"
+          onClick={onStackClick}
+          title="開啟模型 / 語音 stack 設定"
+          className="bg-foreground/5 border-border text-foreground/70 hover:bg-foreground/10 hover:text-foreground inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[11px] whitespace-nowrap transition-colors"
+        >
+          <Layers size={12} />
+          {stackSummary || 'Stack'}
+        </button>
         {language && (
           <span className="bg-foreground/5 border-border text-foreground/60 rounded-full border px-2.5 py-0.5 text-[11px] whitespace-nowrap">
             {language}

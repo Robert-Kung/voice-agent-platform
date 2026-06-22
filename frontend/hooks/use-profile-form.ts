@@ -18,6 +18,7 @@ import {
   prepareGraphSave,
   promptToGraph,
 } from '@/lib/agent-graph';
+import type { ModelMode, ModelSpec, ModelsConfig, RealtimeBlock } from '@/lib/model-catalog';
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -81,6 +82,7 @@ export interface KnownConfig {
   tools?: ToolEntry[];
   graph?: AgentGraph;
   editor_mode?: EditorMode;
+  models?: ModelsConfig;
 }
 
 // ── Constants ──────────────────────────────────────────────────────
@@ -102,6 +104,7 @@ export const KNOWN_KEYS = [
   'tools',
   'graph',
   'editor_mode',
+  'models',
 ] as const;
 
 export const LANGUAGES = [
@@ -219,13 +222,44 @@ export function normalizeKnownGraph(known: KnownConfig): KnownConfig {
   return out;
 }
 
+// A model spec carries no pinned intent unless it names a provider or model.
+function specHasValue(spec: ModelSpec | ModelSpec[] | undefined): boolean {
+  const s = Array.isArray(spec) ? spec[0] : spec;
+  if (!s) return false;
+  return Boolean((s.provider && s.provider.trim()) || (s.model && s.model.trim()));
+}
+
+// Drop empty sub-blocks so a `models` block that the user opened but never pinned
+// isn't persisted as noise — keeping the runtime's "未宣告即 fallback" contract
+// (design D2). Returns undefined when nothing meaningful remains.
+export function pruneModels(models: ModelsConfig | undefined): ModelsConfig | undefined {
+  if (!models) return undefined;
+  const out: ModelsConfig = {};
+  if (models.mode === 'pipeline' || models.mode === 'realtime') out.mode = models.mode;
+  for (const kind of ['llm', 'stt', 'tts'] as const) {
+    if (specHasValue(models[kind])) out[kind] = models[kind];
+  }
+  if (models.realtime) {
+    const rt: RealtimeBlock = {};
+    const { model, voice, provider, thinking_budget, stt } = models.realtime;
+    if (model && model.trim()) rt.model = model;
+    if (voice && voice.trim()) rt.voice = voice;
+    if (provider && provider.trim()) rt.provider = provider;
+    if (typeof thinking_budget === 'number') rt.thinking_budget = thinking_budget;
+    if (specHasValue(stt)) rt.stt = stt;
+    if (Object.keys(rt).length > 0) out.realtime = rt;
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
 export function buildConfig(
   known: KnownConfig,
   extra: Record<string, unknown>
 ): Record<string, unknown> {
   const out: Record<string, unknown> = { ...extra };
   for (const k of KNOWN_KEYS) {
-    const v = known[k];
+    let v: unknown = known[k];
+    if (k === 'models') v = pruneModels(known.models);
     if (v === undefined || v === '' || (Array.isArray(v) && v.length === 0)) continue;
     out[k] = v;
   }
@@ -283,6 +317,13 @@ export interface UseProfileFormReturn {
   savedEditorMode: EditorMode;
   setEditorMode: (mode: EditorMode) => void;
   convertToGraph: () => void;
+  modelsMode: ModelMode;
+  savedModelMode: ModelMode;
+  setModelMode: (mode: ModelMode) => void;
+  updateModelSpec: (kind: 'llm' | 'stt' | 'tts', patch: Partial<ModelSpec>) => void;
+  updateRealtime: (patch: Partial<RealtimeBlock>) => void;
+  graphRealtimeConflict: boolean;
+  clearGraphRealtimeConflict: () => void;
   updateGlobalPrompt: (value: string) => void;
   addNode: (type: Exclude<GraphNodeType, 'start'>) => void;
   removeNode: (id: string) => void;
@@ -315,6 +356,11 @@ export function useProfileForm(): UseProfileFormReturn {
   const [saving, setSaving] = useState(false);
   const [trying, setTrying] = useState(false);
   const [initialSnapshot, setInitialSnapshot] = useState<string>('');
+  // Set when a save is rejected by the backend graph×realtime 422 (reachable only
+  // via API/YAML bypass of the locked Realtime tab). Surfaced near the engine-mode
+  // control as the exclusivity constraint, not a generic error (spec task 4.3).
+  const [graphRealtimeConflict, setGraphRealtimeConflict] = useState(false);
+  const clearGraphRealtimeConflict = useCallback(() => setGraphRealtimeConflict(false), []);
 
   const currentSnapshot = useMemo(
     () => JSON.stringify({ name, displayName, known, extraJson }),
@@ -551,16 +597,62 @@ export function useProfileForm(): UseProfileFormReturn {
     setKnown((prev) => (prev.graph ? { ...prev, graph: updater(prev.graph) } : prev));
   }, []);
 
+  // Graph executes only in pipeline (realtime rejects mid-session node swaps), so
+  // switching into graph coerces a realtime models.mode to pipeline — never leaving
+  // the unsavable graph+realtime state (spec D4 / task 4.2). The page surfaces the
+  // confirmation before calling this.
   const setEditorMode = useCallback((mode: EditorMode) => {
-    setKnown((prev) => ({ ...prev, editor_mode: mode }));
+    setKnown((prev) => {
+      if (mode === 'graph' && prev.models?.mode === 'realtime') {
+        return { ...prev, editor_mode: mode, models: { ...prev.models, mode: 'pipeline' } };
+      }
+      return { ...prev, editor_mode: mode };
+    });
   }, []);
 
   const convertToGraph = useCallback(() => {
+    setKnown((prev) => {
+      const models =
+        prev.models?.mode === 'realtime'
+          ? { ...prev.models, mode: 'pipeline' as const }
+          : prev.models;
+      return {
+        ...prev,
+        // A previously converted profile keeps its graph; conversion only happens once.
+        graph: prev.graph ?? promptToGraph(prev),
+        editor_mode: 'graph',
+        ...(models ? { models } : {}),
+      };
+    });
+  }, []);
+
+  // ── Models (engine/voice stack) actions ──────────────────────────
+  // Selecting a tab pins models.mode (an explicit engine choice). Editing a spec
+  // field pins only that spec; inactive sub-blocks are never cleared on a mode
+  // switch (keep-but-don't-clear, task 1.2). Inherited compiled defaults are shown
+  // by the UI but not written here (design D2).
+  const setModelMode = useCallback((mode: ModelMode) => {
+    setKnown((prev) => ({ ...prev, models: { ...(prev.models || {}), mode } }));
+  }, []);
+
+  const updateModelSpec = useCallback((kind: 'llm' | 'stt' | 'tts', patch: Partial<ModelSpec>) => {
+    setKnown((prev) => {
+      const models = { ...(prev.models || {}) };
+      const existing = models[kind];
+      // Preserve a fallback list's tail: edit the primary spec, keep the rest.
+      if (Array.isArray(existing)) {
+        models[kind] = [{ ...(existing[0] ?? {}), ...patch }, ...existing.slice(1)];
+      } else {
+        models[kind] = { ...(existing ?? {}), ...patch };
+      }
+      return { ...prev, models };
+    });
+  }, []);
+
+  const updateRealtime = useCallback((patch: Partial<RealtimeBlock>) => {
     setKnown((prev) => ({
       ...prev,
-      // A previously converted profile keeps its graph; conversion only happens once.
-      graph: prev.graph ?? promptToGraph(prev),
-      editor_mode: 'graph',
+      models: { ...(prev.models || {}), realtime: { ...(prev.models?.realtime || {}), ...patch } },
     }));
   }, []);
 
@@ -710,6 +802,7 @@ export function useProfileForm(): UseProfileFormReturn {
 
     const finalConfig = buildConfig(knownToSave, extraObj);
 
+    setGraphRealtimeConflict(false);
     setSaving(true);
     try {
       if (isNew) {
@@ -744,7 +837,16 @@ export function useProfileForm(): UseProfileFormReturn {
         toast.success('Profile 已儲存', { duration: 3000 });
       }
     } catch (e) {
-      toast.error(`儲存失敗: ${(e as Error).message}`);
+      const msg = (e as Error).message;
+      if (msg.includes('graph_realtime_conflict')) {
+        // Surfaced in-context near the engine-mode control; unsaved edits retained.
+        setGraphRealtimeConflict(true);
+        toast.error(
+          'graph × realtime 互斥：graph 執行僅支援 pipeline，請改回 Pipeline 引擎後再存。'
+        );
+      } else {
+        toast.error(`儲存失敗: ${msg}`);
+      }
       return false;
     } finally {
       setSaving(false);
@@ -791,6 +893,18 @@ export function useProfileForm(): UseProfileFormReturn {
     return persisted === 'graph' ? 'graph' : 'prompt';
   }, [profile]);
 
+  // Effective engine mode: an absent/invalid models.mode resolves to the runtime
+  // default (realtime), mirroring agent.py's coercion. models.mode is the runtime
+  // engine selector (cost/latency/graph-execution), so saving a change to it is a
+  // strategy change gated by the same confirm as editor_mode (spec task 2.4).
+  const modelsMode: ModelMode = known.models?.mode === 'pipeline' ? 'pipeline' : 'realtime';
+
+  const savedModelMode: ModelMode = useMemo(() => {
+    const persisted = (profile?.config as { models?: { mode?: unknown } } | undefined)?.models
+      ?.mode;
+    return persisted === 'pipeline' ? 'pipeline' : 'realtime';
+  }, [profile]);
+
   return {
     profile,
     loading,
@@ -832,6 +946,13 @@ export function useProfileForm(): UseProfileFormReturn {
     savedEditorMode,
     setEditorMode,
     convertToGraph,
+    modelsMode,
+    savedModelMode,
+    setModelMode,
+    updateModelSpec,
+    updateRealtime,
+    graphRealtimeConflict,
+    clearGraphRealtimeConflict,
     updateGlobalPrompt,
     addNode,
     removeNode,

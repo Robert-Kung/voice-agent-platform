@@ -1,0 +1,19 @@
+{
+  "_comment": "Mirror of the authoritative backend model constants (runtime.constants + db.cost, surfaced by api/routes_model_defaults.build_model_catalog). Checked from BOTH sides: pytest (tests/test_model_defaults.py) asserts the backend matches this; vitest (model-catalog.test.ts) asserts FALLBACK_MODEL_CATALOG matches this. Drift in either direction fails a test. Update this file whenever the backend constants change.",
+  "direct_providers": ["deepgram", "google"],
+  "pipeline": {
+    "defaults": {
+      "llm": { "provider": "google", "model": "gemini-3.1-flash-lite" },
+      "stt": { "provider": "elevenlabs", "model": "scribe_v2_realtime" },
+      "tts": { "provider": "cartesia", "model": "sonic-3:9626c31c-bec5-4cca-baa8-f8ba9e84c8bc" }
+    }
+  },
+  "realtime": {
+    "llm_providers": ["gemini", "google"],
+    "model_allowlist": ["gemini-2.5-flash-native-audio-preview-12-2025"],
+    "defaults": {
+      "model": "gemini-2.5-flash-native-audio-preview-12-2025",
+      "voice": "Kore"
+    }
+  }
+}
