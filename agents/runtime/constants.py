@@ -76,6 +76,101 @@ DEFAULT_REALTIME_MODEL = "gemini-2.5-flash-native-audio-preview-12-2025"
 DEFAULT_REALTIME_VOICE = "Kore"
 
 
+# ── LiveKit Inference catalog (curated, import-light) ──────
+# The authoritative set of pipeline provider/models the editor offers. Verified
+# against the installed livekit-agents 1.5.2 SDK accepted set (the `*Models`
+# Literal types in inference/{llm,stt,tts}.py); the namespace is `provider/model`.
+# This is the SOURCE OF TRUTH for the catalog — routes_model_defaults reflects it
+# and cost (db/cost.py) ANNOTATES it with a priced flag (do NOT derive the catalog
+# from cost keys; that can't express unpriced-but-runnable models).
+# Plain dicts only — no plugin imports (the FastAPI process imports this on save).
+# `google/gemini-3.1-flash-lite` is the current shipping default; kept here as a
+# known-good extra though it's dropped from the SDK 1.5.2 Literal (str is accepted).
+MODEL_CATALOG: dict[str, dict[str, list[str]]] = {
+    "llm": {
+        "openai": [
+            "gpt-4o", "gpt-4o-mini", "gpt-4.1", "gpt-4.1-mini", "gpt-4.1-nano",
+            "gpt-5", "gpt-5-mini", "gpt-5-nano", "gpt-5.1", "gpt-5.1-chat-latest",
+            "gpt-5.2", "gpt-5.2-chat-latest", "gpt-5.3-chat-latest", "gpt-5.4",
+            "gpt-oss-120b",
+        ],
+        "google": [
+            "gemini-3-pro", "gemini-3-flash", "gemini-2.5-pro", "gemini-2.5-flash",
+            "gemini-2.5-flash-lite", "gemini-3.1-flash-lite",
+        ],
+        "moonshotai": ["kimi-k2-instruct"],
+        "deepseek-ai": ["deepseek-v3", "deepseek-v3.2"],
+    },
+    "stt": {
+        "deepgram": [
+            "nova-3", "nova-3-medical", "nova-2", "nova-2-medical",
+            "nova-2-conversationalai", "nova-2-phonecall", "flux-general",
+            "flux-general-en",
+        ],
+        "cartesia": ["ink-whisper"],
+        "assemblyai": [
+            "universal-streaming", "universal-streaming-multilingual", "u3-rt-pro",
+        ],
+        "elevenlabs": ["scribe_v2_realtime"],
+    },
+    "tts": {
+        "cartesia": ["sonic-3", "sonic-2", "sonic-turbo", "sonic"],
+        "deepgram": ["aura", "aura-2"],
+        "elevenlabs": [
+            "eleven_flash_v2", "eleven_flash_v2_5", "eleven_turbo_v2",
+            "eleven_turbo_v2_5", "eleven_multilingual_v2",
+        ],
+        "rime": ["arcana", "mistv2"],
+        "inworld": [
+            "inworld-tts-1.5-max", "inworld-tts-1.5-mini", "inworld-tts-1-max",
+            "inworld-tts-1",
+        ],
+    },
+}
+
+# Per-provider suggested TTS voices (docs.livekit.io/agents/models/tts). `id` is
+# the bare value for the inference.TTS `voice=` kwarg; a free-form entry in the UI
+# covers custom/cloned ids. LiveKit also documents these as `provider/model:id`.
+SUGGESTED_VOICES: dict[str, list[dict[str, str]]] = {
+    "cartesia": [
+        {"id": "a167e0f3-df7e-4d52-a9c3-f949145efdab", "label": "Blake — Energetic American adult male"},
+        {"id": "5c5ad5e7-1020-476b-8b91-fdcbe9cc313c", "label": "Daniela — Calm, trusting Mexican female"},
+        {"id": "9626c31c-bec5-4cca-baa8-f8ba9e84c8bc", "label": "Jacqueline — Confident, young American female"},
+        {"id": "f31cc6a7-c1e8-4764-980c-60a361443dd1", "label": "Robyn — Neutral, mature Australian female"},
+    ],
+    "deepgram": [
+        {"id": "apollo", "label": "Apollo — Comfortable, casual male"},
+        {"id": "athena", "label": "Athena — Smooth, professional female"},
+        {"id": "odysseus", "label": "Odysseus — Calm, professional male"},
+        {"id": "theia", "label": "Theia — Expressive, polite female"},
+    ],
+    "elevenlabs": [
+        {"id": "Xb7hH8MSUJpSbSDYk0k2", "label": "Alice — Clear, friendly British woman"},
+        {"id": "iP95p4xoKVk53GoZ742B", "label": "Chris — Natural, real American male"},
+        {"id": "cjVigY5qzO86Huf0OWal", "label": "Eric — Smooth tenor Mexican male"},
+        {"id": "cgSgspJ2msm6clMCkdW9", "label": "Jessica — Young, playful American female"},
+    ],
+    "rime": [
+        {"id": "astra", "label": "Astra — Chipper, upbeat American female"},
+        {"id": "celeste", "label": "Celeste — Chill Gen-Z American female"},
+        {"id": "luna", "label": "Luna — Chill but excitable American female"},
+        {"id": "ursa", "label": "Ursa — Young, emo American male"},
+    ],
+    "inworld": [
+        {"id": "Ashley", "label": "Ashley — Warm, natural American female"},
+        {"id": "Diego", "label": "Diego — Soothing, gentle Mexican male"},
+        {"id": "Edward", "label": "Edward — Fast-talking, emphatic American male"},
+        {"id": "Olivia", "label": "Olivia — Upbeat, friendly British female"},
+    ],
+}
+
+# (kind, provider) pairs the runtime can build over a DIRECT SDK connection.
+# Single source consumed by normalize_spec (save-time reject) AND providers.build_*
+# (build-time dispatch); a test asserts the two agree. Adding a pair means wiring
+# the matching branch in providers.py + carrying its plugin dependency.
+DIRECT_BUILDABLE: set[tuple[str, str]] = {("stt", "deepgram"), ("llm", "google")}
+
+
 class SpecError(ValueError):
     """Raised when a model spec is malformed or names an unsupported combo."""
 
@@ -106,27 +201,24 @@ def normalize_spec(kind: str, spec: dict) -> dict:
         raise SpecError(f"{kind} spec has invalid via '{via}', expected one of {VALID_VIA}")
     # Kind-aware direct support — must match exactly what providers.build_* can
     # build, or a profile would pass save-time validation then crash at session
-    # start (no FallbackAdapter net on a SIP call). Only deepgram STT is a direct
-    # pipeline component; google-direct is realtime-only (validated separately).
-    if via == VIA_DIRECT:
-        if kind == "stt":
-            if provider != "deepgram":
-                raise SpecError(
-                    f"stt spec: via:direct is only supported for deepgram, not '{provider}'; use via:inference"
-                )
-        else:
-            raise SpecError(
-                f"{kind} spec: via:direct is not supported (only deepgram STT uses direct in the "
-                f"pipeline; realtime google is configured under models.realtime); use via:inference"
-            )
+    # start (no FallbackAdapter net on a SIP call). The DIRECT_BUILDABLE matrix is
+    # the single source shared with providers.py (test asserts they agree):
+    # (stt, deepgram) and (llm, google). tts via:direct stays unsupported in v1.
+    if via == VIA_DIRECT and (kind, provider) not in DIRECT_BUILDABLE:
+        buildable = sorted(f"{k}:{p}" for k, p in DIRECT_BUILDABLE)
+        raise SpecError(
+            f"{kind} spec: via:direct is not supported for '{provider}' "
+            f"(direct-buildable: {buildable}); use via:inference"
+        )
 
     options = spec.get("options") or {}
     if not isinstance(options, dict):
         raise SpecError(f"{kind} spec 'options' must be a mapping")
     # Reserved keys are passed as explicit kwargs by the builders; allowing them
     # inside options would raise a duplicate-kwarg TypeError at build time (past
-    # save-time validation). Reject them up front.
-    reserved = {"model", "provider", "via", "language"} & set(options)
+    # save-time validation). Reject them up front. `voice` is reserved because
+    # _build_one_tts now passes models.tts.voice as an explicit kwarg.
+    reserved = {"model", "provider", "via", "language", "voice"} & set(options)
     if reserved:
         raise SpecError(f"{kind} spec 'options' may not contain reserved keys {sorted(reserved)}")
 
@@ -140,6 +232,13 @@ def normalize_spec(kind: str, spec: dict) -> dict:
     language = spec.get("language")
     if language:
         out["language"] = language
+    # tts voice is a first-class field (separate from the model id) passed to
+    # inference.TTS(voice=). Carry it through when present; absent → model-id-only.
+    voice = spec.get("voice")
+    if voice is not None:
+        if not isinstance(voice, str):
+            raise SpecError(f"{kind} spec 'voice' must be a string")
+        out["voice"] = voice
     return out
 
 

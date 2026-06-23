@@ -7,6 +7,7 @@ misprices).
 """
 
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -82,6 +83,87 @@ def test_catalog_matches_shared_frontend_fixture():
         want = mirror["pipeline"]["defaults"][kind]
         assert got["provider"] == want["provider"]
         assert got["model"] == want["model"]
+    # Catalog structure parity (provider/model lists; priced flag is computed,
+    # not mirrored — checked in test_priced_flag_is_consistent).
+    assert cat["direct_buildable"] == mirror["direct_buildable"]
+    for kind in ("llm", "stt", "tts"):
+        got_struct = {
+            p: [e["model"] for e in entries]
+            for p, entries in cat["pipeline"]["catalog"][kind].items()
+        }
+        assert got_struct == mirror["pipeline"]["catalog"][kind], f"{kind} catalog drift"
+    assert cat["pipeline"]["voices"] == mirror["pipeline"]["voices"]
+
+
+def test_priced_flag_is_consistent():
+    """LLM priced flag = EXACT rate-key membership (model-granular); STT/TTS =
+    provider membership (provider-granular, design D7). Exact, NOT the fuzzy cost
+    matcher: a shorter key (gpt-4.1) must not falsely flag a distinct model
+    (gpt-4.1-nano) as priced (review F-nano)."""
+    from db.cost import LLM_RATES, STT_RATES, TTS_RATES, _match_llm_rate
+
+    cat = build_model_catalog()["pipeline"]["catalog"]
+    for provider, entries in cat["llm"].items():
+        for e in entries:
+            key = f"{provider}/{e['model']}"
+            assert e["priced"] == (key in LLM_RATES), f"llm priced drift: {key}"
+            # Cross-rate guard: a priced model must resolve to ITS OWN rate, never
+            # a different model's via substring fuzz.
+            if e["priced"]:
+                assert _match_llm_rate(key) == LLM_RATES[key], f"llm cross-rate: {key}"
+    for provider, entries in cat["stt"].items():
+        for e in entries:
+            assert e["priced"] == (provider in STT_RATES), f"stt priced drift: {provider}/{e}"
+    for provider, entries in cat["tts"].items():
+        for e in entries:
+            assert e["priced"] == (provider in TTS_RATES), f"tts priced drift: {provider}/{e}"
+
+
+def test_direct_buildable_matches_runtime():
+    """The DIRECT_BUILDABLE matrix (save-time validator source) must equal what
+    providers.build_* can actually build, or a profile passes save then crashes at
+    session start with no SIP fallback (review M3). Asserts the two never desync."""
+    from runtime.constants import DIRECT_BUILDABLE, SpecError, normalize_spec
+    from runtime import providers
+
+    # Every declared-buildable (kind, provider) must NOT raise at normalize, and a
+    # via:direct combo outside the matrix MUST raise.
+    for kind, provider in DIRECT_BUILDABLE:
+        spec = normalize_spec(kind, {"provider": provider, "model": "x", "via": "direct"})
+        assert spec["via"] == "direct"
+    with pytest.raises(SpecError):
+        normalize_spec("tts", {"provider": "cartesia", "model": "sonic-3", "via": "direct"})
+    with pytest.raises(SpecError):
+        normalize_spec("llm", {"provider": "openai", "model": "gpt-4o", "via": "direct"})
+    # providers.py dispatch side: the llm-google-direct branch and stt-deepgram-direct
+    # branch exist; assert the build functions reference exactly these.
+    assert ("llm", "google") in DIRECT_BUILDABLE
+    assert ("stt", "deepgram") in DIRECT_BUILDABLE
+
+
+@pytest.mark.skipif(
+    not os.environ.get("LIVEKIT_INFERENCE_PROBE"),
+    reason="network probe — set LIVEKIT_INFERENCE_PROBE=1 (+ LIVEKIT_* creds) to run in CI/pre-deploy",
+)
+def test_catalog_ids_accepted_by_gateway():
+    """GATING backstop (review C1): construct inference.LLM/STT/TTS for every catalog
+    id against the live project. A renamed/deprecated gateway id fails here in CI,
+    BEFORE it can 422 a live SIP call (which has no FallbackAdapter net). Opt-in via
+    LIVEKIT_INFERENCE_PROBE so the default offline suite stays network-free."""
+    from livekit.agents import inference
+    from runtime.constants import MODEL_CATALOG
+
+    builders = {"llm": inference.LLM, "stt": inference.STT, "tts": inference.TTS}
+    failures = []
+    for kind, build in builders.items():
+        for provider, models in MODEL_CATALOG[kind].items():
+            for model in models:
+                mid = f"{provider}/{model}"
+                try:
+                    build(model=mid)  # construction does the gateway model-id check
+                except Exception as e:  # noqa: BLE001
+                    failures.append(f"{kind} {mid}: {e}")
+    assert not failures, "catalog ids rejected by gateway:\n" + "\n".join(failures)
 
 
 @pytest.fixture()
@@ -94,5 +176,8 @@ def test_endpoint_serves_catalog(client):
     res = client.get("/api/model-defaults")
     assert res.status_code == 200
     body = res.json()
-    assert body["schema"] == 1
+    assert body["schema"] == 2
     assert "pipeline" in body and "realtime" in body
+    assert set(body["pipeline"]["catalog"]) == {"llm", "stt", "tts"}
+    assert "voices" in body["pipeline"]
+    assert body["direct_buildable"] == ["llm:google", "stt:deepgram"]

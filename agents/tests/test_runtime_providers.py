@@ -79,10 +79,11 @@ class TestBuildDispatch:
         ]))
         assert isinstance(comp, lk_llm.FallbackAdapter)
 
-    def test_direct_llm_fails_loud(self):
-        # direct is only wired for deepgram STT + google realtime; direct LLM rejected
+    def test_direct_llm_nongoogle_fails_loud(self):
+        # direct LLM is wired ONLY for google (+ deepgram STT); any other direct LLM
+        # provider still fails loud at build (no silent fallback).
         with pytest.raises(SpecError):
-            providers.build_llm([{"kind": "llm", "provider": "google", "model": "x", "via": "direct", "options": {}}])
+            providers.build_llm([{"kind": "llm", "provider": "openai", "model": "x", "via": "direct", "options": {}}])
 
     def test_tts_single_and_multi(self):
         single = providers.build_tts(normalize_specs("tts", [{"provider": "cartesia", "model": "sonic-3"}]))
@@ -212,9 +213,11 @@ class TestCodeReviewFixes:
         comp = providers.build_stt([providers._apply_stt_override(spec)])
         assert "inference" in type(comp).__module__  # not flipped to direct
 
-    def test_p2a_direct_llm_rejected_at_validation(self):
+    def test_p2a_direct_llm_nongoogle_rejected_at_validation(self):
+        # google-direct LLM is now wired (accepted); a non-google direct LLM is not.
         with pytest.raises(SpecError):
-            normalize_spec("llm", {"provider": "google", "model": "x", "via": "direct"})
+            normalize_spec("llm", {"provider": "openai", "model": "x", "via": "direct"})
+        assert normalize_spec("llm", {"provider": "google", "model": "x", "via": "direct"})["via"] == "direct"
 
     def test_p2a_direct_tts_rejected_at_validation(self):
         with pytest.raises(SpecError):
@@ -240,3 +243,100 @@ class TestCodeReviewFixes:
         from agent import _resolve_mode, _DEFAULT_MODE
         monkeypatch.setenv("AGENT_MODE", "pipelime")
         assert _resolve_mode({}) == _DEFAULT_MODE
+
+
+# ── profile-model-catalog-runtime: voice passthrough, google-direct, preflight ──
+class TestVoicePassthrough:
+    def test_voice_carried_through_normalize(self):
+        spec = normalize_spec("tts", {"provider": "cartesia", "model": "sonic-3", "voice": "9626"})
+        assert spec["voice"] == "9626"
+
+    def test_absent_voice_not_in_spec(self):
+        spec = normalize_spec("tts", {"provider": "cartesia", "model": "sonic-3"})
+        assert "voice" not in spec
+
+    def test_non_string_voice_rejected(self):
+        with pytest.raises(SpecError):
+            normalize_spec("tts", {"provider": "cartesia", "model": "sonic-3", "voice": 123})
+
+    def test_voice_is_reserved_option_key(self):
+        with pytest.raises(SpecError):
+            normalize_spec("tts", {"provider": "cartesia", "model": "sonic-3", "options": {"voice": "x"}})
+
+    def test_build_passes_voice_kwarg(self, monkeypatch):
+        captured = {}
+        def fake_tts(**kw):
+            captured.update(kw)
+            return object()
+        monkeypatch.setattr(providers.inference, "TTS", fake_tts)
+        providers._build_one_tts(normalize_spec("tts", {"provider": "cartesia", "model": "sonic-3", "voice": "abc"}))
+        assert captured["voice"] == "abc"
+        assert captured["model"] == "cartesia/sonic-3"
+
+    def test_build_omits_voice_when_absent(self, monkeypatch):
+        captured = {}
+        def fake_tts(**kw):
+            captured.update(kw)
+            return object()
+        monkeypatch.setattr(providers.inference, "TTS", fake_tts)
+        providers._build_one_tts(normalize_spec("tts", {"provider": "cartesia", "model": "sonic-3"}))
+        assert "voice" not in captured
+
+
+class TestGoogleDirectLLM:
+    def test_validator_accepts_google_direct_llm(self):
+        spec = normalize_spec("llm", {"provider": "google", "model": "gemini-2.5-flash", "via": "direct"})
+        assert spec["via"] == "direct"
+
+    def test_validator_rejects_openai_direct_llm(self):
+        with pytest.raises(SpecError):
+            normalize_spec("llm", {"provider": "openai", "model": "gpt-4o", "via": "direct"})
+
+    def test_build_uses_bare_model_name(self, monkeypatch):
+        captured = {}
+        def fake_google_llm(**kw):
+            captured.update(kw)
+            return object()
+        monkeypatch.setattr(providers.google, "LLM", fake_google_llm)
+        providers._build_one_llm(normalize_spec("llm", {"provider": "google", "model": "gemini-2.5-flash", "via": "direct"}))
+        # google.LLM takes a BARE model name, NOT provider/model
+        assert captured["model"] == "gemini-2.5-flash"
+
+    def test_inference_llm_uses_prefixed_name(self, monkeypatch):
+        captured = {}
+        def fake_inf_llm(**kw):
+            captured.update(kw)
+            return object()
+        monkeypatch.setattr(providers.inference, "LLM", fake_inf_llm)
+        providers._build_one_llm(normalize_spec("llm", {"provider": "google", "model": "gemini-2.5-flash"}))
+        assert captured["model"] == "google/gemini-2.5-flash"
+
+
+class TestPipelinePreflight:
+    def test_failed_build_falls_back_to_defaults(self, monkeypatch):
+        # A pinned llm spec whose build raises must degrade to the default chain,
+        # and model_names must reflect the fallback, not the dead pin.
+        real_build_llm = providers.build_llm
+        calls = {"n": 0}
+        def flaky_build_llm(specs):
+            calls["n"] += 1
+            if calls["n"] == 1:  # first call = the pinned spec
+                raise RuntimeError("stale model id")
+            return real_build_llm(specs)
+        monkeypatch.setattr(providers, "build_llm", flaky_build_llm)
+        profile = {"models": {"mode": "pipeline", "llm": {"provider": "google", "model": "dead-model"}}}
+        resolved = providers.resolve_session_components(profile, "pipeline")
+        names = [s["model"] for s in resolved.model_names["llm"]]
+        assert "google/dead-model" not in names
+        assert names  # fell back to a real default
+
+    def test_default_chain_failure_reraises(self, monkeypatch):
+        # If the DEFAULT chain itself can't build (platform misconfig, e.g. no
+        # LIVEKIT_API_KEY), preflight must fail loud — NOT mask it into a None
+        # component that crashes downstream (review P2).
+        def always_fail(specs):
+            raise RuntimeError("platform misconfigured")
+        monkeypatch.setattr(providers, "build_llm", always_fail)
+        profile = {"models": {"mode": "pipeline", "llm": {"provider": "google", "model": "dead-model"}}}
+        with pytest.raises(RuntimeError, match="platform misconfigured"):
+            providers.resolve_session_components(profile, "pipeline")

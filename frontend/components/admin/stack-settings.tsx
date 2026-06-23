@@ -1,9 +1,19 @@
 'use client';
 
+import { useState } from 'react';
 import { Info, Lock } from 'lucide-react';
 import { useModelCatalog } from '@/hooks/use-model-catalog';
 import type { UseProfileFormReturn } from '@/hooks/use-profile-form';
-import { type ModelSpec, resolveField, specPrimary } from '@/lib/model-catalog';
+import {
+  type CatalogModel,
+  type ModelCatalog,
+  type ModelSpec,
+  type VoiceOption,
+  isDirectCapable,
+  parseLegacyVoiceModel,
+  resolveField,
+  specPrimary,
+} from '@/lib/model-catalog';
 
 // Engine-mode model/voice stack settings, opened from the header Stack chip (D7).
 // Reads/writes the profile config's `models` block via the form hook; the legal
@@ -215,11 +225,11 @@ function RealtimePanel({
 
       {/* Text-input STT source feeding Gemini — selectable (signal flow:
           語音 → STT → text → Gemini Live), without exposing a non-Gemini LLM. */}
-      <SpecField
+      <CatalogSpecField
         label="STT 來源 (轉文字餵給 Gemini)"
         kind="stt"
         spec={specPrimary(rt?.stt)}
-        providers={catalog.pipeline.stt_providers}
+        catalog={catalog}
         compiledDefault={catalog.realtime.defaults.stt}
         onChange={(patch) =>
           form.updateRealtime({ stt: { ...(specPrimary(rt?.stt) ?? {}), ...patch } })
@@ -241,95 +251,151 @@ function PipelinePanel({
   const stt = specPrimary(form.known.models?.stt);
   const tts = specPrimary(form.known.models?.tts);
 
-  const llmModel = resolveField(
-    llm?.provider && llm?.model ? `${llm.provider}/${llm.model}` : undefined,
-    `${catalog.pipeline.defaults.llm.provider}/${catalog.pipeline.defaults.llm.model}`
-  );
-
   return (
     <div className="space-y-3">
-      <FieldRow label="LLM" source={llmModel.source}>
-        <select
-          className={selectCls}
-          value={llmModel.value}
-          onChange={(e) => {
-            const [provider, ...rest] = e.target.value.split('/');
-            form.updateModelSpec('llm', { provider, model: rest.join('/'), via: 'inference' });
-          }}
-        >
-          {/* Pinned-but-unlisted value stays selectable so a custom model round-trips. */}
-          {!catalog.pipeline.llm_options.some(
-            (o) => `${o.provider}/${o.model}` === llmModel.value
-          ) && <option value={llmModel.value}>{llmModel.value}</option>}
-          {catalog.pipeline.llm_options.map((o) => {
-            const id = `${o.provider}/${o.model}`;
-            return (
-              <option key={id} value={id}>
-                {id}
-              </option>
-            );
-          })}
-        </select>
-      </FieldRow>
+      <CatalogSpecField
+        label="LLM"
+        kind="llm"
+        spec={llm}
+        catalog={catalog}
+        compiledDefault={catalog.pipeline.defaults.llm}
+        onChange={(patch) => form.updateModelSpec('llm', patch)}
+      />
 
-      <SpecField
+      <CatalogSpecField
         label="STT (語音轉文字)"
         kind="stt"
         spec={stt}
-        providers={catalog.pipeline.stt_providers}
+        catalog={catalog}
         compiledDefault={catalog.pipeline.defaults.stt}
         onChange={(patch) => form.updateModelSpec('stt', patch)}
       />
 
-      <SpecField
-        label="TTS / 語音 (Voice)"
+      <CatalogSpecField
+        label="TTS"
         kind="tts"
         spec={tts}
-        providers={catalog.pipeline.tts_providers}
+        catalog={catalog}
         compiledDefault={catalog.pipeline.defaults.tts}
         onChange={(patch) => form.updateModelSpec('tts', patch)}
-        hint="Pipeline 的語音編在 TTS 的 model id（多數 provider 以 model 帶 voice）。"
       />
     </div>
   );
 }
 
-function SpecField({
+// "estimate incomplete" pill for a model with no cost rate (design D7).
+function UnpricedBadge() {
+  return (
+    <span
+      title="此模型在成本表沒有費率，成本估算會標示為不完整（不影響選用）。"
+      className="rounded border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-600 dark:text-amber-400"
+    >
+      無成本估算
+    </span>
+  );
+}
+
+// via:inference / via:direct segmented toggle, human-labeled. Only rendered for
+// (kind, provider) pairs the runtime can build directly (e.g. google LLM).
+function ViaToggle({
+  via,
+  onChange,
+}: {
+  via: 'inference' | 'direct';
+  onChange: (v: 'inference' | 'direct') => void;
+}) {
+  const opts: { v: 'inference' | 'direct'; label: string; title: string }[] = [
+    { v: 'inference', label: '透過 LiveKit 閘道', title: '經 LiveKit Inference 閘道，免自備金鑰' },
+    {
+      v: 'direct',
+      label: '用自己的 API 金鑰',
+      title: '直連 provider SDK，用部署層 GOOGLE_API_KEY',
+    },
+  ];
+  return (
+    <div className="border-border flex rounded-md border p-0.5">
+      {opts.map((o) => (
+        <button
+          key={o.v}
+          type="button"
+          title={o.title}
+          onClick={() => onChange(o.v)}
+          className={`flex-1 rounded px-2 py-1 text-[11px] font-medium transition-colors ${
+            via === o.v
+              ? 'bg-primary text-primary-foreground'
+              : 'text-foreground/50 hover:text-foreground'
+          }`}
+        >
+          {o.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+// Cascade-aware provider→model (+ via, + tts voice) field, sourced from the
+// catalog. Provider and model are dropdowns; a pinned-but-unlisted value stays
+// selectable (custom/cloned escape hatch). Changing provider RESETS model (and
+// tts voice) so no invalid provider/model combo survives a switch (review C2/D8).
+function CatalogSpecField({
   label,
+  kind,
   spec,
-  providers,
+  catalog,
   compiledDefault,
   onChange,
-  hint,
 }: {
   label: string;
-  kind: 'stt' | 'tts';
+  kind: 'llm' | 'stt' | 'tts';
   spec: ModelSpec | undefined;
-  providers: string[];
+  catalog: ModelCatalog;
   compiledDefault: ModelSpec;
   onChange: (patch: Partial<ModelSpec>) => void;
-  hint?: string;
 }) {
+  const kindCatalog = catalog.pipeline.catalog[kind];
   const provider = resolveField(spec?.provider, compiledDefault.provider ?? '');
   const model = resolveField(spec?.model, compiledDefault.model ?? '');
-  // pinned if either field is set by the user
-  const source = spec?.provider || spec?.model ? 'pinned' : 'inherited';
-  const providerOptions = providers.includes(provider.value)
-    ? providers
-    : [provider.value, ...providers];
+  const source = spec?.provider || spec?.model || spec?.voice ? 'pinned' : 'inherited';
+  const via: 'inference' | 'direct' = spec?.via === 'direct' ? 'direct' : 'inference';
+
+  const providerNames = Object.keys(kindCatalog).sort();
+  const providerOptions = providerNames.includes(provider.value)
+    ? providerNames
+    : [provider.value, ...providerNames];
+
+  const modelsForProvider: CatalogModel[] = kindCatalog[provider.value] ?? [];
+  const modelListed = modelsForProvider.some((m) => m.model === model.value);
+  const currentPriced = modelsForProvider.find((m) => m.model === model.value)?.priced ?? false;
+
+  // Legacy voice-in-model-id (model:voiceId) — surface non-destructively. Parse the
+  // provider-relative model value only; the spec's model field is provider-relative,
+  // so adopting must yield "sonic-3", not "cartesia/sonic-3" (which would double-prefix
+  // to cartesia/cartesia/sonic-3 at runtime via _model_id).
+  const legacy = kind === 'tts' ? parseLegacyVoiceModel(model.value) : null;
+
+  function firstModelOf(p: string): string {
+    return (kindCatalog[p] ?? [])[0]?.model ?? '';
+  }
+
+  function onProviderChange(p: string) {
+    // Reset model to the new provider's default + clear stale tts voice + reset via.
+    const patch: Partial<ModelSpec> = {
+      provider: p,
+      model: firstModelOf(p) || model.value,
+      via: isDirectCapable(catalog, kind, p) ? via : 'inference',
+    };
+    if (kind === 'tts') patch.voice = '';
+    onChange(patch);
+  }
 
   return (
     <FieldRow label={label} source={source}>
-      <div className="flex gap-2">
-        {/* Always write a COMPLETE spec: pinning one field seeds the other from
-            the currently-shown value (pinned or compiled default), so we never
-            persist a model-less or provider-less spec the backend would 422. */}
+      <div className="space-y-1.5">
+        {/* Provider */}
         <select
-          className={`${selectCls} flex-[2]`}
+          className={selectCls}
           value={provider.value}
-          onChange={(e) =>
-            onChange({ provider: e.target.value, model: model.value, via: 'inference' })
-          }
+          onChange={(e) => onProviderChange(e.target.value)}
         >
           {providerOptions.map((p) => (
             <option key={p} value={p}>
@@ -337,16 +403,137 @@ function SpecField({
             </option>
           ))}
         </select>
-        <input
-          className={`${selectCls} flex-[3]`}
+
+        {/* Model — dropdown filtered to provider; pinned-but-unlisted stays selectable */}
+        <select
+          className={selectCls}
           value={model.value}
-          onChange={(e) =>
-            onChange({ provider: provider.value, model: e.target.value, via: 'inference' })
-          }
-          placeholder={compiledDefault.model}
-        />
+          onChange={(e) => onChange({ provider: provider.value, model: e.target.value, via })}
+        >
+          {!modelListed && model.value && (
+            <option value={model.value}>{model.value}（自訂）</option>
+          )}
+          {modelsForProvider.map((m) => (
+            <option key={m.model} value={m.model}>
+              {m.model}
+              {m.priced ? '' : ' · 無成本估算'}
+            </option>
+          ))}
+        </select>
+
+        {/* Unpriced flag below the field (native <select> can't badge options) */}
+        {model.value && modelListed && !currentPriced && (
+          <div className="flex items-center gap-1.5">
+            <UnpricedBadge />
+            <span className="text-foreground/40 text-[10px]">成本估算將標示為不完整</span>
+          </div>
+        )}
+
+        {/* via toggle — only where the runtime can build direct (e.g. google LLM) */}
+        {isDirectCapable(catalog, kind, provider.value) && (
+          <ViaToggle
+            via={via}
+            onChange={(v) =>
+              // Seed provider+model (like the model <select> above), not just
+              // `via`. On an inherited spec, a `{ via }`-only patch is dropped by
+              // pruneModels (specHasValue ignores via) → the direct choice silently
+              // vanishes on save (review P1).
+              onChange({ provider: provider.value, model: model.value, via: v })
+            }
+          />
+        )}
+
+        {/* TTS voice picker (separate models.tts.voice field) */}
+        {kind === 'tts' && (
+          <TtsVoiceControl
+            provider={provider.value}
+            voice={spec?.voice}
+            voices={catalog.pipeline.voices[provider.value] ?? []}
+            legacy={!spec?.voice && legacy ? legacy : null}
+            onChange={(voice) => onChange({ voice })}
+            onAdoptLegacy={(l) => onChange({ model: l.model, voice: l.voice })}
+          />
+        )}
       </div>
-      {hint && <p className="text-foreground/40 text-[10px]">{hint}</p>}
     </FieldRow>
+  );
+}
+
+const VOICE_CUSTOM = '__custom__';
+const VOICE_NONE = '';
+
+// Per-provider suggested-voice picker for pipeline TTS. Suggested voices in a
+// dropdown + a "自訂" option that reveals a free-text input (custom/cloned ids).
+// When a provider has no suggested voices, degrades to free-text directly (M8).
+function TtsVoiceControl({
+  provider,
+  voice,
+  voices,
+  legacy,
+  onChange,
+  onAdoptLegacy,
+}: {
+  provider: string;
+  voice: string | undefined;
+  voices: VoiceOption[];
+  legacy: { model: string; voice: string } | null;
+  onChange: (voice: string) => void;
+  onAdoptLegacy: (l: { model: string; voice: string }) => void;
+}) {
+  const current = voice ?? '';
+  const inSuggested = voices.some((v) => v.id === current);
+  const [custom, setCustom] = useState(Boolean(current) && !inSuggested);
+  const showFreeText = voices.length === 0 || custom || (Boolean(current) && !inSuggested);
+
+  return (
+    <div className="border-border/60 mt-0.5 space-y-1 rounded-md border border-dashed p-2">
+      <span className="text-foreground/60 text-[11px] font-medium">語音 (Voice)</span>
+      {legacy && (
+        <div className="rounded border border-amber-500/40 bg-amber-500/10 px-2 py-1 text-[10px] leading-relaxed text-amber-700 dark:text-amber-400">
+          偵測到舊格式：語音編在 model id 內（{legacy.model}:{legacy.voice}）。
+          <button type="button" className="ml-1 underline" onClick={() => onAdoptLegacy(legacy)}>
+            改用獨立語音欄位
+          </button>
+        </div>
+      )}
+      {voices.length > 0 && (
+        <select
+          className={selectCls}
+          value={custom ? VOICE_CUSTOM : current}
+          onChange={(e) => {
+            const v = e.target.value;
+            if (v === VOICE_CUSTOM) {
+              setCustom(true);
+              return;
+            }
+            setCustom(false);
+            onChange(v);
+          }}
+        >
+          <option value={VOICE_NONE}>（用 model 內建語音）</option>
+          {voices.map((v) => (
+            <option key={v.id} value={v.id}>
+              {v.label}
+            </option>
+          ))}
+          <option value={VOICE_CUSTOM}>自訂 / 複製的語音…</option>
+        </select>
+      )}
+      {showFreeText && (
+        <input
+          className={selectCls}
+          value={current}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder={
+            voices.length === 0
+              ? '輸入 voice id（此 provider 無建議清單）'
+              : '輸入自訂 / 複製的 voice id'
+          }
+        />
+      )}
+      <p className="text-foreground/40 text-[10px]">
+        選好語音後用 ▶ Try 試聽；留空則用 model 內建語音。
+      </p>
+    </div>
   );
 }

@@ -6,6 +6,8 @@ import { promptToGraph } from '@/lib/agent-graph';
 import {
   FALLBACK_MODEL_CATALOG,
   type ModelsConfig,
+  isDirectCapable,
+  parseLegacyVoiceModel,
   resolveField,
   specPrimary,
 } from '@/lib/model-catalog';
@@ -26,6 +28,70 @@ describe('models round-trip (task 1.1)', () => {
     const config = buildConfig(known, {});
     const { known: back } = splitConfig(config);
     expect(back.models).toEqual(models);
+  });
+});
+
+describe('voice + via round-trip (catalog-runtime task 6.1)', () => {
+  it('models.tts.voice and per-spec via survive buildConfig → splitConfig', () => {
+    const models: ModelsConfig = {
+      mode: 'pipeline',
+      llm: { provider: 'google', model: 'gemini-2.5-flash', via: 'direct' },
+      tts: {
+        provider: 'cartesia',
+        model: 'sonic-3',
+        voice: '9626c31c-bec5-4cca-baa8-f8ba9e84c8bc',
+      },
+    };
+    const known: KnownConfig = { instructions: 'hi', tools: [], models };
+    const back = splitConfig(buildConfig(known, {})).known;
+    expect(back.models).toEqual(models);
+  });
+
+  // Review P1: the via toggle now seeds provider+model (not just `via`), so a
+  // direct choice on an inherited spec survives prune. A full direct spec is kept;
+  // a via-only spec stays correctly dropped (meaningless without a provider).
+  it('a full provider/model/via:direct spec survives prune', () => {
+    const models: ModelsConfig = {
+      mode: 'pipeline',
+      llm: { provider: 'google', model: 'gemini-2.5-flash', via: 'direct' },
+    };
+    expect(pruneModels(models)).toEqual(models);
+  });
+
+  it('a via-only spec is dropped (UI seeds provider/model, so this never ships)', () => {
+    expect(pruneModels({ mode: 'pipeline', llm: { via: 'direct' } })).toEqual({
+      mode: 'pipeline',
+    });
+  });
+});
+
+describe('direct-capable + legacy voice helpers (catalog-runtime D8)', () => {
+  it('isDirectCapable mirrors the direct_buildable matrix (google llm only)', () => {
+    expect(isDirectCapable(FALLBACK_MODEL_CATALOG, 'llm', 'google')).toBe(true);
+    expect(isDirectCapable(FALLBACK_MODEL_CATALOG, 'llm', 'openai')).toBe(false);
+    expect(isDirectCapable(FALLBACK_MODEL_CATALOG, 'tts', 'cartesia')).toBe(false);
+    expect(isDirectCapable(FALLBACK_MODEL_CATALOG, 'stt', 'deepgram')).toBe(true);
+    expect(isDirectCapable(FALLBACK_MODEL_CATALOG, 'llm', undefined)).toBe(false);
+  });
+
+  it('parseLegacyVoiceModel splits provider/model:voice non-destructively', () => {
+    expect(parseLegacyVoiceModel('cartesia/sonic-3:9626c31c')).toEqual({
+      model: 'cartesia/sonic-3',
+      voice: '9626c31c',
+    });
+    expect(parseLegacyVoiceModel('cartesia/sonic-3')).toBeNull();
+    expect(parseLegacyVoiceModel(undefined)).toBeNull();
+  });
+
+  // Regression: adopt-legacy double-prefix — StackSettings must parse the
+  // provider-RELATIVE model value, not `${provider}/${model}`, so adopting yields
+  // "sonic-3" (not "cartesia/sonic-3" → cartesia/cartesia/sonic-3 at runtime).
+  // Found by /qa on 2026-06-22.
+  it('parseLegacyVoiceModel on a provider-relative model yields a bare model', () => {
+    expect(parseLegacyVoiceModel('sonic-3:9626c31c-bec5-4cca-baa8-f8ba9e84c8bc')).toEqual({
+      model: 'sonic-3',
+      voice: '9626c31c-bec5-4cca-baa8-f8ba9e84c8bc',
+    });
   });
 });
 
@@ -69,6 +135,14 @@ describe('pruneModels drops unpinned noise (design D2)', () => {
     expect(
       pruneModels({ mode: 'pipeline', llm: { provider: 'google', model: 'x' }, stt: {} })
     ).toEqual({ mode: 'pipeline', llm: { provider: 'google', model: 'x' } });
+  });
+
+  it('keeps a tts block pinned by voice alone (review H2)', () => {
+    // A re-picked voice on an inherited model must survive prune, or it's lost on save.
+    expect(pruneModels({ mode: 'pipeline', tts: { voice: '9626c31c' } })).toEqual({
+      mode: 'pipeline',
+      tts: { voice: '9626c31c' },
+    });
   });
 });
 
@@ -115,6 +189,18 @@ describe('model-list source-of-truth contract (task 7.1 — anti-drift)', () => 
       const want = backendConstants.pipeline.defaults[kind];
       expect({ provider: got.provider, model: got.model }).toEqual(want);
     }
+    // schema-2 additions: direct_buildable, catalog model lists, voices.
+    expect(FALLBACK_MODEL_CATALOG.direct_buildable).toEqual(backendConstants.direct_buildable);
+    for (const kind of ['llm', 'stt', 'tts'] as const) {
+      const gotStruct = Object.fromEntries(
+        Object.entries(FALLBACK_MODEL_CATALOG.pipeline.catalog[kind]).map(([p, ms]) => [
+          p,
+          ms.map((m) => m.model),
+        ])
+      );
+      expect(gotStruct).toEqual(backendConstants.pipeline.catalog[kind]);
+    }
+    expect(FALLBACK_MODEL_CATALOG.pipeline.voices).toEqual(backendConstants.pipeline.voices);
   });
 
   it('realtime variant ↔ cost sync: the offered default is in the allowlist', () => {

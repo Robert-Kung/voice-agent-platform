@@ -100,9 +100,15 @@ def _apply_stt_override(spec: dict) -> dict:
 def _build_one_llm(spec: dict):
     if spec["via"] == VIA_INFERENCE:
         return inference.LLM(model=_model_id(spec), **spec["options"])
+    # Direct SDK path. google.LLM takes a BARE model name (no provider prefix),
+    # unlike inference.LLM which takes "{provider}/{model}". model_names still
+    # records the canonical provider/model form (see resolve_session_components)
+    # so cost matching is unaffected by via. Key comes from GOOGLE_API_KEY env.
+    if spec["via"] == VIA_DIRECT and spec["provider"] == "google":
+        return google.LLM(model=spec["model"], **spec["options"])
     raise SpecError(
         f"direct LLM provider '{spec['provider']}' not supported; use via:inference "
-        f"(direct is only wired for deepgram STT and google realtime)"
+        f"(direct LLM is wired only for google)"
     )
 
 
@@ -120,7 +126,14 @@ def _build_one_tts(spec: dict):
     language = spec.get("language") or "zh"
     if spec["via"] == VIA_DIRECT:
         raise SpecError(f"direct TTS provider '{spec['provider']}' not supported; use via:inference")
-    return inference.TTS(model=_model_id(spec), language=language, **spec["options"])
+    # models.tts.voice is a first-class param (LiveKit Inference TTS contract:
+    # model + separate voice). Pass it through when present; absent → model-id-only
+    # behavior (a voice encoded in the model id, the documented form, still works).
+    voice = spec.get("voice")
+    kwargs = dict(spec["options"])
+    if voice:
+        kwargs["voice"] = voice
+    return inference.TTS(model=_model_id(spec), language=language, **kwargs)
 
 
 def build_llm(specs: list[dict]):
@@ -196,6 +209,48 @@ def _segments(*names: str | None) -> list[dict]:
     return [{"model": n} for n in names if n]
 
 
+def _build_with_preflight(kind: str, specs: list[dict], default_specs, builder):
+    """Build a pipeline component; on BUILD failure degrade to the built-in default
+    chain with a loud warning instead of crashing session start.
+
+    A single pinned pipeline spec has no FallbackAdapter net, so on a SIP call a
+    stale/unbuildable id would otherwise drop the call (design D2). This catches
+    build-time failures (e.g. google-direct with no GOOGLE_API_KEY, malformed
+    combos). Note: an inference-gateway id that is syntactically fine but rejected
+    by the gateway fails at the runtime handshake, not at build — the network-gated
+    CI probe (task 7.3) is the backstop for that. Returns (component, specs_used)
+    so model_names reflects whatever actually built.
+    """
+    defaults = normalize_specs(kind, default_specs)
+    try:
+        return builder(specs), specs
+    except Exception as e:  # noqa: BLE001 — degrade on any build failure, never crash start
+        ids = [f"{s.get('provider','?')}/{s.get('model','?')}" for s in specs]
+        if specs == defaults:
+            # The specs that failed ARE the defaults (no real pin to degrade to).
+            # This is a platform-level failure (e.g. missing LIVEKIT_API_KEY breaks
+            # every gateway build), not a bad pinned id — fail loud, don't mask.
+            logger.critical("Pipeline %s default chain failed to build (%s) — "
+                            "platform misconfigured; cannot start.", kind, e)
+            raise
+        logger.error(
+            "Pipeline %s build failed for %s (%s); falling back to the built-in "
+            "default chain. A pinned model id may be stale or unrunnable.",
+            kind, ids, e,
+        )
+        try:
+            return builder(defaults), defaults
+        except Exception as e2:  # noqa: BLE001
+            # Pinned spec failed AND the default chain also fails to build — this
+            # is platform-level (creds/deps), not a per-profile issue. Fail loud
+            # with both causes rather than returning a None component that would
+            # crash agent.py more confusingly downstream.
+            logger.critical("Pipeline %s fallback default chain also failed to "
+                            "build (%s) after pinned build failed (%s) — platform "
+                            "misconfigured.", kind, e2, e)
+            raise
+
+
 # ── Resolver ───────────────────────────────────────────────
 @dataclass
 class ResolvedComponents:
@@ -257,15 +312,19 @@ def resolve_session_components(profile: dict, mode: str, env=None) -> ResolvedCo
     stt_specs = normalize_specs("stt", models.get("stt")) or normalize_specs("stt", _DEFAULT_PIPELINE_STT)
     tts_specs = normalize_specs("tts", models.get("tts")) or normalize_specs("tts", _DEFAULT_PIPELINE_TTS)
 
+    llm, llm_used = _build_with_preflight("llm", llm_specs, _DEFAULT_PIPELINE_LLM, build_llm)
+    stt, stt_used = _build_with_preflight("stt", stt_specs, _DEFAULT_PIPELINE_STT, build_stt)
+    tts, tts_used = _build_with_preflight("tts", tts_specs, _DEFAULT_PIPELINE_TTS, build_tts)
+
     return ResolvedComponents(
         mode="pipeline",
-        llm=build_llm(llm_specs),
-        stt=build_stt(stt_specs),
-        tts=build_tts(tts_specs),
+        llm=llm,
+        stt=stt,
+        tts=tts,
         model_names={
             "schema": 1,
-            "llm": _segments(_model_id(llm_specs[0]) if llm_specs else None),
-            "stt": _segments(_model_id(stt_specs[0]) if stt_specs else None),
-            "tts": _segments(_model_id(tts_specs[0]) if tts_specs else None),
+            "llm": _segments(_model_id(llm_used[0]) if llm_used else None),
+            "stt": _segments(_model_id(stt_used[0]) if stt_used else None),
+            "tts": _segments(_model_id(tts_used[0]) if tts_used else None),
         },
     )

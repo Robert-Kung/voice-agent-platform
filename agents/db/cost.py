@@ -41,6 +41,7 @@ LLM_RATES: dict[str, dict[str, float]] = {
     # OpenAI
     "openai/gpt-4o-mini": {"in": 0.15, "out": 0.60},
     "openai/gpt-4.1-mini": {"in": 0.40, "out": 1.60},
+    "openai/gpt-4.1-nano": {"in": 0.10, "out": 0.40},
     "openai/gpt-4o": {"in": 2.50, "out": 10.00},
     "openai/gpt-4.1": {"in": 2.00, "out": 8.00},
 }
@@ -76,6 +77,14 @@ def _match_rate(key: str, rate_table: dict[str, float]) -> float | None:
 
 def _match_llm_rate(llm_model: str) -> dict[str, float] | None:
     model_lower = (llm_model or "").lower()
+    # Exact match first: prevents a shorter key from fuzzy-matching a distinct
+    # model (e.g. "openai/gpt-4.1" substring-matching "openai/gpt-4.1-nano",
+    # which would both falsely flag nano as priced and bill it ~20x its rate).
+    for model_key in LLM_RATES:
+        if model_key.lower() == model_lower:
+            return LLM_RATES[model_key]
+    # Fall back to substring (handles recorded names with suffixes/prefixes the
+    # rate key is contained in, e.g. dated/preview variants).
     for model_key in sorted(LLM_RATES, key=len, reverse=True):
         if model_key.lower() in model_lower:
             return LLM_RATES[model_key]
