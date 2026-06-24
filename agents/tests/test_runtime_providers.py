@@ -167,6 +167,38 @@ class TestDefaultBackfill:
         assert r.model_names["tts"][0]["model"].startswith("cartesia/sonic-3")
 
 
+# ── regression: malformed pinned spec degrades, never crashes (review #1/#3) ──
+class TestMalformedSpecDegrades:
+    """A malformed pinned spec must degrade to the built-in default instead of
+    raising at session start — there is no FallbackAdapter net on a SIP call."""
+
+    def test_voice_only_tts_pin_degrades_not_crash(self):
+        # The editor can persist models.tts=[{voice:'x'}] (voice pinned, model left
+        # inherited). normalize_spec would SpecError on the missing provider/model;
+        # resolve must degrade to the default TTS chain, not propagate the crash.
+        r = providers.resolve_session_components(
+            {"models": {"tts": [{"voice": "9626c31c-bec5-4cca-baa8-f8ba9e84c8bc"}]}},
+            "pipeline",
+        )
+        assert r.model_names["tts"][0]["model"].startswith("cartesia/sonic-3")
+
+    def test_malformed_pipeline_stt_pin_degrades(self):
+        r = providers.resolve_session_components(
+            {"models": {"stt": [{"language": "zh"}]}},  # no provider/model
+            "pipeline",
+        )
+        assert r.model_names["stt"] == [{"model": "deepgram/nova-2"}]
+
+    def test_malformed_realtime_stt_pin_degrades(self):
+        # realtime has no fallback net either — a malformed pinned realtime STT must
+        # degrade to DEFAULT_REALTIME_STT rather than crash (review #3).
+        r = providers.resolve_session_components(
+            {"models": {"realtime": {"stt": {"language": "zh"}}}},  # no provider/model
+            "realtime",
+        )
+        assert r.model_names["stt"] == [{"model": "deepgram/nova-2"}]
+
+
 # ── effective mode precedence ──────────────────────────────
 class TestModePrecedence:
     def test_profile_mode_used_when_env_unset(self, monkeypatch):

@@ -46,19 +46,29 @@ LLM_RATES: dict[str, dict[str, float]] = {
     "openai/gpt-4.1": {"in": 2.00, "out": 8.00},
 }
 
-# USD per minute of audio
+# USD per minute of audio (LiveKit Inference Ship-tier gateway rates). Keyed by
+# provider (D7 provider-granular approximation). Covers BOTH catalog providers AND
+# off-catalog ones reachable via the editor's free-text escape hatch / recorded in
+# historical sessions, so a provider here is NOT required to be in MODEL_CATALOG.
+# rime/inworld vary per SKU (rime arcana 0.024 / mistv2 0.018; inworld max 0.021 /
+# mini 0.009) — the provider-granular value uses the flagship/higher SKU so cost is
+# not under-reported.
 TTS_RATES: dict[str, float] = {
     "cartesia": 0.020,
     "elevenlabs": 0.018,
     "openai": 0.015,
     "google": 0.016,
+    "deepgram": 0.018,
+    "rime": 0.024,
+    "inworld": 0.021,
 }
 
-# USD per minute of audio
+# USD per minute of audio (see TTS_RATES note on provider-granular keying).
 STT_RATES: dict[str, float] = {
     "deepgram": 0.0043,
     "elevenlabs": 0.010,
     "google": 0.006,
+    "cartesia": 0.003,
 }
 
 

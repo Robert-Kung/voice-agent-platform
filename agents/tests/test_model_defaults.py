@@ -120,6 +120,18 @@ def test_priced_flag_is_consistent():
             assert e["priced"] == (provider in TTS_RATES), f"tts priced drift: {provider}/{e}"
 
 
+def test_review4_newly_offered_providers_are_priced():
+    """review #4: providers added to the catalog (cartesia STT; deepgram/rime/inworld
+    TTS) now carry a cost rate so a session using them is not estimated at $0. (D7
+    still permits unpriced-but-flagged providers in general; this only locks the ones
+    we have authoritative LiveKit rates for.)"""
+    from db.cost import STT_RATES, TTS_RATES
+
+    assert "cartesia" in STT_RATES
+    for provider in ("deepgram", "rime", "inworld"):
+        assert provider in TTS_RATES, f"TTS provider {provider} offered but unpriced"
+
+
 def test_direct_buildable_matches_runtime():
     """The DIRECT_BUILDABLE matrix (save-time validator source) must equal what
     providers.build_* can actually build, or a profile passes save then crashes at

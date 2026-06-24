@@ -38,7 +38,6 @@ from runtime.constants import (
     SpecError,
     VIA_DIRECT,
     VIA_INFERENCE,
-    normalize_spec,
     normalize_specs,
 )
 
@@ -209,19 +208,32 @@ def _segments(*names: str | None) -> list[dict]:
     return [{"model": n} for n in names if n]
 
 
-def _build_with_preflight(kind: str, specs: list[dict], default_specs, builder):
-    """Build a pipeline component; on BUILD failure degrade to the built-in default
-    chain with a loud warning instead of crashing session start.
+def _build_with_preflight(kind: str, raw_specs, default_specs, builder):
+    """Normalize + build a component; on a malformed pinned spec OR a build failure,
+    degrade to the built-in default chain with a loud warning instead of crashing
+    session start.
 
-    A single pinned pipeline spec has no FallbackAdapter net, so on a SIP call a
-    stale/unbuildable id would otherwise drop the call (design D2). This catches
-    build-time failures (e.g. google-direct with no GOOGLE_API_KEY, malformed
-    combos). Note: an inference-gateway id that is syntactically fine but rejected
-    by the gateway fails at the runtime handshake, not at build — the network-gated
-    CI probe (task 7.3) is the backstop for that. Returns (component, specs_used)
-    so model_names reflects whatever actually built.
+    A single pinned spec has no FallbackAdapter net, so on a SIP call a stale/
+    unbuildable/malformed pin would otherwise drop the call (design D2). NORMALIZATION
+    happens inside here so a malformed pin (e.g. a voice-only TTS block with no
+    provider/model that the editor can persist — review #1) degrades rather than
+    raising SpecError uncaught. This also catches build-time failures (e.g.
+    google-direct with no GOOGLE_API_KEY, malformed combos). Note: an inference-
+    gateway id that is syntactically fine but rejected by the gateway fails at the
+    runtime handshake, not at build — the network-gated CI probe (task 7.3) is the
+    backstop for that. Returns (component, specs_used) so model_names reflects
+    whatever actually built.
     """
     defaults = normalize_specs(kind, default_specs)
+    try:
+        specs = normalize_specs(kind, raw_specs) or defaults
+    except SpecError as e:
+        # Malformed pinned spec — degrade, never crash start (no SIP fallback net).
+        logger.error(
+            "Pipeline %s spec is invalid (%s); falling back to the built-in default "
+            "chain.", kind, e,
+        )
+        return builder(defaults), defaults
     try:
         return builder(specs), specs
     except Exception as e:  # noqa: BLE001 — degrade on any build failure, never crash start
@@ -290,9 +302,14 @@ def resolve_session_components(profile: dict, mode: str, env=None) -> ResolvedCo
         realtime_block = models.get("realtime") or {}
         realtime_llm, rt_model, rt_voice = build_realtime_llm(realtime_block)
 
-        stt_spec = normalize_spec("stt", realtime_block.get("stt") or _DEFAULT_REALTIME_STT)
-        realtime_stt = build_stt([stt_spec])
-        stt_built = _apply_stt_override(stt_spec)
+        # Route realtime STT through preflight too (review #3): realtime has no
+        # FallbackAdapter net, so a malformed/unbuildable pinned STT (e.g. via:direct
+        # deepgram with no DEEPGRAM_API_KEY) must degrade to the default rather than
+        # crash session start on a live call.
+        realtime_stt, rt_stt_used = _build_with_preflight(
+            "stt", realtime_block.get("stt"), _DEFAULT_REALTIME_STT, build_stt
+        )
+        stt_built = _apply_stt_override(rt_stt_used[0])
 
         return ResolvedComponents(
             mode="realtime",
@@ -308,13 +325,11 @@ def resolve_session_components(profile: dict, mode: str, env=None) -> ResolvedCo
         )
 
     # ── pipeline ──
-    llm_specs = normalize_specs("llm", models.get("llm")) or normalize_specs("llm", _DEFAULT_PIPELINE_LLM)
-    stt_specs = normalize_specs("stt", models.get("stt")) or normalize_specs("stt", _DEFAULT_PIPELINE_STT)
-    tts_specs = normalize_specs("tts", models.get("tts")) or normalize_specs("tts", _DEFAULT_PIPELINE_TTS)
-
-    llm, llm_used = _build_with_preflight("llm", llm_specs, _DEFAULT_PIPELINE_LLM, build_llm)
-    stt, stt_used = _build_with_preflight("stt", stt_specs, _DEFAULT_PIPELINE_STT, build_stt)
-    tts, tts_used = _build_with_preflight("tts", tts_specs, _DEFAULT_PIPELINE_TTS, build_tts)
+    # Pass RAW specs — _build_with_preflight normalizes inside so a malformed pin
+    # degrades to defaults instead of crashing session start (review #1).
+    llm, llm_used = _build_with_preflight("llm", models.get("llm"), _DEFAULT_PIPELINE_LLM, build_llm)
+    stt, stt_used = _build_with_preflight("stt", models.get("stt"), _DEFAULT_PIPELINE_STT, build_stt)
+    tts, tts_used = _build_with_preflight("tts", models.get("tts"), _DEFAULT_PIPELINE_TTS, build_tts)
 
     return ResolvedComponents(
         mode="pipeline",

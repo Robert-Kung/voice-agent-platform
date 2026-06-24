@@ -34,7 +34,6 @@ models:
     - { provider: google, model: gemini-3.1-flash-lite, via: inference }
     - { provider: openai, model: gpt-4.1-mini, via: inference }
   stt:
-    - { provider: elevenlabs, model: scribe_v2_realtime, via: inference, language: zh }
     - { provider: deepgram, model: nova-2, via: inference, language: zh-TW }
   tts:
     - { provider: cartesia, model: "sonic-3:9626c31c-bec5-4cca-baa8-f8ba9e84c8bc", via: inference, language: zh }

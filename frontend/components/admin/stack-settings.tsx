@@ -450,8 +450,14 @@ function CatalogSpecField({
             voice={spec?.voice}
             voices={catalog.pipeline.voices[provider.value] ?? []}
             legacy={!spec?.voice && legacy ? legacy : null}
-            onChange={(voice) => onChange({ voice })}
-            onAdoptLegacy={(l) => onChange({ model: l.model, voice: l.voice })}
+            // Seed provider+model (like the model <select>/via toggle above), not
+            // just `voice`. On an inherited TTS spec a `{ voice }`-only patch persists
+            // as models.tts=[{voice}] with no provider/model, which crashes session
+            // start at normalize (review #1) — write a COMPLETE spec instead.
+            onChange={(voice) => onChange({ provider: provider.value, model: model.value, voice })}
+            onAdoptLegacy={(l) =>
+              onChange({ provider: provider.value, model: l.model, voice: l.voice })
+            }
           />
         )}
       </div>
