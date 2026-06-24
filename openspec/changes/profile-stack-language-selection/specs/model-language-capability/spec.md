@@ -2,13 +2,14 @@
 
 ### Requirement: Per-model language capability matrix
 
-The catalog SHALL expose a per-`provider/model` language capability matrix for STT and TTS, listing the BCP-47 language codes each model is known to support. The matrix SHALL be keyed at model granularity (not provider granularity) because language support varies between models of the same provider. The matrix SHALL be defined in the backend source of truth (`runtime/constants.py`, alongside `MODEL_CATALOG`), served by the model-defaults catalog endpoint, and mirrored in the frontend catalog fallback and the shared fixture, with contract tests asserting the backend, the frontend fallback, and the fixture agree.
+The catalog SHALL expose a per-`provider/model` language capability matrix for STT and TTS, listing the BCP-47 language codes each model is known to support. The matrix SHALL be keyed at model granularity (not provider granularity) because language support varies between models of the same provider. Each model's language list SHALL be ORDERED so the first entry is that model's sensible default (`zh-TW` first for Deepgram general models, `zh` first for `cartesia/ink-whisper`, `en`/`en-US` first for the English-only specialty models), so the editor can derive a per-model default as `supportedLanguages[0]` without a separate default field. The matrix SHALL be defined in the backend source of truth (`runtime/constants.py`, alongside `MODEL_CATALOG`), served by the model-defaults catalog endpoint, and mirrored in the frontend catalog fallback and the shared fixture, with contract tests asserting the backend, the frontend fallback, and the fixture agree.
 
 #### Scenario: STT model-level granularity distinguishes English-only specialty models
 
 - **WHEN** the matrix is read for Deepgram STT models
-- **THEN** `deepgram/nova-3` and `deepgram/nova-2` list the Chinese codes (including `zh-TW` and `zh-Hant`)
+- **THEN** `deepgram/nova-3` and `deepgram/nova-2` list the Chinese codes with `zh-TW` first (the default), including `zh-Hant`
 - **AND** `deepgram/nova-2-phonecall`, `deepgram/nova-2-medical`, `deepgram/nova-2-conversationalai`, and `deepgram/nova-3-medical` list only English codes
+- **AND** `cartesia/ink-whisper` lists `zh` (its default) without a region subtag
 
 #### Scenario: TTS model-level granularity distinguishes Chinese-capable models
 

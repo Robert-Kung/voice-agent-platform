@@ -2,12 +2,12 @@
 
 ### Requirement: STT and TTS language controls
 
-The model-stack editor SHALL provide a language control for pipeline STT (bound to `models.stt[].language`) and a language control for pipeline TTS (bound to `models.tts.language`). Each control SHALL be a dropdown sourced from the per-model language capability matrix for the currently selected provider/model, plus a free-text escape hatch for codes not in the matrix. The STT control SHALL default to `zh-TW` for Deepgram general models and the TTS control SHALL default to `zh`, matching the compiled runtime defaults; the inherited-vs-pinned distinction SHALL be shown the same way as the other stack fields. Both values SHALL round-trip through save/load, participate in the editor's `isDirty` state, survive prune, and reset to the new model's default when the provider/model is changed to one that does not support the current language.
+The model-stack editor SHALL provide a language control for STT (bound to `models.stt[].language`, the primary spec, consistent with how the model/voice/via controls edit `specs[0]` — fallback-chain entries keep their own language) and for pipeline TTS (bound to `models.tts.language`). The same STT control SHALL also apply to realtime STT (`models.realtime.stt.language`), since the realtime and pipeline STT fields share the editor's catalog spec control. Each control SHALL be a dropdown sourced from the per-model language capability matrix for the currently selected provider/model, plus a free-text escape hatch for codes not in the matrix. Each control's default SHALL be the selected model's first matrix entry (`zh-TW` for Deepgram general models, `zh` for `cartesia/ink-whisper`, `en` for the English-only models; TTS defaults to `zh`), matching the compiled runtime defaults; the inherited-vs-pinned distinction SHALL be shown the same way as the other stack fields. Both values SHALL round-trip through save/load, participate in the editor's `isDirty` state, and survive prune. When the provider/model is changed, the language SHALL reset to the new model's default (its first matrix entry) rather than carrying the previous language onto a model that may not support it.
 
 #### Scenario: Pick an STT language from the matrix
 
-- **WHEN** the user selects a language for a pipeline STT model that supports it
-- **THEN** the value is written to `models.stt[].language` and round-trips through save/load
+- **WHEN** the user selects a language for an STT model that supports it
+- **THEN** the value is written to `models.stt[].language` (primary spec) and round-trips through save/load
 
 #### Scenario: Pick a TTS language from the matrix
 
@@ -19,10 +19,10 @@ The model-stack editor SHALL provide a language control for pipeline STT (bound 
 - **WHEN** the user enters a language code not present in the matrix for the selected model
 - **THEN** the value is still written and round-trips, without being blocked
 
-#### Scenario: Provider change resets an unsupported language
+#### Scenario: Provider/model change resets the language to the new model's default
 
-- **WHEN** the user changes the STT or TTS provider/model to one whose matrix entry does not include the current language
-- **THEN** the language resets to the new model's default rather than leaving an unsupported value pinned
+- **WHEN** the user changes the STT or TTS provider/model
+- **THEN** the language resets to the new model's default (its first matrix entry) — e.g. switching to an English-only STT model resets the language to `en` — rather than carrying the previous value onto a model that may not support it
 
 #### Scenario: Language edit reflects in dirty state
 
@@ -31,13 +31,18 @@ The model-stack editor SHALL provide a language control for pipeline STT (bound 
 
 ### Requirement: Unsupported language combination warning
 
-When the selected language is not in the chosen model's matrix entry — most importantly a Chinese code on an English-only STT model such as `deepgram/nova-2-phonecall` — the editor SHALL surface an inline warning at the control. The warning SHALL be advisory: it SHALL NOT disable save and SHALL NOT auto-rewrite the user's value.
+When a profile's persisted language is not in the selected model's matrix entry — a state reachable by loading an existing profile whose model/language predate the matrix, or by the user free-texting a code the model does not support (a fresh provider/model change resets to a supported default, so it does not trigger this) — the editor SHALL surface an inline advisory warning at the control. The warning SHALL NOT disable save and SHALL NOT auto-rewrite the user's value.
 
-#### Scenario: English-only STT model under a Chinese language warns
+#### Scenario: Loaded profile with an unsupported language warns
 
-- **WHEN** the user selects an English-only STT model (e.g. `deepgram/nova-2-phonecall`) while the language is a Chinese code
-- **THEN** an inline warning indicates the model does not support the selected language
+- **WHEN** a profile loads with an STT model and a `language` the model's matrix entry does not include (e.g. an English-only model carrying a Chinese code from an older config)
+- **THEN** an inline warning indicates the model does not support that language
 - **AND** the save action is not disabled and the value is not auto-changed
+
+#### Scenario: Free-text unsupported code warns but is kept
+
+- **WHEN** the user free-texts a language code not in the selected model's matrix entry
+- **THEN** an inline warning is shown, the value is still written, and save is not blocked
 
 ## MODIFIED Requirements
 

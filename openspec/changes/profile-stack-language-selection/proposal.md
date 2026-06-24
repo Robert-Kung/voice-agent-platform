@@ -4,9 +4,10 @@ The runtime already passes `language` to the LiveKit Inference gateway for both 
 
 ## What Changes
 
-- Add a **per-model language capability matrix** to the authoritative catalog: which BCP-47 language codes each STT model accepts, and which languages each TTS provider/model supports (including a Chinese-support signal). Served by the model-defaults endpoint and mirrored in the frontend catalog + shared fixture (contract-tested both sides).
-- Add an **STT language picker** to StackSettings: matrix-driven dropdown, defaulting to `zh-TW` for Deepgram general models, with a free-text escape hatch. When the selected model does not support the chosen language (the English-only specialty Deepgram models), surface a clear warning instead of silently shipping a wrong-language STT.
-- Add a **TTS language picker** to StackSettings: matrix-driven dropdown, defaulting to `zh`, options including `zh-TW`/`zh-CN`, with a free-text escape hatch.
+- Add a **per-model language capability matrix** to the authoritative catalog: an ORDERED BCP-47 language list per STT/TTS model (first entry = that model's default) including a Chinese-support signal. Served by the model-defaults endpoint and mirrored in the frontend catalog + shared fixture (contract-tested both sides).
+- Add an **STT language picker** to StackSettings (shared catalog spec control, so it covers both pipeline `models.stt[].language` and realtime `models.realtime.stt.language`): matrix-driven dropdown defaulting to the selected model's first matrix entry (`zh-TW` for Deepgram general, `en` for English-only models, `zh` for cartesia), with a free-text escape hatch.
+- Add a **TTS language picker** to StackSettings: matrix-driven dropdown defaulting to `zh`, with a free-text escape hatch.
+- **Provider/model change resets the language** to the new model's default; a residual unsupported language (loaded profile predating the matrix, or a free-texted code) surfaces a non-blocking advisory warning — so a zh-TW phone agent can't silently ship an English-only STT.
 - Round-trip `models.stt[].language` and `models.tts.language` through the profile form (dirty-tracking, prune, and provider-change reset consistent with the existing voice/via fields).
 
 ## Capabilities
