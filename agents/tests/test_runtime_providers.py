@@ -113,7 +113,7 @@ class TestSTTViaAndOverride:
 
     def test_override_does_not_touch_other_providers(self, monkeypatch):
         monkeypatch.setenv("AGENT_STT_PROVIDER", "deepgram")
-        comp = providers.build_stt(normalize_specs("stt", [{"provider": "elevenlabs", "model": "scribe_v2_realtime", "via": "inference"}]))
+        comp = providers.build_stt(normalize_specs("stt", [{"provider": "cartesia", "model": "ink-whisper", "via": "inference"}]))
         assert "inference" in type(comp).__module__
 
 
@@ -144,12 +144,14 @@ class TestDefaultBackfill:
         r = providers.resolve_session_components({}, "pipeline")
         assert r.mode == "pipeline"
         assert isinstance(r.llm, lk_llm.FallbackAdapter)
-        assert isinstance(r.stt, lk_stt.FallbackAdapter)
+        # STT default is a single spec (deepgram/nova-2) since the gateway probe
+        # (task 7.3) found elevenlabs/scribe_v2_realtime is rejected by this project's
+        # gateway; the dead primary was dropped, so STT is now a bare component.
+        assert isinstance(r.stt, lk_stt.STT) and not isinstance(r.stt, lk_stt.FallbackAdapter)
         assert isinstance(r.tts, lk_tts.FallbackAdapter)
-        # primary model names equal the old hard-coded first entries
         assert r.model_names["schema"] == 1
         assert r.model_names["llm"] == [{"model": "google/gemini-3.1-flash-lite"}]
-        assert r.model_names["stt"] == [{"model": "elevenlabs/scribe_v2_realtime"}]
+        assert r.model_names["stt"] == [{"model": "deepgram/nova-2"}]
         assert r.model_names["tts"][0]["model"].startswith("cartesia/sonic-3")
 
     def test_partial_block_backfills_missing(self):
@@ -161,7 +163,7 @@ class TestDefaultBackfill:
         assert r.model_names["llm"] == [{"model": "google/gemini-2.5-flash"}]
         assert isinstance(r.llm, lk_llm.LLM) and not isinstance(r.llm, lk_llm.FallbackAdapter)
         # backfilled defaults:
-        assert r.model_names["stt"] == [{"model": "elevenlabs/scribe_v2_realtime"}]
+        assert r.model_names["stt"] == [{"model": "deepgram/nova-2"}]
         assert r.model_names["tts"][0]["model"].startswith("cartesia/sonic-3")
 
 
@@ -205,7 +207,9 @@ class TestCodeReviewFixes:
         # STT spec to direct (which would SpecError and kill session start).
         monkeypatch.setenv("AGENT_STT_PROVIDER", "elevenlabs")
         r = providers.resolve_session_components({}, "pipeline")  # must not raise
-        assert isinstance(r.stt, lk_stt.FallbackAdapter)
+        # default STT is now a single deepgram/nova-2 (see TestDefaultBackfill); a
+        # non-direct override is a no-op and must not crash session start.
+        assert isinstance(r.stt, lk_stt.STT) and not isinstance(r.stt, lk_stt.FallbackAdapter)
 
     def test_p1a_typo_override_is_noop(self, monkeypatch):
         monkeypatch.setenv("AGENT_STT_PROVIDER", "deepgrammm")

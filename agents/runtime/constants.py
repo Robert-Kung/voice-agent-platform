@@ -59,7 +59,6 @@ DEFAULT_PIPELINE_LLM = [
     {"provider": "openai", "model": "gpt-4.1-mini", "via": VIA_INFERENCE},
 ]
 DEFAULT_PIPELINE_STT = [
-    {"provider": "elevenlabs", "model": "scribe_v2_realtime", "via": VIA_INFERENCE, "language": "zh"},
     {"provider": "deepgram", "model": "nova-2", "via": VIA_INFERENCE, "language": "zh-TW"},
 ]
 DEFAULT_PIPELINE_TTS = [
@@ -80,6 +79,11 @@ DEFAULT_REALTIME_VOICE = "Kore"
 # The authoritative set of pipeline provider/models the editor offers. Verified
 # against the installed livekit-agents 1.5.2 SDK accepted set (the `*Models`
 # Literal types in inference/{llm,stt,tts}.py); the namespace is `provider/model`.
+# Then pruned by the live gateway probe (task 7.3, test_catalog_id_accepted_by_gateway):
+# ids the SDK Literal lists but THIS project's gateway rejects ("model not found in
+# list") are dropped — gemini-3-pro, kimi-k2-instruct, deepseek-v3.2, deepgram
+# flux-general*, the whole assemblyai STT set, elevenlabs scribe_v2_realtime STT, and
+# deepgram/aura TTS. Re-run the probe (with LIVEKIT_INFERENCE_PROBE=1) before adding any.
 # This is the SOURCE OF TRUTH for the catalog — routes_model_defaults reflects it
 # and cost (db/cost.py) ANNOTATES it with a priced flag (do NOT derive the catalog
 # from cost keys; that can't express unpriced-but-runnable models).
@@ -95,27 +99,21 @@ MODEL_CATALOG: dict[str, dict[str, list[str]]] = {
             "gpt-oss-120b",
         ],
         "google": [
-            "gemini-3-pro", "gemini-3-flash", "gemini-2.5-pro", "gemini-2.5-flash",
+            "gemini-3-flash", "gemini-2.5-pro", "gemini-2.5-flash",
             "gemini-2.5-flash-lite", "gemini-3.1-flash-lite",
         ],
-        "moonshotai": ["kimi-k2-instruct"],
-        "deepseek-ai": ["deepseek-v3", "deepseek-v3.2"],
+        "deepseek-ai": ["deepseek-v3"],
     },
     "stt": {
         "deepgram": [
             "nova-3", "nova-3-medical", "nova-2", "nova-2-medical",
-            "nova-2-conversationalai", "nova-2-phonecall", "flux-general",
-            "flux-general-en",
+            "nova-2-conversationalai", "nova-2-phonecall",
         ],
         "cartesia": ["ink-whisper"],
-        "assemblyai": [
-            "universal-streaming", "universal-streaming-multilingual", "u3-rt-pro",
-        ],
-        "elevenlabs": ["scribe_v2_realtime"],
     },
     "tts": {
         "cartesia": ["sonic-3", "sonic-2", "sonic-turbo", "sonic"],
-        "deepgram": ["aura", "aura-2"],
+        "deepgram": ["aura-2"],
         "elevenlabs": [
             "eleven_flash_v2", "eleven_flash_v2_5", "eleven_turbo_v2",
             "eleven_turbo_v2_5", "eleven_multilingual_v2",

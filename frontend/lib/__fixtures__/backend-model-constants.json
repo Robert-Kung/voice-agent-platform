@@ -6,21 +6,19 @@
   "pipeline": {
     "defaults": {
       "llm": { "provider": "google", "model": "gemini-3.1-flash-lite" },
-      "stt": { "provider": "elevenlabs", "model": "scribe_v2_realtime" },
+      "stt": { "provider": "deepgram", "model": "nova-2" },
       "tts": { "provider": "cartesia", "model": "sonic-3:9626c31c-bec5-4cca-baa8-f8ba9e84c8bc" }
     },
     "catalog": {
       "llm": {
-        "deepseek-ai": ["deepseek-v3", "deepseek-v3.2"],
+        "deepseek-ai": ["deepseek-v3"],
         "google": [
-          "gemini-3-pro",
           "gemini-3-flash",
           "gemini-2.5-pro",
           "gemini-2.5-flash",
           "gemini-2.5-flash-lite",
           "gemini-3.1-flash-lite"
         ],
-        "moonshotai": ["kimi-k2-instruct"],
         "openai": [
           "gpt-4o",
           "gpt-4o-mini",
@@ -40,7 +38,6 @@
         ]
       },
       "stt": {
-        "assemblyai": ["universal-streaming", "universal-streaming-multilingual", "u3-rt-pro"],
         "cartesia": ["ink-whisper"],
         "deepgram": [
           "nova-3",
@@ -48,15 +45,12 @@
           "nova-2",
           "nova-2-medical",
           "nova-2-conversationalai",
-          "nova-2-phonecall",
-          "flux-general",
-          "flux-general-en"
-        ],
-        "elevenlabs": ["scribe_v2_realtime"]
+          "nova-2-phonecall"
+        ]
       },
       "tts": {
         "cartesia": ["sonic-3", "sonic-2", "sonic-turbo", "sonic"],
-        "deepgram": ["aura", "aura-2"],
+        "deepgram": ["aura-2"],
         "elevenlabs": [
           "eleven_flash_v2",
           "eleven_flash_v2_5",

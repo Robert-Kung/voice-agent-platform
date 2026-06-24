@@ -6,6 +6,7 @@ with the cost rate table (so the UI never offers a variant the runtime rejects o
 misprices).
 """
 
+import asyncio
 import json
 import os
 from pathlib import Path
@@ -141,29 +142,95 @@ def test_direct_buildable_matches_runtime():
     assert ("stt", "deepgram") in DIRECT_BUILDABLE
 
 
+def _catalog_ids():
+    """Flat [(kind, 'provider/model'), ...] over the whole catalog, for probe params."""
+    from runtime.constants import MODEL_CATALOG
+
+    return [
+        (kind, f"{provider}/{model}")
+        for kind in ("llm", "stt", "tts")
+        for provider, models in MODEL_CATALOG[kind].items()
+        for model in models
+    ]
+
+
+async def _probe_gateway(kind: str, mid: str) -> None:
+    """Make a minimal REAL inference call through the LiveKit Inference gateway and
+    raise if the gateway rejects the model id. Construction alone does NO network I/O
+    (it only stores the id), so a renamed/deprecated id is only caught by an actual
+    call: LLM → /v1/chat/completions (404 'model definition'); STT/TTS → WS handshake
+    + session.create ('model not found' / 'INVALID_*'). No room/job needed — we seed
+    an http session context for the WS-based STT/TTS paths."""
+    from livekit import rtc
+    from livekit.agents import inference
+    from livekit.agents.llm import ChatContext
+    from livekit.agents.types import APIConnectOptions
+    from livekit.agents.utils import http_context
+
+    fast = APIConnectOptions(max_retry=0, timeout=20.0)
+    http_context._new_session_ctx()  # STT/TTS WS paths require an http session ctx
+    try:
+        if kind == "llm":
+            comp = inference.LLM(model=mid)
+            try:
+                ctx = ChatContext.empty()
+                ctx.add_message(role="user", content="hi")
+                async with comp.chat(chat_ctx=ctx, conn_options=fast) as stream:
+                    async for _ in stream:
+                        break
+            finally:
+                await comp.aclose()
+        elif kind == "tts":
+            comp = inference.TTS(model=mid)
+            try:
+                async with comp.synthesize("hi", conn_options=fast) as stream:
+                    async for _ in stream:
+                        break
+            finally:
+                await comp.aclose()
+        elif kind == "stt":
+            comp = inference.STT(model=mid)
+            try:
+                stream = comp.stream(conn_options=fast)
+                n = 3200  # 200ms silence @ 16k mono — enough to open the session
+                stream.push_frame(
+                    rtc.AudioFrame(
+                        data=bytes(2 * n), sample_rate=16000, num_channels=1,
+                        samples_per_channel=n,
+                    )
+                )
+                stream.end_input()
+
+                async def _drain():
+                    async for _ in stream:
+                        break
+
+                # A rejected id raises APIError ("model not found") at session.create,
+                # fast — that propagates out of _drain and fails the test. Silence may
+                # legitimately yield no transcript event, so a timeout WITHOUT a
+                # rejection means the gateway accepted the id (not a failure).
+                try:
+                    await asyncio.wait_for(_drain(), timeout=15)
+                except asyncio.TimeoutError:
+                    pass
+                await stream.aclose()
+            finally:
+                await comp.aclose()
+    finally:
+        await http_context._close_http_ctx()
+
+
 @pytest.mark.skipif(
     not os.environ.get("LIVEKIT_INFERENCE_PROBE"),
     reason="network probe — set LIVEKIT_INFERENCE_PROBE=1 (+ LIVEKIT_* creds) to run in CI/pre-deploy",
 )
-def test_catalog_ids_accepted_by_gateway():
-    """GATING backstop (review C1): construct inference.LLM/STT/TTS for every catalog
-    id against the live project. A renamed/deprecated gateway id fails here in CI,
-    BEFORE it can 422 a live SIP call (which has no FallbackAdapter net). Opt-in via
-    LIVEKIT_INFERENCE_PROBE so the default offline suite stays network-free."""
-    from livekit.agents import inference
-    from runtime.constants import MODEL_CATALOG
-
-    builders = {"llm": inference.LLM, "stt": inference.STT, "tts": inference.TTS}
-    failures = []
-    for kind, build in builders.items():
-        for provider, models in MODEL_CATALOG[kind].items():
-            for model in models:
-                mid = f"{provider}/{model}"
-                try:
-                    build(model=mid)  # construction does the gateway model-id check
-                except Exception as e:  # noqa: BLE001
-                    failures.append(f"{kind} {mid}: {e}")
-    assert not failures, "catalog ids rejected by gateway:\n" + "\n".join(failures)
+@pytest.mark.parametrize("kind,mid", _catalog_ids(), ids=lambda v: v)
+def test_catalog_id_accepted_by_gateway(kind, mid):
+    """GATING backstop (review C1/task 7.3): a minimal REAL call per catalog id against
+    the live gateway. A renamed/deprecated id fails HERE in CI, before it can 422 a live
+    SIP call (which has no FallbackAdapter net). Opt-in via LIVEKIT_INFERENCE_PROBE so
+    the default offline suite stays network-free."""
+    asyncio.run(_probe_gateway(kind, mid))
 
 
 @pytest.fixture()

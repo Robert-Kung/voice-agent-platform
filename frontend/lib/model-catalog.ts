@@ -122,10 +122,10 @@ export const FALLBACK_MODEL_CATALOG: ModelCatalog = {
     defaults: {
       llm: { provider: 'google', model: 'gemini-3.1-flash-lite', via: 'inference' },
       stt: {
-        provider: 'elevenlabs',
-        model: 'scribe_v2_realtime',
+        provider: 'deepgram',
+        model: 'nova-2',
         via: 'inference',
-        language: 'zh',
+        language: 'zh-TW',
       },
       tts: {
         provider: 'cartesia',
@@ -138,16 +138,14 @@ export const FALLBACK_MODEL_CATALOG: ModelCatalog = {
     // unpriced (false) — the contract test compares model lists, not the flag.
     catalog: {
       llm: {
-        'deepseek-ai': _c('deepseek-v3', 'deepseek-v3.2'),
+        'deepseek-ai': _c('deepseek-v3'),
         google: _c(
-          'gemini-3-pro',
           'gemini-3-flash',
           'gemini-2.5-pro',
           'gemini-2.5-flash',
           'gemini-2.5-flash-lite',
           'gemini-3.1-flash-lite'
         ),
-        moonshotai: _c('kimi-k2-instruct'),
         openai: _c(
           'gpt-4o',
           'gpt-4o-mini',
@@ -167,7 +165,6 @@ export const FALLBACK_MODEL_CATALOG: ModelCatalog = {
         ),
       },
       stt: {
-        assemblyai: _c('universal-streaming', 'universal-streaming-multilingual', 'u3-rt-pro'),
         cartesia: _c('ink-whisper'),
         deepgram: _c(
           'nova-3',
@@ -175,15 +172,12 @@ export const FALLBACK_MODEL_CATALOG: ModelCatalog = {
           'nova-2',
           'nova-2-medical',
           'nova-2-conversationalai',
-          'nova-2-phonecall',
-          'flux-general',
-          'flux-general-en'
+          'nova-2-phonecall'
         ),
-        elevenlabs: _c('scribe_v2_realtime'),
       },
       tts: {
         cartesia: _c('sonic-3', 'sonic-2', 'sonic-turbo', 'sonic'),
-        deepgram: _c('aura', 'aura-2'),
+        deepgram: _c('aura-2'),
         elevenlabs: _c(
           'eleven_flash_v2',
           'eleven_flash_v2_5',
@@ -246,14 +240,11 @@ export const FALLBACK_MODEL_CATALOG: ModelCatalog = {
     },
     llm_options: [
       { provider: 'deepseek-ai', model: 'deepseek-v3' },
-      { provider: 'deepseek-ai', model: 'deepseek-v3.2' },
-      { provider: 'google', model: 'gemini-3-pro' },
       { provider: 'google', model: 'gemini-3-flash' },
       { provider: 'google', model: 'gemini-2.5-pro' },
       { provider: 'google', model: 'gemini-2.5-flash' },
       { provider: 'google', model: 'gemini-2.5-flash-lite' },
       { provider: 'google', model: 'gemini-3.1-flash-lite' },
-      { provider: 'moonshotai', model: 'kimi-k2-instruct' },
       { provider: 'openai', model: 'gpt-4o' },
       { provider: 'openai', model: 'gpt-4o-mini' },
       { provider: 'openai', model: 'gpt-4.1' },
@@ -270,7 +261,7 @@ export const FALLBACK_MODEL_CATALOG: ModelCatalog = {
       { provider: 'openai', model: 'gpt-5.4' },
       { provider: 'openai', model: 'gpt-oss-120b' },
     ],
-    stt_providers: ['assemblyai', 'cartesia', 'deepgram', 'elevenlabs'],
+    stt_providers: ['cartesia', 'deepgram'],
     tts_providers: ['cartesia', 'deepgram', 'elevenlabs', 'inworld', 'rime'],
   },
   realtime: {
