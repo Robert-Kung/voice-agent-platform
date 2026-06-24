@@ -43,19 +43,24 @@ When the selected language is not in the chosen model's matrix entry — most im
 
 ### Requirement: Voice settings panel
 
-The editor SHALL provide voice settings bound to the correct `models` field per engine mode: in Realtime mode the voice is the `models.realtime.voice` field, and in Pipeline mode the voice is carried by the TTS selection (`models.tts`, where many providers encode the voice in the `model` field). The spec SHALL map each voice control to its exact `models.*` path per mode rather than leaving it generic. Because no curated voice catalog exists in the codebase today (realtime voice is a free-form string, pipeline TTS voices are encoded in the model id), v1 SHALL provide a free-form voice input (optionally with suggestions) for realtime and the provider/model selector for pipeline TTS. A metadata-rich searchable catalog (language/gender/accent badges) and sample playback are deferred extensions, NOT v1 requirements, and the spec SHALL NOT imply metadata is shown when no catalog source exists. Language controls for STT and TTS are specified separately (see "STT and TTS language controls") and are driven by the language capability matrix; a speed control SHALL be shown only for providers/modes that support it (hidden or disabled otherwise).
+The editor SHALL provide voice settings bound to the correct `models` field per engine mode: in Realtime mode the voice is the `models.realtime.voice` field, and in Pipeline mode the voice is a **separate `models.tts.voice` field**, distinct from the TTS model id, consistent with the LiveKit Inference TTS contract (`model` + separate `voice`). The spec SHALL map each voice control to its exact `models.*` path per mode. For pipeline TTS the editor SHALL present a per-provider suggested-voice selection (from the catalog's suggested-voice list) plus a free-form entry for custom or cloned voice ids. For realtime the voice remains a free-form input (optionally with suggestions). STT and TTS **language controls are now in scope** and specified separately (see "STT and TTS language controls"), driven by the language capability matrix; a **speed** control remains out of scope (no per-provider speed capability data exists), and when added in a follow-up SHALL be shown only for providers/modes that support it (hidden or disabled otherwise) — until then no ignored speed value is written. A profile that previously encoded a voice inside the pipeline TTS model id SHALL keep working (the id stays a valid model string) and the editor SHALL surface it without destructively rewriting it, letting the user re-pick into `models.tts.voice`.
 
 #### Scenario: Select a realtime voice
 
 - **WHEN** the user sets the voice in Realtime mode
 - **THEN** the value is written to `models.realtime.voice` and round-trips through save/load
 
-#### Scenario: Pipeline voice via TTS selection
+#### Scenario: Pipeline voice is a separate field
 
-- **WHEN** the user picks a pipeline TTS provider/model that encodes a voice
-- **THEN** the voice is carried by `models.tts` and round-trips through save/load, without a separate conflicting voice field
+- **WHEN** the user picks a pipeline TTS voice from the suggested list (or enters a custom id)
+- **THEN** the value is written to `models.tts.voice` (separate from `models.tts.model`) and round-trips through save/load, and the runtime applies it as the TTS voice parameter
 
-#### Scenario: Unsupported control is hidden or disabled
+#### Scenario: Legacy model-id-encoded voice still works
+
+- **WHEN** a profile has a pipeline TTS voice encoded in the model id (the v1 stopgap shape)
+- **THEN** the editor displays it without rewriting it, the session still runs, and the user MAY re-pick into the `models.tts.voice` field
+
+#### Scenario: Unsupported speed control is hidden or disabled
 
 - **WHEN** the active provider/mode does not support a speed control
 - **THEN** that control is hidden or disabled rather than writing an ignored value

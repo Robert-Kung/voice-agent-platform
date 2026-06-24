@@ -3,12 +3,10 @@
 ## Purpose
 
 Let a profile config declare an optional `models` block (`mode`, `llm`, `stt`, `tts`, `realtime`) that selects the session's models per profile, with built-in defaults as fallback, `AGENT_MODE` env override, and correct propagation through the multi-process worker and SIP dispatch paths.
-
 ## Requirements
-
 ### Requirement: Optional profile models block
 
-A profile config MAY include a `models` block declaring `mode`, `llm`, `stt`, `tts`, and `realtime` settings. When the `models` block or any of its sub-fields is absent, the runtime SHALL fall back to the existing built-in defaults, leaving current profile behavior unchanged.
+A profile config MAY include a `models` block declaring `mode`, `llm`, `stt`, `tts`, and `realtime` settings. The `tts` spec MAY include a `voice` field separate from its `model` id (the LiveKit Inference TTS voice parameter), and any LLM/STT/TTS spec MAY set `via: direct` for a provider with a wired direct build path (e.g. Google LLM with `GOOGLE_API_KEY`). When the `models` block or any of its sub-fields (including `tts.voice`) is absent, the runtime SHALL fall back to the existing built-in defaults, leaving current profile behavior unchanged. The import-light validator SHALL accept these fields when well-formed and reject any `via: direct` combination the runtime cannot build (per the `(kind, provider)` direct-buildable matrix). The validator guarantees spec **shape**, not model-id **runnability**: a free-form/custom model id is NOT validated against the catalog (that would break the custom/cloned-id escape hatch), so an unrunnable pinned id is caught by the runtime preflight fallback (degrade to the safe chain with a warning), not at save time. The validator SHALL also reserve `voice` among the options keys it rejects, so a hand-edited `options.voice` does not collide with the explicit `voice` kwarg at build.
 
 #### Scenario: Profile without models block keeps current behavior
 - **WHEN** a profile has no `models` block
@@ -21,6 +19,14 @@ A profile config MAY include a `models` block declaring `mode`, `llm`, `stt`, `t
 #### Scenario: Partial models block backfills missing components
 - **WHEN** a profile's `models` block declares `llm` but omits `stt` and `tts`
 - **THEN** the declared LLM is used and STT/TTS fall back to built-in defaults
+
+#### Scenario: TTS voice field is recognized and validated
+- **WHEN** a profile's `models.tts` declares a separate `voice` field
+- **THEN** the validator accepts the well-formed spec and the resolved session applies that voice (absent `voice` falls back to prior model-id behavior)
+
+#### Scenario: Google direct LLM spec is accepted
+- **WHEN** a profile's `models.llm` declares `provider: google, via: direct`
+- **THEN** the validator accepts it (a buildable direct combination) and the runtime uses the Google SDK path
 
 ### Requirement: Mode selection and env override
 
@@ -45,3 +51,4 @@ Model settings SHALL travel with the profile config (DB or YAML), so that a fork
 #### Scenario: SIP call inherits profile model config
 - **WHEN** a SIP call is dispatched with the profile fixed by the `AGENT_PROFILE` secret
 - **THEN** the session uses that profile's `models` block, requiring no code change to select models per phone number
+
