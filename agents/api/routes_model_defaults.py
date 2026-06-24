@@ -27,6 +27,7 @@ from runtime.constants import (
     DIRECT_BUILDABLE,
     KNOWN_DIRECT_PROVIDERS,
     MODEL_CATALOG,
+    MODEL_LANGUAGES,
     REALTIME_LLM_PROVIDERS,
     REALTIME_MODEL_ALLOWLIST,
     SUGGESTED_VOICES,
@@ -111,6 +112,15 @@ def build_model_catalog() -> dict:
             },
             "catalog": catalog,
             "voices": {p: list(vs) for p, vs in SUGGESTED_VOICES.items()},
+            # Per-model language capability matrix (advisory), kind→provider→model→
+            # ordered BCP-47 list ([0] = default). Drives the editor language pickers.
+            "languages": {
+                kind: {
+                    provider: {model: list(langs) for model, langs in models.items()}
+                    for provider, models in MODEL_LANGUAGES[kind].items()
+                }
+                for kind in ("stt", "tts")
+            },
             # Legacy (compat): provider lists + flat llm list, now from catalog.
             "llm_options": _flat_llm_options(),
             "stt_providers": sorted(MODEL_CATALOG["stt"]),

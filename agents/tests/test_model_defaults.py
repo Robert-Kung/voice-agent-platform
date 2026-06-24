@@ -94,6 +94,43 @@ def test_catalog_matches_shared_frontend_fixture():
         }
         assert got_struct == mirror["pipeline"]["catalog"][kind], f"{kind} catalog drift"
     assert cat["pipeline"]["voices"] == mirror["pipeline"]["voices"]
+    assert cat["pipeline"]["languages"] == mirror["pipeline"]["languages"]
+
+
+def test_language_matrix_shape():
+    """The language matrix covers every STT/TTS catalog model, is ordered so [0] is
+    the default, and reflects the per-model Chinese capability (the nova-2-phonecall
+    trap + the per-model TTS split this change exists to surface)."""
+    from runtime.constants import MODEL_CATALOG, MODEL_LANGUAGES
+
+    # Every catalog STT/TTS model has a matrix entry (no silent gaps).
+    for kind in ("stt", "tts"):
+        for provider, models in MODEL_CATALOG[kind].items():
+            for model in models:
+                assert model in MODEL_LANGUAGES[kind].get(provider, {}), f"{kind} {provider}/{model}"
+
+    langs = build_model_catalog()["pipeline"]["languages"]
+    # STT: Deepgram general default to zh-TW; specialty models are English-only.
+    assert langs["stt"]["deepgram"]["nova-2"][0] == "zh-TW"
+    assert "zh-TW" in langs["stt"]["deepgram"]["nova-3"]
+    for en_only in ("nova-2-phonecall", "nova-2-medical", "nova-2-conversationalai", "nova-3-medical"):
+        assert all(not c.startswith("zh") for c in langs["stt"]["deepgram"][en_only]), en_only
+    assert langs["stt"]["cartesia"]["ink-whisper"][0] == "zh"
+    # TTS: Chinese-capable vs not, per model.
+    assert "zh" in langs["tts"]["cartesia"]["sonic-3"]
+    assert "zh" in langs["tts"]["elevenlabs"]["eleven_flash_v2_5"]
+    assert "zh" not in langs["tts"]["elevenlabs"]["eleven_flash_v2"]
+    assert "zh" not in langs["tts"]["deepgram"]["aura-2"]
+    assert "zh" not in langs["tts"]["rime"]["arcana"]
+
+
+def test_language_matrix_does_not_gate_save():
+    """The matrix is advisory: the save-time validator accepts a language code that
+    is NOT in the matrix (free-text escape hatch); validator guarantees shape only."""
+    from runtime.constants import normalize_spec
+
+    spec = normalize_spec("stt", {"provider": "deepgram", "model": "nova-2", "language": "xx-YY"})
+    assert spec["language"] == "xx-YY"
 
 
 def test_priced_flag_is_consistent():

@@ -7,9 +7,12 @@ import {
   FALLBACK_MODEL_CATALOG,
   type ModelsConfig,
   isDirectCapable,
+  isLanguageSupported,
+  languageDefault,
   parseLegacyVoiceModel,
   resolveField,
   specPrimary,
+  supportedLanguages,
 } from '@/lib/model-catalog';
 
 // profile-editor-stack-ux: pure-function guards for the model/voice stack.
@@ -201,6 +204,7 @@ describe('model-list source-of-truth contract (task 7.1 — anti-drift)', () => 
       expect(gotStruct).toEqual(backendConstants.pipeline.catalog[kind]);
     }
     expect(FALLBACK_MODEL_CATALOG.pipeline.voices).toEqual(backendConstants.pipeline.voices);
+    expect(FALLBACK_MODEL_CATALOG.pipeline.languages).toEqual(backendConstants.pipeline.languages);
   });
 
   it('realtime variant ↔ cost sync: the offered default is in the allowlist', () => {
@@ -211,6 +215,48 @@ describe('model-list source-of-truth contract (task 7.1 — anti-drift)', () => 
       FALLBACK_MODEL_CATALOG.realtime.defaults.model
     );
     expect(FALLBACK_MODEL_CATALOG.realtime.model_allowlist.length).toBeGreaterThan(0);
+  });
+});
+
+describe('language capability matrix + helpers (language-selection)', () => {
+  const cat = FALLBACK_MODEL_CATALOG;
+
+  it('supportedLanguages / languageDefault derive from the matrix ([0] = default)', () => {
+    expect(languageDefault(cat, 'stt', 'deepgram', 'nova-2')).toBe('zh-TW');
+    expect(languageDefault(cat, 'stt', 'cartesia', 'ink-whisper')).toBe('zh');
+    expect(languageDefault(cat, 'stt', 'deepgram', 'nova-2-phonecall')).toBe('en');
+    expect(languageDefault(cat, 'tts', 'cartesia', 'sonic-3')).toBe('zh');
+    expect(supportedLanguages(cat, 'stt', 'deepgram', 'nova-2')).toContain('zh-TW');
+    // unknown model → empty (imposes no constraint)
+    expect(supportedLanguages(cat, 'stt', 'deepgram', 'made-up')).toEqual([]);
+  });
+
+  it('isLanguageSupported: en-only STT rejects zh, off-catalog model imposes no constraint', () => {
+    expect(isLanguageSupported(cat, 'stt', 'deepgram', 'nova-2', 'zh-TW')).toBe(true);
+    expect(isLanguageSupported(cat, 'stt', 'deepgram', 'nova-2-phonecall', 'zh-TW')).toBe(false);
+    expect(isLanguageSupported(cat, 'tts', 'deepgram', 'aura-2', 'zh')).toBe(false);
+    // free-text / off-catalog model → no matrix entry → not flagged
+    expect(isLanguageSupported(cat, 'stt', 'custom', 'whatever', 'zh-TW')).toBe(true);
+    // empty language → never warns
+    expect(isLanguageSupported(cat, 'stt', 'deepgram', 'nova-2-phonecall', undefined)).toBe(true);
+  });
+
+  it('per-spec language round-trips through buildConfig → splitConfig', () => {
+    const models: ModelsConfig = {
+      mode: 'pipeline',
+      stt: { provider: 'deepgram', model: 'nova-2', language: 'zh-TW' },
+      tts: { provider: 'cartesia', model: 'sonic-3', voice: 'abc', language: 'zh' },
+    };
+    const back = splitConfig(buildConfig({ models } as KnownConfig)).known;
+    expect(back.models).toEqual(models);
+  });
+
+  it('a spec carrying language survives prune (provider/model present)', () => {
+    const models: ModelsConfig = {
+      mode: 'pipeline',
+      stt: { provider: 'deepgram', model: 'nova-2', language: 'zh-TW' },
+    };
+    expect(pruneModels(models)).toEqual(models);
   });
 });
 

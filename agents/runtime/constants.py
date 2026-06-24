@@ -162,6 +162,56 @@ SUGGESTED_VOICES: dict[str, list[dict[str, str]]] = {
     ],
 }
 
+# ── Per-model language capability matrix (advisory) ──────────
+# BCP-47 codes each STT/TTS model is known to accept, ORDERED so [0] is the model's
+# default (the editor derives default = languages[0]; no separate default field).
+# Collected 2026-06-24 from docs.livekit.io/agents/models + provider docs. LiveKit
+# normalizes any of ISO-639-1/BCP-47/name to BCP-47 before the gateway, so codes are
+# advisory: they drive the editor's offered list + unsupported warnings, NOT save-time
+# rejection (free-text escape hatch stays). STT support is per-MODEL (Deepgram's
+# specialty models are English-only despite the phone/clinical naming); TTS Chinese
+# support varies per-model too (elevenlabs v2_5 yes, plain v2 no).
+_DG_GENERAL_LANGS = ["zh-TW", "zh-Hant", "zh-CN", "zh-HK", "en", "en-US", "ja", "ko"]
+_EN_ONLY = ["en", "en-US"]
+_CARTESIA_LANGS = ["zh", "en", "ja", "ko", "es", "fr", "de"]
+_MULTI_ZH_LANGS = ["zh", "en", "ja", "ko", "es", "fr", "de"]  # cross-lingual TTS, zh-capable
+_AURA_LANGS = ["en", "es", "de", "fr", "nl", "it", "ja"]
+_RIME_ARCANA_LANGS = ["en", "es", "fr", "de", "hi", "ja", "pt", "ar"]
+_RIME_MIST_LANGS = ["en", "es", "fr", "de"]
+_INWORLD_V1_LANGS = ["en", "es", "fr", "de", "ja", "ko"]  # v1 zh unconfirmed → no zh
+MODEL_LANGUAGES: dict[str, dict[str, dict[str, list[str]]]] = {
+    "stt": {
+        "deepgram": {
+            "nova-3": _DG_GENERAL_LANGS,
+            "nova-2": _DG_GENERAL_LANGS,
+            "nova-3-medical": _EN_ONLY,
+            "nova-2-medical": _EN_ONLY,
+            "nova-2-conversationalai": _EN_ONLY,
+            "nova-2-phonecall": _EN_ONLY,
+        },
+        "cartesia": {"ink-whisper": _CARTESIA_LANGS},
+    },
+    "tts": {
+        "cartesia": {m: _MULTI_ZH_LANGS for m in ("sonic-3", "sonic-2", "sonic-turbo", "sonic")},
+        "deepgram": {"aura-2": _AURA_LANGS},
+        "elevenlabs": {
+            "eleven_flash_v2_5": _MULTI_ZH_LANGS,
+            "eleven_turbo_v2_5": _MULTI_ZH_LANGS,
+            "eleven_multilingual_v2": _MULTI_ZH_LANGS,
+            "eleven_flash_v2": _EN_ONLY,
+            "eleven_turbo_v2": _EN_ONLY,
+        },
+        "rime": {"arcana": _RIME_ARCANA_LANGS, "mistv2": _RIME_MIST_LANGS},
+        "inworld": {
+            "inworld-tts-1.5-max": _MULTI_ZH_LANGS,
+            "inworld-tts-1.5-mini": _MULTI_ZH_LANGS,
+            "inworld-tts-1-max": _INWORLD_V1_LANGS,
+            "inworld-tts-1": _INWORLD_V1_LANGS,
+        },
+    },
+}
+
+
 # (kind, provider) pairs the runtime can build over a DIRECT SDK connection.
 # Single source consumed by normalize_spec (save-time reject) AND providers.build_*
 # (build-time dispatch); a test asserts the two agree. Adding a pair means wiring

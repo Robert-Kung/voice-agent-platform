@@ -110,6 +110,45 @@
         { "id": "Edward", "label": "Edward — Fast-talking, emphatic American male" },
         { "id": "Olivia", "label": "Olivia — Upbeat, friendly British female" }
       ]
+    },
+    "languages": {
+      "stt": {
+        "deepgram": {
+          "nova-3": ["zh-TW", "zh-Hant", "zh-CN", "zh-HK", "en", "en-US", "ja", "ko"],
+          "nova-2": ["zh-TW", "zh-Hant", "zh-CN", "zh-HK", "en", "en-US", "ja", "ko"],
+          "nova-3-medical": ["en", "en-US"],
+          "nova-2-medical": ["en", "en-US"],
+          "nova-2-conversationalai": ["en", "en-US"],
+          "nova-2-phonecall": ["en", "en-US"]
+        },
+        "cartesia": { "ink-whisper": ["zh", "en", "ja", "ko", "es", "fr", "de"] }
+      },
+      "tts": {
+        "cartesia": {
+          "sonic-3": ["zh", "en", "ja", "ko", "es", "fr", "de"],
+          "sonic-2": ["zh", "en", "ja", "ko", "es", "fr", "de"],
+          "sonic-turbo": ["zh", "en", "ja", "ko", "es", "fr", "de"],
+          "sonic": ["zh", "en", "ja", "ko", "es", "fr", "de"]
+        },
+        "deepgram": { "aura-2": ["en", "es", "de", "fr", "nl", "it", "ja"] },
+        "elevenlabs": {
+          "eleven_flash_v2_5": ["zh", "en", "ja", "ko", "es", "fr", "de"],
+          "eleven_turbo_v2_5": ["zh", "en", "ja", "ko", "es", "fr", "de"],
+          "eleven_multilingual_v2": ["zh", "en", "ja", "ko", "es", "fr", "de"],
+          "eleven_flash_v2": ["en", "en-US"],
+          "eleven_turbo_v2": ["en", "en-US"]
+        },
+        "rime": {
+          "arcana": ["en", "es", "fr", "de", "hi", "ja", "pt", "ar"],
+          "mistv2": ["en", "es", "fr", "de"]
+        },
+        "inworld": {
+          "inworld-tts-1.5-max": ["zh", "en", "ja", "ko", "es", "fr", "de"],
+          "inworld-tts-1.5-mini": ["zh", "en", "ja", "ko", "es", "fr", "de"],
+          "inworld-tts-1-max": ["en", "es", "fr", "de", "ja", "ko"],
+          "inworld-tts-1": ["en", "es", "fr", "de", "ja", "ko"]
+        }
+      }
     }
   },
   "realtime": {

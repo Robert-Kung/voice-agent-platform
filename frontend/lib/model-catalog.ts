@@ -60,6 +60,9 @@ export interface VoiceOption {
 /** Provider-keyed catalog: pick provider → its priced-annotated models. */
 export type CatalogKind = Record<string, CatalogModel[]>;
 
+/** provider → model → ordered BCP-47 language codes ([0] = default). */
+export type LanguageMatrix = Record<string, Record<string, string[]>>;
+
 export interface ModelCatalog {
   schema: number;
   direct_providers: string[];
@@ -70,6 +73,9 @@ export interface ModelCatalog {
     defaults: { llm: ModelSpec; stt: ModelSpec; tts: ModelSpec };
     catalog: { llm: CatalogKind; stt: CatalogKind; tts: CatalogKind };
     voices: Record<string, VoiceOption[]>;
+    /** Per-model language capability matrix (advisory): kind → provider → model →
+     *  ordered BCP-47 codes ([0] = the model's default). Drives the language pickers. */
+    languages: { stt: LanguageMatrix; tts: LanguageMatrix };
     // Legacy (compat) — still served, prefer `catalog`.
     llm_options: { provider: string; model: string }[];
     stt_providers: string[];
@@ -94,6 +100,43 @@ export function isDirectCapable(
   return catalog.direct_buildable.includes(`${kind}:${provider}`);
 }
 
+/** Ordered language codes the matrix lists for a (kind, provider, model). STT and
+ *  TTS only (LLM has no language). Empty when the model isn't in the matrix. */
+export function supportedLanguages(
+  catalog: ModelCatalog,
+  kind: 'stt' | 'tts',
+  provider: string | undefined,
+  model: string | undefined
+): string[] {
+  if (!provider || !model) return [];
+  return catalog.pipeline.languages[kind]?.[provider]?.[model] ?? [];
+}
+
+/** The model's default language = its matrix list's first entry (e.g. zh-TW for
+ *  Deepgram general, zh for cartesia, en for English-only). '' when unknown. */
+export function languageDefault(
+  catalog: ModelCatalog,
+  kind: 'stt' | 'tts',
+  provider: string | undefined,
+  model: string | undefined
+): string {
+  return supportedLanguages(catalog, kind, provider, model)[0] ?? '';
+}
+
+/** Whether a language is in the model's matrix entry. A model with no matrix entry
+ *  imposes no constraint (returns true) so off-catalog/free-text models never warn. */
+export function isLanguageSupported(
+  catalog: ModelCatalog,
+  kind: 'stt' | 'tts',
+  provider: string | undefined,
+  model: string | undefined,
+  language: string | undefined
+): boolean {
+  if (!language) return true;
+  const langs = supportedLanguages(catalog, kind, provider, model);
+  return langs.length === 0 || langs.includes(language);
+}
+
 /** Parse a legacy voice-encoded TTS model id (`provider/model:voiceId`, LiveKit's
  *  documented form) into its base model + voice, for non-destructive migration into
  *  the separate voice field. Returns null when there's no encoded voice. */
@@ -113,6 +156,12 @@ export function parseLegacyVoiceModel(
 // contract test (model-catalog.test.ts) against backend-model-constants.json.
 const _c = (...models: string[]): CatalogModel[] =>
   models.map((m) => ({ model: m, priced: false }));
+
+// Shared language lists (mirror runtime/constants.py MODEL_LANGUAGES; ordered, [0]=default).
+const _DG_GENERAL = ['zh-TW', 'zh-Hant', 'zh-CN', 'zh-HK', 'en', 'en-US', 'ja', 'ko'];
+const _EN_ONLY = ['en', 'en-US'];
+const _MULTI_ZH = ['zh', 'en', 'ja', 'ko', 'es', 'fr', 'de'];
+const _INWORLD_V1 = ['en', 'es', 'fr', 'de', 'ja', 'ko'];
 
 export const FALLBACK_MODEL_CATALOG: ModelCatalog = {
   schema: 2,
@@ -237,6 +286,45 @@ export const FALLBACK_MODEL_CATALOG: ModelCatalog = {
         { id: 'Edward', label: 'Edward — Fast-talking, emphatic American male' },
         { id: 'Olivia', label: 'Olivia — Upbeat, friendly British female' },
       ],
+    },
+    languages: {
+      stt: {
+        deepgram: {
+          'nova-3': _DG_GENERAL,
+          'nova-2': _DG_GENERAL,
+          'nova-3-medical': _EN_ONLY,
+          'nova-2-medical': _EN_ONLY,
+          'nova-2-conversationalai': _EN_ONLY,
+          'nova-2-phonecall': _EN_ONLY,
+        },
+        cartesia: { 'ink-whisper': _MULTI_ZH },
+      },
+      tts: {
+        cartesia: {
+          'sonic-3': _MULTI_ZH,
+          'sonic-2': _MULTI_ZH,
+          'sonic-turbo': _MULTI_ZH,
+          sonic: _MULTI_ZH,
+        },
+        deepgram: { 'aura-2': ['en', 'es', 'de', 'fr', 'nl', 'it', 'ja'] },
+        elevenlabs: {
+          eleven_flash_v2_5: _MULTI_ZH,
+          eleven_turbo_v2_5: _MULTI_ZH,
+          eleven_multilingual_v2: _MULTI_ZH,
+          eleven_flash_v2: _EN_ONLY,
+          eleven_turbo_v2: _EN_ONLY,
+        },
+        rime: {
+          arcana: ['en', 'es', 'fr', 'de', 'hi', 'ja', 'pt', 'ar'],
+          mistv2: ['en', 'es', 'fr', 'de'],
+        },
+        inworld: {
+          'inworld-tts-1.5-max': _MULTI_ZH,
+          'inworld-tts-1.5-mini': _MULTI_ZH,
+          'inworld-tts-1-max': _INWORLD_V1,
+          'inworld-tts-1': _INWORLD_V1,
+        },
+      },
     },
     llm_options: [
       { provider: 'deepseek-ai', model: 'deepseek-v3' },

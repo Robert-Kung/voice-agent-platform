@@ -10,9 +10,12 @@ import {
   type ModelSpec,
   type VoiceOption,
   isDirectCapable,
+  isLanguageSupported,
+  languageDefault,
   parseLegacyVoiceModel,
   resolveField,
   specPrimary,
+  supportedLanguages,
 } from '@/lib/model-catalog';
 
 // Engine-mode model/voice stack settings, opened from the header Stack chip (D7).
@@ -378,13 +381,25 @@ function CatalogSpecField({
   }
 
   function onProviderChange(p: string) {
-    // Reset model to the new provider's default + clear stale tts voice + reset via.
+    // Reset model to the new provider's default + clear stale tts voice + reset via
+    // + reset language to the new model's default (matrix [0]) so no unsupported
+    // language carries over (spec: provider/model change resets the language).
+    const newModel = firstModelOf(p) || model.value;
     const patch: Partial<ModelSpec> = {
       provider: p,
-      model: firstModelOf(p) || model.value,
+      model: newModel,
       via: isDirectCapable(catalog, kind, p) ? via : 'inference',
     };
     if (kind === 'tts') patch.voice = '';
+    if (kind !== 'llm') patch.language = languageDefault(catalog, kind, p, newModel);
+    onChange(patch);
+  }
+
+  function onModelChange(m: string) {
+    // Model change can change the supported-language set (e.g. nova-2 → nova-2-phonecall
+    // is en-only) — reset language to the new model's default too.
+    const patch: Partial<ModelSpec> = { provider: provider.value, model: m, via };
+    if (kind !== 'llm') patch.language = languageDefault(catalog, kind, provider.value, m);
     onChange(patch);
   }
 
@@ -408,7 +423,7 @@ function CatalogSpecField({
         <select
           className={selectCls}
           value={model.value}
-          onChange={(e) => onChange({ provider: provider.value, model: e.target.value, via })}
+          onChange={(e) => onModelChange(e.target.value)}
         >
           {!modelListed && model.value && (
             <option value={model.value}>{model.value}（自訂）</option>
@@ -457,6 +472,26 @@ function CatalogSpecField({
             onChange={(voice) => onChange({ provider: provider.value, model: model.value, voice })}
             onAdoptLegacy={(l) =>
               onChange({ provider: provider.value, model: l.model, voice: l.voice })
+            }
+          />
+        )}
+
+        {/* Language control (STT + TTS) — matrix-driven, default = model's [0] */}
+        {kind !== 'llm' && (
+          <LanguageControl
+            key={`${provider.value}/${model.value}`}
+            langs={supportedLanguages(catalog, kind, provider.value, model.value)}
+            value={spec?.language}
+            placeholder={languageDefault(catalog, kind, provider.value, model.value)}
+            supported={isLanguageSupported(
+              catalog,
+              kind,
+              provider.value,
+              model.value,
+              spec?.language
+            )}
+            onChange={(language) =>
+              onChange({ provider: provider.value, model: model.value, language })
             }
           />
         )}
@@ -540,6 +575,76 @@ function TtsVoiceControl({
       <p className="text-foreground/40 text-[10px]">
         選好語音後用 ▶ Try 試聽；留空則用 model 內建語音。
       </p>
+    </div>
+  );
+}
+
+const LANG_CUSTOM = '__custom__';
+
+// Matrix-driven language picker (STT + TTS). Dropdown of the model's supported BCP-47
+// codes + an "其他" free-text escape hatch. Remounted per provider/model (key) so the
+// custom-mode state resets when the model — and thus the supported set — changes. Shows
+// an advisory warning when the pinned value is outside the model's matrix entry (a loaded
+// mismatch or a free-texted code); never blocks save. Empty = inherit the compiled default.
+function LanguageControl({
+  langs,
+  value,
+  placeholder,
+  supported,
+  onChange,
+}: {
+  langs: string[];
+  value: string | undefined;
+  placeholder: string;
+  supported: boolean;
+  onChange: (language: string) => void;
+}) {
+  const current = value ?? '';
+  const inList = langs.includes(current);
+  const [custom, setCustom] = useState(Boolean(current) && !inList);
+  const showFreeText = custom || langs.length === 0 || (Boolean(current) && !inList);
+  const warn = Boolean(current) && !supported;
+
+  return (
+    <div className="border-border/60 mt-0.5 space-y-1 rounded-md border border-dashed p-2">
+      <span className="text-foreground/60 text-[11px] font-medium">語言 (Language)</span>
+      {langs.length > 0 && (
+        <select
+          className={selectCls}
+          value={showFreeText ? LANG_CUSTOM : current}
+          onChange={(e) => {
+            const v = e.target.value;
+            if (v === LANG_CUSTOM) {
+              setCustom(true);
+              return;
+            }
+            setCustom(false);
+            onChange(v);
+          }}
+        >
+          <option value="">{placeholder ? `（沿用預設：${placeholder}）` : '（沿用預設）'}</option>
+          {langs.map((l) => (
+            <option key={l} value={l}>
+              {l}
+            </option>
+          ))}
+          <option value={LANG_CUSTOM}>其他（自訂代碼）…</option>
+        </select>
+      )}
+      {showFreeText && (
+        <input
+          className={selectCls}
+          value={current}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder="輸入 BCP-47 語言代碼（如 zh-TW）"
+        />
+      )}
+      {warn && (
+        <div className="rounded border border-amber-500/40 bg-amber-500/10 px-2 py-1 text-[10px] leading-relaxed text-amber-700 dark:text-amber-400">
+          此 model 不支援語言「{current}」{langs.length > 0 && <>（支援：{langs.join('、')}）</>}
+          。仍會照樣送出。
+        </div>
+      )}
     </div>
   );
 }
