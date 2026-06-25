@@ -222,15 +222,18 @@ export function normalizeKnownGraph(known: KnownConfig): KnownConfig {
   return out;
 }
 
-// A model spec carries no pinned intent unless it names a provider, model, or
-// voice. `voice` counts because a user may re-pick a tts voice while leaving the
-// model inherited (models.tts.voice is independent of the model id) — dropping the
-// block then would silently lose the voice on save (review H2).
+// A model spec carries no pinned intent unless it names a provider, model, voice,
+// or language. `voice`/`language` count because a user may re-pick either while
+// leaving the model inherited (both are independent of the model id) — dropping the
+// block then would silently lose the choice on save (review H2 + language-selection).
 function specHasValue(spec: ModelSpec | ModelSpec[] | undefined): boolean {
   const s = Array.isArray(spec) ? spec[0] : spec;
   if (!s) return false;
   return Boolean(
-    (s.provider && s.provider.trim()) || (s.model && s.model.trim()) || (s.voice && s.voice.trim())
+    (s.provider && s.provider.trim()) ||
+      (s.model && s.model.trim()) ||
+      (s.voice && s.voice.trim()) ||
+      (s.language && s.language.trim())
   );
 }
 

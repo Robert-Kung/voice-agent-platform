@@ -173,8 +173,9 @@ SUGGESTED_VOICES: dict[str, list[dict[str, str]]] = {
 # support varies per-model too (elevenlabs v2_5 yes, plain v2 no).
 _DG_GENERAL_LANGS = ["zh-TW", "zh-Hant", "zh-CN", "zh-HK", "en", "en-US", "ja", "ko"]
 _EN_ONLY = ["en", "en-US"]
-_CARTESIA_LANGS = ["zh", "en", "ja", "ko", "es", "fr", "de"]
-_MULTI_ZH_LANGS = ["zh", "en", "ja", "ko", "es", "fr", "de"]  # cross-lingual TTS, zh-capable
+# Cross-lingual, zh-capable set shared by cartesia (STT ink-whisper + TTS sonic) and
+# the other multilingual TTS models (one list — keep cartesia from silently drifting).
+_MULTI_ZH_LANGS = ["zh", "en", "ja", "ko", "es", "fr", "de"]
 _AURA_LANGS = ["en", "es", "de", "fr", "nl", "it", "ja"]
 _RIME_ARCANA_LANGS = ["en", "es", "fr", "de", "hi", "ja", "pt", "ar"]
 _RIME_MIST_LANGS = ["en", "es", "fr", "de"]
@@ -189,7 +190,7 @@ MODEL_LANGUAGES: dict[str, dict[str, dict[str, list[str]]]] = {
             "nova-2-conversationalai": _EN_ONLY,
             "nova-2-phonecall": _EN_ONLY,
         },
-        "cartesia": {"ink-whisper": _CARTESIA_LANGS},
+        "cartesia": {"ink-whisper": _MULTI_ZH_LANGS},
     },
     "tts": {
         "cartesia": {m: _MULTI_ZH_LANGS for m in ("sonic-3", "sonic-2", "sonic-turbo", "sonic")},

@@ -375,6 +375,10 @@ function CatalogSpecField({
   // so adopting must yield "sonic-3", not "cartesia/sonic-3" (which would double-prefix
   // to cartesia/cartesia/sonic-3 at runtime via _model_id).
   const legacy = kind === 'tts' ? parseLegacyVoiceModel(model.value) : null;
+  // The language matrix is keyed by the BARE model id; a legacy voice-encoded TTS
+  // model (`sonic-3:<voiceId>`, incl. the compiled default) must be stripped before
+  // the lookup or the picker degrades to free-text with no default (review #1).
+  const langModel = legacy?.model ?? model.value;
 
   function firstModelOf(p: string): string {
     return (kindCatalog[p] ?? [])[0]?.model ?? '';
@@ -399,7 +403,10 @@ function CatalogSpecField({
     // Model change can change the supported-language set (e.g. nova-2 → nova-2-phonecall
     // is en-only) — reset language to the new model's default too.
     const patch: Partial<ModelSpec> = { provider: provider.value, model: m, via };
-    if (kind !== 'llm') patch.language = languageDefault(catalog, kind, provider.value, m);
+    if (kind !== 'llm') {
+      const base = parseLegacyVoiceModel(m)?.model ?? m;
+      patch.language = languageDefault(catalog, kind, provider.value, base);
+    }
     onChange(patch);
   }
 
@@ -479,15 +486,15 @@ function CatalogSpecField({
         {/* Language control (STT + TTS) — matrix-driven, default = model's [0] */}
         {kind !== 'llm' && (
           <LanguageControl
-            key={`${provider.value}/${model.value}`}
-            langs={supportedLanguages(catalog, kind, provider.value, model.value)}
+            key={`${provider.value}/${langModel}`}
+            langs={supportedLanguages(catalog, kind, provider.value, langModel)}
             value={spec?.language}
-            placeholder={languageDefault(catalog, kind, provider.value, model.value)}
+            placeholder={languageDefault(catalog, kind, provider.value, langModel)}
             supported={isLanguageSupported(
               catalog,
               kind,
               provider.value,
-              model.value,
+              langModel,
               spec?.language
             )}
             onChange={(language) =>

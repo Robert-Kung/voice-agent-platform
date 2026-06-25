@@ -258,6 +258,31 @@ describe('language capability matrix + helpers (language-selection)', () => {
     };
     expect(pruneModels(models)).toEqual(models);
   });
+
+  it('a language-only spec survives prune (specHasValue counts language)', () => {
+    const models: ModelsConfig = { mode: 'pipeline', tts: { language: 'zh' } };
+    expect(pruneModels(models)).toEqual(models);
+  });
+
+  it('legacy voice-encoded TTS model id resolves to its base language list (review #1)', () => {
+    // The compiled default TTS model carries a ':voiceId' suffix; the picker strips it
+    // (parseLegacyVoiceModel) before the matrix lookup so the default still offers zh.
+    const enc = 'sonic-3:9626c31c-bec5-4cca-baa8-f8ba9e84c8bc';
+    const base = parseLegacyVoiceModel(enc)?.model ?? enc;
+    expect(base).toBe('sonic-3');
+    expect(languageDefault(cat, 'tts', 'cartesia', base)).toBe('zh');
+    // the un-stripped id misses the matrix — documents WHY the strip is required
+    expect(languageDefault(cat, 'tts', 'cartesia', enc)).toBe('');
+  });
+
+  it('supportedLanguages degrades to [] when the payload omits the languages matrix (review #2)', () => {
+    const noLang = {
+      ...cat,
+      pipeline: { ...cat.pipeline, languages: undefined },
+    } as unknown as typeof cat;
+    expect(supportedLanguages(noLang, 'stt', 'deepgram', 'nova-2')).toEqual([]);
+    expect(isLanguageSupported(noLang, 'stt', 'deepgram', 'nova-2', 'zh-TW')).toBe(true);
+  });
 });
 
 describe('global config survives prompt↔graph convert/revert (task 5.3)', () => {

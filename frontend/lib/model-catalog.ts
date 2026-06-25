@@ -109,7 +109,9 @@ export function supportedLanguages(
   model: string | undefined
 ): string[] {
   if (!provider || !model) return [];
-  return catalog.pipeline.languages[kind]?.[provider]?.[model] ?? [];
+  // `languages?.` guards an older backend payload that predates the matrix — degrade
+  // to "no constraint / free-text" instead of throwing and crashing the panel.
+  return catalog.pipeline.languages?.[kind]?.[provider]?.[model] ?? [];
 }
 
 /** The model's default language = its matrix list's first entry (e.g. zh-TW for
