@@ -70,6 +70,35 @@ profile.config_json (DB row)
 
 ---
 
+## 模型堆疊解析（`models` 區塊）
+
+Profile 的 `models` 區塊宣告要用的 LLM / STT / TTS / 聲音 / 語言;`runtime.providers.resolve_session_components(profile, mode)` 在 `session.start` 前把它解析成實際 component。
+
+```
+models 區塊（或省略 → 編譯預設 runtime.constants.DEFAULT_*）
+        │
+        ▼
+resolve_session_components(mode)
+        │  每個 component 走 _build_with_preflight：
+        │    normalize_spec（補 via=inference、保留 language/voice）
+        │    → build_llm/stt/tts（via:inference 走 inference gateway；
+        │      via:direct 走 provider plugin）
+        │    → 單一 spec = 裸 component；spec 陣列 = FallbackAdapter
+        │  pinned spec 建不起來 → 降級到編譯預設 + loud warning（SIP 無 fallback，絕不掛電話）
+        ▼
+ResolvedComponents(llm, stt, tts | realtime_llm, model_names→cost 層)
+```
+
+要點：
+
+- **Catalog 是唯一真相**：`runtime.constants.MODEL_CATALOG`(provider/model 清單)、`SUGGESTED_VOICES`、`MODEL_LANGUAGES`(per-model 語言矩陣) 由 `api/routes_model_defaults` 吐給前端;`db.cost` 只標註 `priced` flag(不反推 catalog)。三份鏡像(constants / 前端 fixture / `model-catalog.ts` fallback)由 contract test 防漂移。
+- **Catalog 經 gateway 驗證**：`tests/test_model_defaults.py::test_catalog_id_accepted_by_gateway`(opt-in `LIVEKIT_INFERENCE_PROBE=1`)對每個 catalog id 實打 gateway,確保「列得出來 = 跑得起來」。
+- **語言矩陣是 advisory**:save 端只保證 spec 形狀,不擋語言(free-text escape hatch);Deepgram 專用 model(`nova-2-phonecall` 等)為英文 only,UI 會警告但不阻擋。
+- **`via:direct` 受限**:`DIRECT_BUILDABLE = {(llm,google),(stt,deepgram)}`,save 端與 build 端共用同一份(`test_direct_buildable_matches_runtime` 確保兩邊不分歧)。
+- **Realtime**:`TextInputRealtimeModel`(Gemini Live + 外部 Deepgram STT 文字輸入);僅 allowlist 內、可計費的 Gemini 變體;與 graph 互斥。詳見 [root README](../README.md) 的 realtime 說明。
+
+---
+
 ## Tool 三層架構
 
 > 規則：**Tier 1 不再增加新工具**，所有新業務需求走 Tier 3。
