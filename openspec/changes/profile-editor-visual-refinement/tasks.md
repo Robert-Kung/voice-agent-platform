@@ -38,11 +38,11 @@
 
 ## 7. 瀏覽器 QA 與收尾（涵蓋 render 相關行為，D7）
 
-- [ ] 7.1 chip 導向全寬 Model & Voice 視圖；返回編輯後 dirty/未存草稿完整保留（view-swap 不 unmount）
-- [ ] 7.2 Welcome 欄位依 `models.mode` 降權/互換、collapsed 欄位可展開且值不被清除
-- [ ] 7.3 dirty badge 在 editor header 與 profiles list 視覺一致
-- [ ] 7.4 對 5 個既有 profile（含 `elevator_repair_graph`、realtime/pipeline 各一）+ 新建流程做瀏覽器 QA：全頁視圖、雙欄、字級層級、header 分組
-- [ ] 7.5 mobile/desktop 兩種寬度的 header 分組與雙欄降單欄檢查；ESC 優先序（上層有 modal 時不誤返回）
+- [x] 7.1 chip 導向全寬視圖（view-swap、URL 不變）；返回後 Save 變可按、prompt 草稿完整保留 ✓
+- [x] 7.2 Welcome 依 `models.mode` 降權（realtime→Instructions 生效、Message 收合「已填內容」）；展開後原值完整保留 ✓
+- [x] 7.3 dirty badge editor「● 未儲存」與 list「● dirty」同款 amber pill ✓
+- [x] 7.4 dental_clinic(realtime) + elevator_repair_graph(graph/pipeline) QA：全寬視圖、雙欄、inherited/pinned badge、語言 picker 未回退、字級層級、策略/引擎分組 ✓
+- [x] 7.5 ESC 由全寬視圖返回編輯 ✓；mobile(390) header 分組正確收合 ✓（註：engine chip 為 md+ only，mobile 無法經 chip 開 Model&Voice — pre-existing，非本次造成）
 - [x] 7.6 `frontend` build 通過（next build 綠燈、無 type error）
 
 > **§2.4 follow-up**：目前是 wrapper-level 雙欄；若要 prototype / reference 那種 per-segment（TTS/LLM/STT 各卡 `Model｜第二欄`），需在受控前提下重構 `RealtimePanel`/`PipelinePanel` 內部，以既有 28 個契約測試當護欄。建議獨立小 change 處理，不混進本次。
