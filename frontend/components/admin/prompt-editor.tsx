@@ -36,6 +36,7 @@ export function PromptEditor({ form, onGenerateClick, onSave }: PromptEditorProp
 
   const welcomeMessage = (
     <WelcomeField
+      key="welcome_message"
       label="Welcome Message"
       hint="pipeline TTS 逐字朗讀"
       active={messageActive}
@@ -48,6 +49,7 @@ export function PromptEditor({ form, onGenerateClick, onSave }: PromptEditorProp
 
   const welcomeInstructions = (
     <WelcomeField
+      key="welcome_instructions"
       label="Welcome Instructions"
       hint="realtime 模式 — Gemini 自由生成開場"
       active={!messageActive}

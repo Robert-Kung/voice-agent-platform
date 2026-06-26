@@ -53,6 +53,9 @@ export default function ProfileEditorV2Page() {
   // Full-width Model & Voice view (D1). A page-level render swap, NOT a route:
   // the editor form stays mounted so the unsaved draft survives the round trip.
   const [stackView, setStackView] = useState(false);
+  // Graph-convert confirm modal (lives in EditorModeControl) — tracked here so the
+  // Model & Voice view's ESC-to-return yields while it is open (ESC priority, D1).
+  const [modeConfirmOpen, setModeConfirmOpen] = useState(false);
   const [panelOpen, setPanelOpen] = useState(false);
   const [selection, setSelection] = useState<GraphSelection>(NO_SELECTION);
   const [confirmSave, setConfirmSave] = useState<'save' | 'saveAndTry' | null>(null);
@@ -137,7 +140,7 @@ export default function ProfileEditorV2Page() {
             onTry={form.handleTry}
             onSaveAndTry={guardedSaveAndTry}
             onPanelToggle={() => setPanelOpen((o) => !o)}
-            modeControl={<EditorModeControl form={form} />}
+            modeControl={<EditorModeControl form={form} onConfirmingChange={setModeConfirmOpen} />}
             stackSummary={stackSummary}
             onStackClick={() => setStackView((v) => !v)}
           />
@@ -147,7 +150,7 @@ export default function ProfileEditorV2Page() {
             <ModelVoiceView
               form={form}
               onBack={() => setStackView(false)}
-              escEnabled={!showGenerateModal && !confirmSave}
+              escEnabled={!showGenerateModal && !confirmSave && !modeConfirmOpen}
             />
           ) : undefined
         }
@@ -264,8 +267,20 @@ export default function ProfileEditorV2Page() {
 
 // ─── Editor mode control (header) ─────────────────────────────────
 
-function EditorModeControl({ form }: { form: ReturnType<typeof useProfileForm> }) {
+function EditorModeControl({
+  form,
+  onConfirmingChange,
+}: {
+  form: ReturnType<typeof useProfileForm>;
+  /** Notify the page when the graph-convert confirm modal opens/closes so the
+   *  Model & Voice view's ESC-to-return yields to it (ESC priority, D1). */
+  onConfirmingChange?: (open: boolean) => void;
+}) {
   const [confirmGraph, setConfirmGraph] = useState<null | (() => void)>(null);
+
+  useEffect(() => {
+    onConfirmingChange?.(confirmGraph !== null);
+  }, [confirmGraph, onConfirmingChange]);
 
   // Graph requires pipeline. Switching a realtime profile into graph would create
   // an unsavable graph+realtime state, so confirm first; the hook coerces
