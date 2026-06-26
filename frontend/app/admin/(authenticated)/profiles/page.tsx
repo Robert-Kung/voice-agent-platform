@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { toast } from 'sonner';
+import { DirtyBadge } from '@/components/admin/dirty-badge';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { profilesApi, testApi } from '@/lib/admin-api';
 import type { Profile } from '@/lib/admin-api';
@@ -223,12 +224,10 @@ export default function ProfilesPage() {
                           {p.is_active ? 'active' : 'inactive'}
                         </span>
                         {p.is_active && p.is_dirty && (
-                          <span
-                            className="w-fit rounded bg-amber-500/20 px-2 py-0.5 text-xs text-amber-700 dark:text-amber-400"
+                          <DirtyBadge
+                            label="dirty"
                             title="DB 有未 deploy 變更；啟用時會自動走完整 deploy"
-                          >
-                            ● dirty
-                          </span>
+                          />
                         )}
                         {p.is_active && !p.is_dirty && p.last_deployed_at && (
                           <span

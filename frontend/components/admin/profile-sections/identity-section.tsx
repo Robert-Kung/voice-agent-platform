@@ -3,6 +3,7 @@
 import type { UseProfileFormReturn } from '@/hooks/use-profile-form';
 import { LANGUAGES, NAME_PATTERN, TIMEZONES } from '@/hooks/use-profile-form';
 import { CollapsibleSection } from '../collapsible-section';
+import { fieldLabel } from '../editor-type-scale';
 
 const inputClass =
   'border-border bg-background text-foreground w-full rounded-md border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40';
@@ -23,7 +24,7 @@ export function IdentitySection({ form }: IdentitySectionProps) {
     >
       <div className="space-y-3">
         <div>
-          <label className="text-foreground/60 text-[10px]">
+          <label className={`text-foreground/60 ${fieldLabel}`}>
             Name <span className="text-foreground/40">(unique, immutable)</span>
           </label>
           <input
@@ -39,7 +40,7 @@ export function IdentitySection({ form }: IdentitySectionProps) {
           )}
         </div>
         <div>
-          <label className="text-foreground/60 text-[10px]">Display Name</label>
+          <label className={`text-foreground/60 ${fieldLabel}`}>Display Name</label>
           <input
             type="text"
             value={displayName}
@@ -49,7 +50,7 @@ export function IdentitySection({ form }: IdentitySectionProps) {
           />
         </div>
         <div>
-          <label className="text-foreground/60 text-[10px]">Agent Name (LiveKit worker)</label>
+          <label className={`text-foreground/60 ${fieldLabel}`}>Agent Name (LiveKit worker)</label>
           <input
             type="text"
             value={known.agent_name ?? ''}
@@ -60,7 +61,7 @@ export function IdentitySection({ form }: IdentitySectionProps) {
         </div>
         <div className="grid grid-cols-2 gap-2">
           <div>
-            <label className="text-foreground/60 text-[10px]">Language</label>
+            <label className={`text-foreground/60 ${fieldLabel}`}>Language</label>
             <select
               value={known.language ?? ''}
               onChange={(e) => updateKnown('language', e.target.value)}
@@ -75,7 +76,7 @@ export function IdentitySection({ form }: IdentitySectionProps) {
             </select>
           </div>
           <div>
-            <label className="text-foreground/60 text-[10px]">Timezone</label>
+            <label className={`text-foreground/60 ${fieldLabel}`}>Timezone</label>
             <select
               value={known.timezone ?? ''}
               onChange={(e) => updateKnown('timezone', e.target.value)}

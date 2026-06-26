@@ -2,6 +2,7 @@
 
 import type { UseProfileFormReturn } from '@/hooks/use-profile-form';
 import { CollapsibleSection } from '../collapsible-section';
+import { fieldLabel } from '../editor-type-scale';
 
 const inputClass =
   'border-border bg-background text-foreground w-full rounded-md border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40';
@@ -35,7 +36,7 @@ export function HandoffSection({ form }: HandoffSectionProps) {
         {enabled && (
           <div className="space-y-2">
             <div>
-              <label className="text-foreground/60 text-[10px]">Greeting (轉接後第一句)</label>
+              <label className={`text-foreground/60 ${fieldLabel}`}>Greeting (轉接後第一句)</label>
               <input
                 type="text"
                 value={known.human_operator?.greeting ?? ''}
@@ -45,7 +46,7 @@ export function HandoffSection({ form }: HandoffSectionProps) {
               />
             </div>
             <div>
-              <label className="text-foreground/60 text-[10px]">
+              <label className={`text-foreground/60 ${fieldLabel}`}>
                 Tool Description (何時觸發轉接)
               </label>
               <textarea
@@ -60,7 +61,9 @@ export function HandoffSection({ form }: HandoffSectionProps) {
               </p>
             </div>
             <div>
-              <label className="text-foreground/60 text-[10px]">Instructions (人工 persona)</label>
+              <label className={`text-foreground/60 ${fieldLabel}`}>
+                Instructions (人工 persona)
+              </label>
               <textarea
                 value={known.human_operator?.instructions ?? ''}
                 onChange={(e) => updateHandoff('instructions', e.target.value)}
@@ -71,7 +74,7 @@ export function HandoffSection({ form }: HandoffSectionProps) {
             </div>
             <div className="grid grid-cols-2 gap-2">
               <div>
-                <label className="text-foreground/60 text-[10px]">Voice</label>
+                <label className={`text-foreground/60 ${fieldLabel}`}>Voice</label>
                 <input
                   type="text"
                   value={known.human_operator?.voice ?? ''}
@@ -81,7 +84,7 @@ export function HandoffSection({ form }: HandoffSectionProps) {
                 />
               </div>
               <div>
-                <label className="text-foreground/60 text-[10px]">Transfer Message</label>
+                <label className={`text-foreground/60 ${fieldLabel}`}>Transfer Message</label>
                 <input
                   type="text"
                   value={known.human_operator?.transfer_message ?? ''}

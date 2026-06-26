@@ -4,6 +4,7 @@ import { useState } from 'react';
 import type { UseProfileFormReturn } from '@/hooks/use-profile-form';
 import type { QaMode } from '@/hooks/use-profile-form';
 import { CollapsibleSection } from '../collapsible-section';
+import { fieldLabel } from '../editor-type-scale';
 
 const inputClass =
   'border-border bg-background text-foreground w-full rounded-md border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40';
@@ -116,7 +117,9 @@ export function QaSection({ form }: QaSectionProps) {
                 {isOpen && (
                   <div className="border-border space-y-2 border-t p-2">
                     <div>
-                      <label className="text-foreground/60 text-[10px]">Keywords（逗號分隔）</label>
+                      <label className={`text-foreground/60 ${fieldLabel}`}>
+                        Keywords（逗號分隔）
+                      </label>
                       <input
                         type="text"
                         value={(qa.keywords || []).join('、')}
@@ -132,7 +135,7 @@ export function QaSection({ form }: QaSectionProps) {
                       />
                     </div>
                     <div>
-                      <label className="text-foreground/60 text-[10px]">Answer</label>
+                      <label className={`text-foreground/60 ${fieldLabel}`}>Answer</label>
                       <textarea
                         value={qa.answer ?? ''}
                         onChange={(e) => updateQaEntry(idx, { answer: e.target.value })}

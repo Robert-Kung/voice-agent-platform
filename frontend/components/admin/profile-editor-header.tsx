@@ -2,7 +2,8 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
-import { ArrowLeft, Layers, SlidersHorizontal } from 'lucide-react';
+import { ArrowLeft, Settings2, SlidersHorizontal } from 'lucide-react';
+import { DirtyBadge } from '@/components/admin/dirty-badge';
 
 interface ProfileEditorHeaderProps {
   displayName: string;
@@ -62,30 +63,48 @@ export function ProfileEditorHeader({
           </h1>
           {!isNew && <p className="text-foreground/40 truncate font-mono text-xs">{profileName}</p>}
         </div>
-        {isDirty && (
-          <span className="shrink-0 text-xs text-amber-500" title="未儲存的變更">
-            ●
-          </span>
-        )}
+        {isDirty && <DirtyBadge title="未儲存的變更" />}
       </div>
 
-      {/* Center: mode control + Stack chips */}
-      {modeControl}
+      {/* Center: the two orthogonal-but-coupled mode axes, each in a labeled
+          group so a first-time viewer can tell them apart at rest (spec: header
+          strategy/engine axes visually grouped). 策略 (editor_mode) → 引擎
+          (models.mode, via the Stack chip); the → hints the coupling (graph
+          needs pipeline). Hidden < md, where the controls collapse as before. */}
       <div className="hidden items-center gap-2 md:flex">
-        <button
-          type="button"
-          onClick={onStackClick}
-          title="開啟模型 / 語音 stack 設定"
-          className="bg-foreground/5 border-border text-foreground/70 hover:bg-foreground/10 hover:text-foreground inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[11px] whitespace-nowrap transition-colors"
-        >
-          <Layers size={12} />
-          {stackSummary || 'Stack'}
-        </button>
-        {language && (
-          <span className="bg-foreground/5 border-border text-foreground/60 rounded-full border px-2.5 py-0.5 text-[11px] whitespace-nowrap">
-            {language}
-          </span>
+        {modeControl && (
+          <div className="border-border/70 flex items-center gap-2 rounded-lg border border-dashed px-2 py-1">
+            <span className="text-foreground/40 text-[10px] font-medium tracking-wider uppercase">
+              策略
+            </span>
+            {modeControl}
+          </div>
         )}
+        <span className="text-foreground/30 shrink-0 text-xs" aria-hidden>
+          →
+        </span>
+        <div className="border-border/70 flex items-center gap-2 rounded-lg border border-dashed px-2 py-1">
+          <span className="text-foreground/40 text-[10px] font-medium tracking-wider uppercase">
+            引擎
+          </span>
+          {/* Stack chip — an explicit editable entry point (accent fill + cog +
+              hover ring), distinct from the passive language status pill (spec:
+              Stack chip reads as editable, not a status badge). */}
+          <button
+            type="button"
+            onClick={onStackClick}
+            title="開啟模型 / 語音設定"
+            className="bg-primary/10 text-primary ring-primary/20 hover:bg-primary/15 hover:ring-primary/40 inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[11px] font-medium whitespace-nowrap ring-1 transition-colors"
+          >
+            <Settings2 size={12} />
+            {stackSummary || 'Stack'}
+          </button>
+          {language && (
+            <span className="bg-foreground/5 border-border text-foreground/60 rounded-full border px-2.5 py-0.5 text-[11px] whitespace-nowrap">
+              {language}
+            </span>
+          )}
+        </div>
       </div>
 
       {/* Right: actions */}

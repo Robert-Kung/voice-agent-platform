@@ -1,11 +1,12 @@
 'use client';
 
-import { useCallback, useEffect, useRef } from 'react';
-import { Sparkles } from 'lucide-react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { ChevronRight, Sparkles } from 'lucide-react';
 import { markdown } from '@codemirror/lang-markdown';
 import { defaultHighlightStyle, syntaxHighlighting } from '@codemirror/language';
 import { EditorState } from '@codemirror/state';
 import { EditorView, placeholder as cmPlaceholder, keymap, lineNumbers } from '@codemirror/view';
+import { badgeText, fieldLabel } from '@/components/admin/editor-type-scale';
 import type { UseProfileFormReturn } from '@/hooks/use-profile-form';
 
 const inputClass =
@@ -27,51 +28,62 @@ export function PromptEditor({ form, onGenerateClick, onSave }: PromptEditorProp
   const charCount = known.instructions?.length ?? 0;
   const tokenEstimate = Math.ceil(charCount / 4);
 
+  // Active welcome field follows the engine (D5): pipeline reads Welcome Message
+  // verbatim; realtime generates from Welcome Instructions. The inactive field is
+  // collapsed (de-emphasized) but never cleared — it round-trips and is ready when
+  // the engine mode changes.
+  const messageActive = form.modelsMode === 'pipeline';
+
+  const welcomeMessage = (
+    <WelcomeField
+      label="Welcome Message"
+      hint="pipeline TTS 逐字朗讀"
+      active={messageActive}
+      inactiveNote="pipeline 模式才生效"
+      value={known.welcome_message ?? ''}
+      onChange={(v) => updateKnown('welcome_message', v)}
+      placeholder="進線第一句歡迎語…"
+    />
+  );
+
+  const welcomeInstructions = (
+    <WelcomeField
+      label="Welcome Instructions"
+      hint="realtime 模式 — Gemini 自由生成開場"
+      active={!messageActive}
+      inactiveNote="realtime 模式才生效"
+      value={known.welcome_instructions ?? ''}
+      onChange={(v) => updateKnown('welcome_instructions', v)}
+      placeholder="向來電者打招呼，簡短介紹自己並詢問需要什麼協助。"
+    />
+  );
+
   return (
     <div className="flex h-full flex-col space-y-5">
       {/* Welcome helper — only one mode applies */}
       <p className="text-foreground/50 text-xs leading-relaxed">
         <span className="font-medium">僅一種模式生效</span>
         ：pipeline 模式逐字朗讀 Welcome Message；realtime 模式由 Gemini 依 Welcome Instructions
-        生成。
+        生成。依目前引擎，未生效的欄位收起（值保留）。
       </p>
 
-      {/* Welcome Message — compact */}
-      <div>
-        <label className="text-foreground/60 mb-1 block text-xs font-medium">
-          Welcome Message
-          <span className="text-foreground/40 ml-2 font-normal">(pipeline TTS 逐字朗讀)</span>
-        </label>
-        <textarea
-          value={known.welcome_message ?? ''}
-          onChange={(e) => updateKnown('welcome_message', e.target.value)}
-          rows={2}
-          placeholder="進線第一句歡迎語…"
-          className={`${inputClass} resize-y`}
-        />
-      </div>
-
-      {/* Welcome Instructions — for realtime mode */}
-      <div>
-        <label className="text-foreground/60 mb-1 block text-xs font-medium">
-          Welcome Instructions
-          <span className="text-foreground/40 ml-2 font-normal">
-            (realtime 模式 — Gemini 自由生成開場)
-          </span>
-        </label>
-        <textarea
-          value={known.welcome_instructions ?? ''}
-          onChange={(e) => updateKnown('welcome_instructions', e.target.value)}
-          rows={2}
-          placeholder="向來電者打招呼，簡短介紹自己並詢問需要什麼協助。"
-          className={`${inputClass} resize-y`}
-        />
-      </div>
+      {/* Active field first, inactive collapsed below it. */}
+      {messageActive ? (
+        <>
+          {welcomeMessage}
+          {welcomeInstructions}
+        </>
+      ) : (
+        <>
+          {welcomeInstructions}
+          {welcomeMessage}
+        </>
+      )}
 
       {/* System Prompt — dominant, takes remaining space */}
       <div className="flex min-h-0 flex-1 flex-col">
         <div className="mb-1 flex items-center justify-between">
-          <label className="text-foreground/60 text-xs font-medium">
+          <label className={`text-foreground/70 ${fieldLabel}`}>
             System Prompt
             <span className="text-foreground/40 ml-2 font-normal">(instructions)</span>
           </label>
@@ -95,6 +107,72 @@ export function PromptEditor({ form, onGenerateClick, onSave }: PromptEditorProp
           {charCount} chars · ~{tokenEstimate} tokens
         </div>
       </div>
+    </div>
+  );
+}
+
+// ── Welcome field (active emphasized / inactive collapsed, D5) ──────
+
+interface WelcomeFieldProps {
+  label: string;
+  hint: string;
+  active: boolean;
+  inactiveNote: string;
+  value: string;
+  onChange: (v: string) => void;
+  placeholder: string;
+}
+
+function WelcomeField({
+  label,
+  hint,
+  active,
+  inactiveNote,
+  value,
+  onChange,
+  placeholder,
+}: WelcomeFieldProps) {
+  const [expanded, setExpanded] = useState(false);
+
+  if (!active && !expanded) {
+    // De-emphasized: a collapsed row, never cleared. Expandable to edit ahead of
+    // an engine switch; a "has content" dot hints there's a preserved value.
+    return (
+      <button
+        type="button"
+        onClick={() => setExpanded(true)}
+        className="border-border/70 text-foreground/50 hover:bg-foreground/5 hover:text-foreground flex w-full items-center gap-2 rounded-md border border-dashed px-3 py-1.5 text-left"
+      >
+        <ChevronRight size={13} className="shrink-0" />
+        <span className={fieldLabel}>{label}</span>
+        <span className={`text-foreground/40 ${badgeText}`}>{inactiveNote}</span>
+        {value.trim() && <span className="text-foreground/30 ml-auto text-[10px]">已填內容</span>}
+      </button>
+    );
+  }
+
+  return (
+    <div>
+      <label className={`text-foreground/70 mb-1 block ${fieldLabel}`}>
+        {label}
+        <span className="text-foreground/40 ml-2 font-normal">({hint})</span>
+        {active ? (
+          <span className="ml-2 rounded bg-green-500/15 px-1.5 py-0.5 text-[10px] font-medium text-green-700 dark:text-green-400">
+            生效中
+          </span>
+        ) : (
+          <span className="text-foreground/40 ml-2 rounded border border-dashed px-1.5 py-0.5 text-[10px] font-normal">
+            {inactiveNote}
+          </span>
+        )}
+      </label>
+      <textarea
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        rows={2}
+        placeholder={placeholder}
+        className={`${inputClass} resize-y`}
+      />
     </div>
   );
 }
