@@ -8,7 +8,7 @@
 - [x] 2.1 `page.tsx`：`showStack`→`stackView`，移除 `StackSettingsModal`，header chip toggle
 - [x] 2.2 `ProfileEditorLayout` 加 `fullWidth` slot + 「← 返回編輯」+ ESC（gate 在 AI-Generate / SaveConfirm modal 開啟時不誤觸發）
 - [x] 2.3 `StackSettings` 內部邏輯一字未動，僅移出 modal 容器（`model-voice-view.tsx`）
-- [~] 2.4 雙欄佈局採 **wrapper-level**（左說明欄｜右 StackSettings 控制欄）＋窄螢幕降單欄。**未做 per-segment（TTS/LLM/STT 各 `Model｜第二欄`）**——那需動 `RealtimePanel`/`PipelinePanel` 內部，與「不動 StackSettings 內部」約束衝突，故延後為 follow-up（見下方備註）
+- [x] 2.4 雙欄佈局完成：wrapper-level（左說明欄｜右控制欄）**＋ per-segment**（`CatalogSpecField` 內 LLM/STT/TTS 各「左 provider+model｜右 via/voice/language」，無 secondary 的 LLM 退單欄）；窄螢幕(<sm)降單欄。僅動 JSX 排版，handler 全不變，28 契約測試綠
 - [x] 2.5 `models` round-trip 與 modal 版一致（vitest 6.1 斷言 + build 綠燈）
 
 ## 3. Header chip 與兩軸分組 (D4, stack-ux chip affordance)
@@ -45,4 +45,4 @@
 - [x] 7.5 ESC 由全寬視圖返回編輯 ✓；mobile(390) header 分組正確收合 ✓（註：engine chip 為 md+ only，mobile 無法經 chip 開 Model&Voice — pre-existing，非本次造成）
 - [x] 7.6 `frontend` build 通過（next build 綠燈、無 type error）
 
-> **§2.4 follow-up**：目前是 wrapper-level 雙欄；若要 prototype / reference 那種 per-segment（TTS/LLM/STT 各卡 `Model｜第二欄`），需在受控前提下重構 `RealtimePanel`/`PipelinePanel` 內部，以既有 28 個契約測試當護欄。建議獨立小 change 處理，不混進本次。
+> **§2.4 已完成 per-segment 雙欄**（受控重構 `CatalogSpecField` JSX 排版，handler 不變，28 契約測試 + tsc + build 綠、瀏覽器 QA 確認三段皆 `Model｜secondary` 雙欄、窄螢幕降單欄）。同批附帶修掉 language-selection 帶進來的 pre-existing 型別錯（`model-stack.test.ts` `buildConfig` 少參數）。

@@ -247,7 +247,7 @@ describe('language capability matrix + helpers (language-selection)', () => {
       stt: { provider: 'deepgram', model: 'nova-2', language: 'zh-TW' },
       tts: { provider: 'cartesia', model: 'sonic-3', voice: 'abc', language: 'zh' },
     };
-    const back = splitConfig(buildConfig({ models } as KnownConfig)).known;
+    const back = splitConfig(buildConfig({ models } as KnownConfig, {})).known;
     expect(back.models).toEqual(models);
   });
 

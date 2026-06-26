@@ -410,97 +410,113 @@ function CatalogSpecField({
     onChange(patch);
   }
 
+  // Per-segment two-column layout (visual-refinement §2.4): left = which model
+  // (provider + model), right = behavior (via / voice / language). LLMs without a
+  // direct-key toggle have no secondary control, so they stay single-column to
+  // avoid a dangling empty cell. Handlers are unchanged — layout only.
+  const hasSecondary = kind !== 'llm' || isDirectCapable(catalog, kind, provider.value);
+
   return (
     <FieldRow label={label} source={source}>
-      <div className="space-y-1.5">
-        {/* Provider */}
-        <select
-          className={selectCls}
-          value={provider.value}
-          onChange={(e) => onProviderChange(e.target.value)}
-        >
-          {providerOptions.map((p) => (
-            <option key={p} value={p}>
-              {p}
-            </option>
-          ))}
-        </select>
+      <div className={hasSecondary ? 'grid gap-x-3 gap-y-1.5 sm:grid-cols-2' : 'space-y-1.5'}>
+        {/* Left column: which model (provider + model) */}
+        <div className="space-y-1.5">
+          {/* Provider */}
+          <select
+            className={selectCls}
+            value={provider.value}
+            onChange={(e) => onProviderChange(e.target.value)}
+          >
+            {providerOptions.map((p) => (
+              <option key={p} value={p}>
+                {p}
+              </option>
+            ))}
+          </select>
 
-        {/* Model — dropdown filtered to provider; pinned-but-unlisted stays selectable */}
-        <select
-          className={selectCls}
-          value={model.value}
-          onChange={(e) => onModelChange(e.target.value)}
-        >
-          {!modelListed && model.value && (
-            <option value={model.value}>{model.value}（自訂）</option>
-          )}
-          {modelsForProvider.map((m) => (
-            <option key={m.model} value={m.model}>
-              {m.model}
-              {m.priced ? '' : ' · 無成本估算'}
-            </option>
-          ))}
-        </select>
-
-        {/* Unpriced flag below the field (native <select> can't badge options) */}
-        {model.value && modelListed && !currentPriced && (
-          <div className="flex items-center gap-1.5">
-            <UnpricedBadge />
-            <span className="text-foreground/40 text-[10px]">成本估算將標示為不完整</span>
-          </div>
-        )}
-
-        {/* via toggle — only where the runtime can build direct (e.g. google LLM) */}
-        {isDirectCapable(catalog, kind, provider.value) && (
-          <ViaToggle
-            via={via}
-            onChange={(v) =>
-              // Seed provider+model (like the model <select> above), not just
-              // `via`. On an inherited spec, a `{ via }`-only patch is dropped by
-              // pruneModels (specHasValue ignores via) → the direct choice silently
-              // vanishes on save (review P1).
-              onChange({ provider: provider.value, model: model.value, via: v })
-            }
-          />
-        )}
-
-        {/* TTS voice picker (separate models.tts.voice field) */}
-        {kind === 'tts' && (
-          <TtsVoiceControl
-            provider={provider.value}
-            voice={spec?.voice}
-            voices={catalog.pipeline.voices[provider.value] ?? []}
-            legacy={!spec?.voice && legacy ? legacy : null}
-            // Seed provider+model (like the model <select>/via toggle above), not
-            // just `voice`. On an inherited TTS spec a `{ voice }`-only patch persists
-            // as models.tts=[{voice}] with no provider/model, which crashes session
-            // start at normalize (review #1) — write a COMPLETE spec instead.
-            onChange={(voice) => onChange({ provider: provider.value, model: model.value, voice })}
-            onAdoptLegacy={(l) =>
-              onChange({ provider: provider.value, model: l.model, voice: l.voice })
-            }
-          />
-        )}
-
-        {/* Language control (STT + TTS) — matrix-driven, default = model's [0] */}
-        {kind !== 'llm' && (
-          <LanguageControl
-            key={`${provider.value}/${langModel}`}
-            langs={supportedLanguages(catalog, kind, provider.value, langModel)}
-            value={spec?.language}
-            placeholder={languageDefault(catalog, kind, provider.value, langModel)}
-            supported={isLanguageSupported(
-              catalog,
-              kind,
-              provider.value,
-              langModel,
-              spec?.language
+          {/* Model — dropdown filtered to provider; pinned-but-unlisted stays selectable */}
+          <select
+            className={selectCls}
+            value={model.value}
+            onChange={(e) => onModelChange(e.target.value)}
+          >
+            {!modelListed && model.value && (
+              <option value={model.value}>{model.value}（自訂）</option>
             )}
-            onChange={(language) =>
-              onChange({ provider: provider.value, model: model.value, language })
-            }
-          />
+            {modelsForProvider.map((m) => (
+              <option key={m.model} value={m.model}>
+                {m.model}
+                {m.priced ? '' : ' · 無成本估算'}
+              </option>
+            ))}
+          </select>
+
+          {/* Unpriced flag below the field (native <select> can't badge options) */}
+          {model.value && modelListed && !currentPriced && (
+            <div className="flex items-center gap-1.5">
+              <UnpricedBadge />
+              <span className="text-foreground/40 text-[10px]">成本估算將標示為不完整</span>
+            </div>
+          )}
+        </div>
+
+        {/* Right column: behavior (via / voice / language) */}
+        {hasSecondary && (
+          <div className="space-y-1.5">
+            {/* via toggle — only where the runtime can build direct (e.g. google LLM) */}
+            {isDirectCapable(catalog, kind, provider.value) && (
+              <ViaToggle
+                via={via}
+                onChange={(v) =>
+                  // Seed provider+model (like the model <select> above), not just
+                  // `via`. On an inherited spec, a `{ via }`-only patch is dropped by
+                  // pruneModels (specHasValue ignores via) → the direct choice silently
+                  // vanishes on save (review P1).
+                  onChange({ provider: provider.value, model: model.value, via: v })
+                }
+              />
+            )}
+
+            {/* TTS voice picker (separate models.tts.voice field) */}
+            {kind === 'tts' && (
+              <TtsVoiceControl
+                provider={provider.value}
+                voice={spec?.voice}
+                voices={catalog.pipeline.voices[provider.value] ?? []}
+                legacy={!spec?.voice && legacy ? legacy : null}
+                // Seed provider+model (like the model <select>/via toggle above), not
+                // just `voice`. On an inherited TTS spec a `{ voice }`-only patch persists
+                // as models.tts=[{voice}] with no provider/model, which crashes session
+                // start at normalize (review #1) — write a COMPLETE spec instead.
+                onChange={(voice) =>
+                  onChange({ provider: provider.value, model: model.value, voice })
+                }
+                onAdoptLegacy={(l) =>
+                  onChange({ provider: provider.value, model: l.model, voice: l.voice })
+                }
+              />
+            )}
+
+            {/* Language control (STT + TTS) — matrix-driven, default = model's [0] */}
+            {kind !== 'llm' && (
+              <LanguageControl
+                key={`${provider.value}/${langModel}`}
+                langs={supportedLanguages(catalog, kind, provider.value, langModel)}
+                value={spec?.language}
+                placeholder={languageDefault(catalog, kind, provider.value, langModel)}
+                supported={isLanguageSupported(
+                  catalog,
+                  kind,
+                  provider.value,
+                  langModel,
+                  spec?.language
+                )}
+                onChange={(language) =>
+                  onChange({ provider: provider.value, model: model.value, language })
+                }
+              />
+            )}
+          </div>
         )}
       </div>
     </FieldRow>
