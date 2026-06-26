@@ -10,6 +10,12 @@ interface ProfileEditorLayoutProps {
   rightPanel: ReactNode;
   panelOpen?: boolean;
   onPanelClose?: () => void;
+  /**
+   * When set, replaces the center/right split with a single full-width view
+   * (the Model & Voice view, D1). The editor form stays mounted underneath —
+   * this is a render swap, not a route change, so the unsaved draft is kept.
+   */
+  fullWidth?: ReactNode;
 }
 
 /**
@@ -23,6 +29,7 @@ export function ProfileEditorLayout({
   rightPanel,
   panelOpen,
   onPanelClose,
+  fullWidth,
 }: ProfileEditorLayoutProps) {
   useEffect(() => {
     if (!panelOpen) return;
@@ -38,18 +45,22 @@ export function ProfileEditorLayout({
       {/* Sticky header */}
       <div className="border-border bg-background/95 shrink-0 border-b backdrop-blur">{header}</div>
 
-      {/* Main content area — split panel */}
-      <div className="flex min-h-0 flex-1">
-        {/* Center: Prompt area */}
-        <div className="border-border flex min-h-0 flex-1 flex-col overflow-y-auto md:flex-[3] md:border-r">
-          <div className="flex-1 p-6">{center}</div>
-        </div>
+      {/* Main content area — full-width swap (Model & Voice view) or split panel */}
+      {fullWidth ? (
+        <div className="min-h-0 flex-1 overflow-y-auto">{fullWidth}</div>
+      ) : (
+        <div className="flex min-h-0 flex-1">
+          {/* Center: Prompt area */}
+          <div className="border-border flex min-h-0 flex-1 flex-col overflow-y-auto md:flex-[3] md:border-r">
+            <div className="flex-1 p-6">{center}</div>
+          </div>
 
-        {/* Right panel — desktop only (md+) */}
-        <div className="hidden min-h-0 flex-[2] flex-col overflow-y-auto md:flex">
-          <div className="p-4">{rightPanel}</div>
+          {/* Right panel — desktop only (md+) */}
+          <div className="hidden min-h-0 flex-[2] flex-col overflow-y-auto md:flex">
+            <div className="p-4">{rightPanel}</div>
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Mobile drawer (< md) */}
       <AnimatePresence>

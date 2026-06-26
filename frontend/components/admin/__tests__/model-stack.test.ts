@@ -285,6 +285,44 @@ describe('language capability matrix + helpers (language-selection)', () => {
   });
 });
 
+describe('Model & Voice full-width view is shape-neutral (visual-refinement task 6.1)', () => {
+  // The header chip now view-swaps to a full-width Model & Voice view instead of
+  // opening a center modal (D1/D2). The view renders the SAME StackSettings
+  // writing through the SAME form mutators, so the persisted `models` shape is
+  // unchanged by the container swap. These guard that the modal-era shapes still
+  // round-trip identically through buildConfig → splitConfig for both engines.
+  it('pipeline stack selection round-trips unchanged', () => {
+    const models: ModelsConfig = {
+      mode: 'pipeline',
+      llm: { provider: 'google', model: 'gemini-2.5-flash', via: 'direct' },
+      stt: { provider: 'deepgram', model: 'nova-2' },
+      tts: { provider: 'cartesia', model: 'sonic-3:9626c31c', via: 'inference' },
+    };
+    const known: KnownConfig = { instructions: 'hi', tools: [], models };
+    expect(splitConfig(buildConfig(known, {})).known.models).toEqual(models);
+  });
+
+  it('realtime stack selection round-trips unchanged', () => {
+    const models: ModelsConfig = {
+      mode: 'realtime',
+      realtime: {
+        model: 'gemini-2.5-flash-native-audio-preview-12-2025',
+        voice: 'Puck',
+        stt: { provider: 'deepgram', model: 'nova-2' },
+      },
+    };
+    const known: KnownConfig = { instructions: 'hi', tools: [], models };
+    expect(splitConfig(buildConfig(known, {})).known.models).toEqual(models);
+  });
+
+  it('mode-only block (no pinned specs) survives prune from the view', () => {
+    // Selecting an engine in the view writes models.mode even with everything else
+    // inherited — the explicit choice must persist (matches modal behavior).
+    expect(pruneModels({ mode: 'pipeline' })).toEqual({ mode: 'pipeline' });
+    expect(pruneModels({ mode: 'realtime' })).toEqual({ mode: 'realtime' });
+  });
+});
+
 describe('global config survives prompt↔graph convert/revert (task 5.3)', () => {
   it('promptToGraph does not touch the models stack', () => {
     const models: ModelsConfig = {

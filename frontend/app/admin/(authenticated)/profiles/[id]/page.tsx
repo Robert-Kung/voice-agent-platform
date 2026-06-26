@@ -7,6 +7,7 @@ import { buildFlowFromConfig } from '@/components/admin/agent-flow-builder';
 import type { FlowNodeType } from '@/components/admin/agent-flow-builder';
 import { CollapsibleSection } from '@/components/admin/collapsible-section';
 import type { GraphSelection } from '@/components/admin/graph-canvas';
+import { ModelVoiceView } from '@/components/admin/model-voice-view';
 import { NodeInspector } from '@/components/admin/node-inspector';
 import { ProfileEditorHeader } from '@/components/admin/profile-editor-header';
 import { ProfileEditorLayout } from '@/components/admin/profile-editor-layout';
@@ -19,7 +20,6 @@ import {
   ToolsSection,
 } from '@/components/admin/profile-sections';
 import { PromptEditor } from '@/components/admin/prompt-editor';
-import { StackSettings } from '@/components/admin/stack-settings';
 import { useProfileForm } from '@/hooks/use-profile-form';
 import { graphToPrompt, normalizeGraph } from '@/lib/agent-graph';
 import { specPrimary } from '@/lib/model-catalog';
@@ -50,7 +50,9 @@ const GraphCanvas = dynamic(
 export default function ProfileEditorV2Page() {
   const form = useProfileForm();
   const [showGenerateModal, setShowGenerateModal] = useState(false);
-  const [showStack, setShowStack] = useState(false);
+  // Full-width Model & Voice view (D1). A page-level render swap, NOT a route:
+  // the editor form stays mounted so the unsaved draft survives the round trip.
+  const [stackView, setStackView] = useState(false);
   const [panelOpen, setPanelOpen] = useState(false);
   const [selection, setSelection] = useState<GraphSelection>(NO_SELECTION);
   const [confirmSave, setConfirmSave] = useState<'save' | 'saveAndTry' | null>(null);
@@ -137,8 +139,17 @@ export default function ProfileEditorV2Page() {
             onPanelToggle={() => setPanelOpen((o) => !o)}
             modeControl={<EditorModeControl form={form} />}
             stackSummary={stackSummary}
-            onStackClick={() => setShowStack(true)}
+            onStackClick={() => setStackView((v) => !v)}
           />
+        }
+        fullWidth={
+          stackView ? (
+            <ModelVoiceView
+              form={form}
+              onBack={() => setStackView(false)}
+              escEnabled={!showGenerateModal && !confirmSave}
+            />
+          ) : undefined
         }
         center={
           isGraphMode ? (
@@ -235,9 +246,6 @@ export default function ProfileEditorV2Page() {
           }}
         />
       )}
-
-      {/* Model / voice stack settings — opened from the header Stack chip (D7) */}
-      {showStack && <StackSettingsModal form={form} onClose={() => setShowStack(false)} />}
 
       {/* AI Generate Modal */}
       {showGenerateModal && (
@@ -450,63 +458,6 @@ function SaveConfirmModal({
             className="bg-primary text-primary-foreground rounded-md px-4 py-1.5 text-sm font-medium hover:opacity-90"
           >
             確認並儲存
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ─── Stack settings modal (header chip → model/voice stack) ───────
-
-function StackSettingsModal({
-  form,
-  onClose,
-}: {
-  form: ReturnType<typeof useProfileForm>;
-  onClose: () => void;
-}) {
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
-    window.addEventListener('keydown', handler);
-    return () => window.removeEventListener('keydown', handler);
-  }, [onClose]);
-
-  return (
-    <div
-      className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/50 p-4 backdrop-blur-sm sm:items-center"
-      onClick={(e) => e.target === e.currentTarget && onClose()}
-    >
-      <div className="bg-background border-border my-auto w-full max-w-lg rounded-xl border p-6 shadow-xl">
-        <div className="mb-4 flex items-start justify-between gap-2">
-          <div>
-            <h2 className="text-foreground flex items-center gap-2 text-base font-semibold">
-              <Layers size={16} />
-              模型 / 語音 Stack
-            </h2>
-            <p className="text-foreground/50 mt-0.5 text-xs">
-              profile 級設定，套用於整個 agent（global 底層）。未宣告的欄位走編譯預設。
-            </p>
-          </div>
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="Close"
-            className="text-foreground/60 hover:bg-foreground/5 hover:text-foreground -mt-1 -mr-1 rounded-md p-1"
-          >
-            <X size={16} />
-          </button>
-        </div>
-        <StackSettings form={form} />
-        <div className="mt-5 flex items-center justify-end">
-          <button
-            type="button"
-            onClick={onClose}
-            className="border-border hover:bg-foreground/5 rounded-md border px-4 py-1.5 text-sm"
-          >
-            完成
           </button>
         </div>
       </div>

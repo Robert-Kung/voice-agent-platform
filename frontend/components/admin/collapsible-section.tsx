@@ -2,6 +2,7 @@
 
 import { type ReactNode, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
+import { sectionTitle } from '@/components/admin/editor-type-scale';
 
 interface CollapsibleSectionProps {
   title: string;
@@ -35,7 +36,7 @@ export function CollapsibleSection({
       >
         <span className="text-foreground/50 w-4 shrink-0 text-xs">{open ? '▾' : '▸'}</span>
         {icon && <span className="text-foreground/60 shrink-0">{icon}</span>}
-        <span className="text-foreground flex-1 text-sm font-medium">{title}</span>
+        <span className={`text-foreground flex-1 ${sectionTitle}`}>{title}</span>
         {badge && !open && <span className="text-foreground/50 text-xs">{badge}</span>}
       </button>
       <AnimatePresence initial={false}>
