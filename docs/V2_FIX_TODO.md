@@ -3,6 +3,7 @@
 > Design review baseline: 2026-05-15
 > Audit reference: /home/user/.gstack/projects/Robert-Kung-first-livekit/designs/design-audit-20260515/
 > 對應 CLAUDE.md 任務表項 9 (Docker build 驗證 + 瀏覽器 QA)
+> 狀態：已完成並被後續 OpenSpec changes 吸收；目前 default editor 為 `frontend/app/admin/(authenticated)/profiles/[id]/page.tsx`。
 
 ---
 
@@ -18,7 +19,7 @@
 ## Sprint A — 必修（GA 前）✅ 完成
 
 ### A1. AI Generate Modal 關閉與覆寫保護 ✅
-**檔案**：`frontend/app/admin/(authenticated)/profiles/[id]/v2/page.tsx`（`GeneratePromptModal` 元件）
+**檔案**：`frontend/app/admin/(authenticated)/profiles/[id]/page.tsx`（`GeneratePromptModal` 元件）
 
 - [x] Escape 鍵關閉 modal
 - [x] 點 backdrop 關閉 modal（textarea / dialog 內點擊不關）

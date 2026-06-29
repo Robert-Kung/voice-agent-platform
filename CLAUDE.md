@@ -14,43 +14,46 @@ LiveKit-based 語音 Agent 平台。Profile-driven Agent 系統，admin UI 管�
 
 ---
 
-## Profile Editor v2（2026-05-14 啟動）
+## Profile Editor（v2 → default，2026-05-14 啟動）
 
 > V1 Admin UI 重新設計已完成，歸檔於 `docs/archive/ADMIN_UI_REDESIGN_V1_2026-05.md`
 
-### 設計方向
+### 現況
 
-參考 Retell AI / Vapi 的 Agent Builder 介面，將現有 Tab-based 編輯器改為 **Split-panel Prompt-first** 架構：
-- **中央 60%**：System Prompt 永遠可見（Welcome Message + Instructions），搭配 CodeMirror 6 編輯器
-- **右側 40%**：可折疊設定面板（Tools / QA / Hours / Handoff / Identity / Advanced）+ 頂部 Flow minimap
-- **Header**：Stack summary chips（Gemini Live · Deepgram · zh）+ Save + Try
-- **AI Generate**：右上角按鈕呼叫 Gemini 2.0 Flash Lite 產生 prompt 初稿
+Profile Editor v2 已取代舊 prototype，default route 是 `frontend/app/admin/(authenticated)/profiles/[id]/page.tsx`；舊 `/v2` 路由已退場/redirect。OpenSpec 的最新真相在 `openspec/specs/`，近期 `openspec/changes/` 全數歸檔。
 
-### 路徑
+核心能力：
+- **Prompt / Graph 雙模式**：prompt-first split panel；graph mode 使用 editable React Flow canvas + Node Inspector。
+- **Global-as-base-layer IA**：global prompt、identity、QA、hours、tools、model/voice stack 是 always-on base layer；graph 只是 branching layer。
+- **Model & Voice full-width view**：Header Stack chip 開啟全頁視圖，編輯 `models.mode`、LLM/STT/TTS provider+model、voice、language、`via`。
+- **Catalog source of truth**：`GET /api/model-defaults` 由 backend constants 提供 LiveKit Inference catalog、voice suggestions、language matrix、pricing flags；frontend fallback 由 shared fixture 雙邊測試防 drift。
+- **AI Generate**：prompt create/enhance 已完成，使用 LM Studio endpoint；graph 草稿生成仍是延伸項。
 
-Prototype 建在 `/admin/profiles/[id]/v2`，不動現有 v1 頁面。驗證後再替換。
+### 已落地 changes
 
-### 進度
+| Change | 狀態 | 重點 |
+|---|---|---|
+| `multi-model-runtime` | ✅ archived | `models` block、provider runtime、cost |
+| `graph-agent-builder` | ✅ archived | editable graph editor + schema |
+| `graph-runtime-executor` | ✅ archived | pipeline graph runtime + fallback |
+| `profile-editor-model-voice-ux` | ✅ archived | Stack UI first pass |
+| `profile-model-catalog-runtime` | ✅ archived | catalog endpoint + direct Google LLM + voice |
+| `profile-stack-language-selection` | ✅ archived | STT/TTS language matrix + controls |
+| `profile-editor-visual-refinement` | ✅ archived | full-width Model & Voice view + browser QA |
 
-| # | 內容 | 狀態 |
-|---|------|------|
-| 1 | `useProfileForm` hook 抽出 | ✅ |
-| 2 | `ProfileEditorLayout` split-panel | ✅ |
-| 3 | 右側折疊區塊 6 個元件 | ✅ |
-| 4 | 中央 Prompt Editor（CodeMirror 6） | ✅ |
-| 5 | Header bar + Stack chips | ✅ |
-| 6 | Flow minimap 整合右側面板頂部 | ✅ |
-| 7 | AI Generate Prompt（Gemini 2.0 Flash Lite） | ✅ |
-| 8 | v2/page.tsx 組裝 + Profiles 列表加 Beta 入口 | ✅ |
-| 9 | Docker build 驗證 + 瀏覽器 QA | 🔄 |
+### 目前殘項
+
+- Live 語音 e2e：`tool_result → handoff/transfer_to_human` 已修並在 Try log 驗證；外部 LINE 單據已確認收到。剩餘風險是建單 endpoint side effect 成功但 response 超過 agent HTTP tool 的 10s timeout，需調整 quick-ack / timeout / async job contract。
+- CI workflow 已建立：root `.github/workflows/test.yml` 跑 backend pytest 與 frontend vitest。
+- Per-node model UI、AI Generate graph 草稿、end-node hang-up 仍是 follow-up，不是現有 blocker。
 
 ### AI Generate Prompt 設計
 
 - 後端 endpoint：`POST /api/admin/generate-prompt`
-- 使用 `GOOGLE_API_KEY`（已有），模型 `gemini-2.0-flash-lite`
+- 目前走 LM Studio OpenAI-compatible endpoint（`http://192.168.2.100:1234/v1`，`google/gemma-4-26b-a4b`）
 - 輸入：使用者描述（business type + 功能需求）
 - 輸出：完整 system prompt 初稿
-- 前端：System Prompt 區域右上角「✨ Generate」按鈕 → modal 輸入描述 → 填回編輯器
+- 前端：System Prompt 區域右上角 `Generate` 按鈕 → modal 輸入描述 → preview → 使用者確認 Replace
 
 ---
 
@@ -59,7 +62,7 @@ Prototype 建在 `/admin/profiles/[id]/v2`，不動現有 v1 頁面。驗證後�
 - 安全 / 中間件 / auth：Apr 30 review 後已 hardened，動到 `frontend/middleware.ts`、`frontend/app/api/admin/*`、`api/routes_test.py` 前先看 git log 理解
 - Admin 路由結構：`frontend/app/admin/(authenticated)/` route group 包住所有登入後頁面（共用含 sidebar 的 layout），`frontend/app/admin/login/` 維持平行、不套 sidebar。新增登入後頁面請放進 `(authenticated)/` 內
 - 登入跳轉用 `window.location.assign()` 而非 `router.replace()`：login 頁與 dashboard 在不同 layout 下，但 App Router 仍會 prefetch dashboard 的 RSC payload；prefetch 發生時還沒 cookie，middleware 回 redirect 並被 client cache，導致登入後 `router.replace` 拿到的是舊的 redirect。hard navigation 直接繞過 client cache
-- Test：`cd agents && uv run pytest tests/ -q`，目前 147 pass。`tests/test_api.py` 的 `client` fixture 會 unset `ADMIN_API_TOKEN`，auth 強制驗證用 `secured_client`
+- Test：`cd agents && uv run pytest tests/ -q`（目前 275 passed / 44 skipped）；`cd frontend && pnpm test`（目前 76 passed）。`tests/test_api.py` 的 `client` fixture 會 unset `ADMIN_API_TOKEN`，auth 強制驗證用 `secured_client`
 - DB：SQLite，profile 透過 `db.profile_store` 持久化；YAML 是 fallback。`db.engine` 是 module-global singleton，conftest.py 已將測試 DB 指向 `:memory:`
 - Profile 改名 / tool 拿掉時記得同步更新 `agents/tests/test_agent_system.py` 的 assertion
 - Cost：realtime 用 Gemini Live token rates（`db/cost.py`），pipeline 走 LLM/STT/TTS 分開計費
