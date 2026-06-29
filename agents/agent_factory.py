@@ -320,6 +320,11 @@ def _build_node_instructions(preamble: str, node: dict, user_edges: list[dict]) 
         parts.append(preamble)
     if (node.get("prompt") or "").strip():
         parts.append(node["prompt"].strip())
+    if node.get("type") == "handoff":
+        parts.append(
+            "[轉接規則] 進入此階段時必須立即呼叫 transfer_to_human，"
+            "不要只用文字說明已轉接。"
+        )
     if user_edges:
         lines = ["[轉移規則] 對話進行中，符合下列情況時呼叫對應工具進入下一階段（依序判斷，先命中者生效）："]
         for e in user_edges:
@@ -350,16 +355,46 @@ def _make_transition_tool(registry: dict, target_id: str, condition: str):
     return _goto
 
 
-def _wrap_domain_tool_for_handoff(tool, registry: dict, target_id: str):
-    """Wrap a domain tool so it returns (result, target_agent): the LLM speaks the
-    tool result, then the SDK hands off to the target (tool_result transition).
+def _inject_tool_result(target: Agent, result) -> None:
+    if not isinstance(target.instructions, str):
+        return
+    base_instructions = target.instructions.split("\n\n[上一個工具結果]\n", 1)[0]
+    result_context = json.dumps(result, ensure_ascii=False, default=str)
+    target._instructions = f"{base_instructions}\n\n[上一個工具結果]\n{result_context}"
+
+
+def _wrap_domain_tool_for_handoff(tool, registry: dict, target_id: str, handoff_tool=None):
+    """Wrap a domain tool so it hands off directly after it returns.
+
+    LiveKit marks a tool reply as required when the tool returns non-Agent output.
+    For graph `tool_result` edges, the edge means "transition after this tool",
+    so the source node should not generate a free-form reply before the handoff.
+    We inject the result into the target node instructions, then return only the
+    target Agent so the SDK switches agents without a source-node tool reply.
     functools.wraps preserves the original parameter schema via __wrapped__."""
     raw = tool._func
 
     @functools.wraps(raw)
     async def _wrapped(self, *args, **kwargs):
         result = await raw(self, *args, **kwargs)
-        return (result, registry[target_id])
+        target = registry[target_id]
+        _inject_tool_result(target, result)
+        has_livekit_context = False
+        if handoff_tool is not None:
+            try:
+                self.session
+                self.chat_ctx
+                has_livekit_context = True
+            except (AttributeError, RuntimeError):
+                has_livekit_context = False
+        if handoff_tool is not None and has_livekit_context:
+            handoff_output = await handoff_tool._func(self)
+            handoff_items = handoff_output if isinstance(handoff_output, tuple) else (handoff_output,)
+            for item in handoff_items:
+                if isinstance(item, Agent):
+                    _inject_tool_result(item, result)
+            return handoff_output
+        return target
 
     return function_tool(_wrapped, name=tool.info.name, description=tool.info.description)
 
@@ -384,6 +419,11 @@ def _make_node_agent_class(node_instructions: str, node_type: str, welcome: str,
             await self.update_chat_ctx(self.session.history)
             # A user_turn handoff returns only the target Agent (no reply_required), so
             # we kick the reply ourselves or the node stays silent until the caller speaks.
+            if node_type == "handoff":
+                self.session.generate_reply(
+                    instructions="立即呼叫 transfer_to_human 進行真人轉接；不要只用文字說明已轉接。"
+                )
+                return
             self.session.generate_reply()
 
     for name, method in tool_attrs.items():
@@ -403,6 +443,7 @@ def build_graph_root_agent(profile: dict, mode: str, graph: dict) -> Agent:
     preamble = _compose_global_preamble(profile, graph)
     nodes = graph["nodes"]
     edges = graph["edges"]
+    node_by_id = {node["id"]: node for node in nodes}
     welcome = profile.get("welcome_message", "您好，請問有什麼可以為您服務的？")
 
     # Profile-declared domain tools, built once, selected per node by name.
@@ -442,10 +483,17 @@ def build_graph_root_agent(profile: dict, mode: str, graph: dict) -> Agent:
         # returning (v1 unconditional; first tool_result edge by array order wins).
         if toolresult_edges:
             target = toolresult_edges[0]["target"]
+            target_handoff_tool = (
+                handoff_tool
+                if (node_by_id.get(target) or {}).get("type") == "handoff"
+                else None
+            )
             for tname in list(tool_attrs.keys()):
                 if tname in ("lookup_qa", "transfer_to_human"):
                     continue  # don't hijack global/handoff tools
-                tool_attrs[tname] = _wrap_domain_tool_for_handoff(tool_attrs[tname], registry, target)
+                tool_attrs[tname] = _wrap_domain_tool_for_handoff(
+                    tool_attrs[tname], registry, target, target_handoff_tool
+                )
 
         # user_turn transitions.
         for e in user_edges:

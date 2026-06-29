@@ -107,16 +107,15 @@ def test_user_turn_transition_tool_hands_off_to_target():
     assert "提供資訊" in target.instructions      # handed off to the 'info' node Agent
 
 
-def test_tool_result_wraps_domain_tool_to_return_tuple():
+def test_tool_result_wraps_domain_tool_to_handoff_directly():
     profile = _graph_profile()
     root = build_graph_root_agent(profile, "pipeline", normalize_graph(profile["graph"]))
-    # start has a tool_result edge → its get_current_time is wrapped to (result, agent)
+    # start has a tool_result edge → its get_current_time is wrapped to hand off directly.
     wrapped = _tool_by_name(root, "get_current_time")
-    out = _call(wrapped, root)
-    assert isinstance(out, tuple) and len(out) == 2
-    result, handoff_agent = out
-    assert "current_time" in result               # original tool result preserved
+    handoff_agent = _call(wrapped, root)
     assert "為您轉接真人" in handoff_agent.instructions  # hands off to the 'ho' node
+    assert "上一個工具結果" in handoff_agent.instructions
+    assert "current_time" in handoff_agent.instructions
 
 
 def test_handoff_node_mounts_transfer_to_human():
@@ -124,7 +123,34 @@ def test_handoff_node_mounts_transfer_to_human():
     root = build_graph_root_agent(profile, "pipeline", normalize_graph(profile["graph"]))
     # reach the ho node via the registry by following the tool_result handoff
     wrapped = _tool_by_name(root, "get_current_time")
-    _, ho_agent = _call(wrapped, root)
+    ho_agent = _call(wrapped, root)
+    assert "transfer_to_human" in _tool_names(ho_agent)
+
+
+def test_handoff_node_instructs_model_to_call_transfer_tool():
+    profile = _graph_profile()
+    root = build_graph_root_agent(profile, "pipeline", normalize_graph(profile["graph"]))
+    wrapped = _tool_by_name(root, "get_current_time")
+    ho_agent = _call(wrapped, root)
+    assert "必須立即呼叫 transfer_to_human" in ho_agent.instructions
+    assert "不要只用文字說明已轉接" in ho_agent.instructions
+
+
+def test_user_turn_and_tool_result_tools_coexist_on_same_node():
+    profile = _graph_profile()
+    root = build_graph_root_agent(profile, "pipeline", normalize_graph(profile["graph"]))
+
+    names = _tool_names(root)
+    assert "goto_info" in names
+    assert "get_current_time" in names
+
+    goto = _tool_by_name(root, "goto_info")
+    info_agent = _call(goto, root)
+    assert "提供資訊" in info_agent.instructions
+
+    wrapped = _tool_by_name(root, "get_current_time")
+    ho_agent = _call(wrapped, root)
+    assert "current_time" in ho_agent.instructions
     assert "transfer_to_human" in _tool_names(ho_agent)
 
 
