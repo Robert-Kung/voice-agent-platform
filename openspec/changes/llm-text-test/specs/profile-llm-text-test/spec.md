@@ -14,7 +14,7 @@
 #### Scenario: 多輪 messages 依序執行
 
 - **WHEN** run request 帶多則 user messages
-- **THEN** runner 依序執行每輪對話並保留 chat context，每輪各記錄一個 `llm_response` 事件，事件標示輪次
+- **THEN** runner 依序執行每輪對話並保留單一 chat context（user/assistant/tool 訊息跨輪累積），每輪各記錄一個 `llm_response` 事件，事件標示輪次；run 記錄完整 messages 序列，既有單 `message` 欄位契約保持相容
 
 #### Scenario: LLM 呼叫失敗或逾時
 
@@ -33,7 +33,7 @@
 #### Scenario: tool_result edge 轉移
 
 - **WHEN** LLM 呼叫的 domain tool 所在 node 有 `tool_result` edge
-- **THEN** runner 在工具回傳後記錄 `tool_result` 與轉移事件，進入 target node
+- **THEN** runner 將 dry-run 工具結果餵回 LLM 完成本輪回覆，回覆完成後無條件轉移至 target node（不由 LLM 決定是否轉移，對齊 runtime v1 語意），並記錄 `tool_result` 與轉移事件：chat context 跨 node 保留不重置
 
 #### Scenario: 終止條件
 
@@ -61,7 +61,7 @@ llm_text run 中 LLM 呼叫 domain tools 時，系統 SHALL 以 dry-run dispatch
 #### Scenario: Realtime profile 執行文字測試
 
 - **WHEN** 對 realtime mode profile 建立 llm_text run
-- **THEN** runner 以 fallback LLM 完成測試，事件中含 warning 說明「以 fallback LLM 執行，非 realtime 模型」，run 正常 completed
+- **THEN** runner 以 fallback LLM 完成測試，事件中含 warning 說明「以 fallback LLM 執行，非 realtime 模型」，run 正常 completed；UI 在 run 頂部以顯眼 banner 呈現該 warning
 
 ### Requirement: Run kind 區分與 API 相容
 
@@ -84,12 +84,17 @@ llm_text run 中 LLM 呼叫 domain tools 時，系統 SHALL 以 dry-run dispatch
 
 ### Requirement: 事件 sanitization 與 usage 記錄
 
-llm_text run 的所有事件 payload（含 LLM 回覆文字、tool call 參數）SHALL 經既有 sanitizer 處理後才持久化；LLM API 有回報 usage 時 SHALL 記錄 token usage 事件。
+llm_text run 的結構化事件 payload（tool call 參數、config）SHALL 經既有 key-based sanitizer 處理；LLM 回覆全文 SHALL 經保守的 pattern-based 規則處理（只紅線明確格式的 secret 樣式與 URL query credentials），MUST NOT 因對話提及「token」等字詞而誤傷正常內容；LLM API 有回報 usage 時 SHALL 記錄 token usage 事件。
 
-#### Scenario: LLM 回覆含機密樣式內容
+#### Scenario: Tool call payload 含機密欄位
 
-- **WHEN** LLM 回覆或 tool call payload 含符合機密樣式的欄位（如 token、api_key）
+- **WHEN** tool call payload 含符合機密樣式的欄位（如 token、api_key）
 - **THEN** 持久化的事件 payload 中該值為 `<redacted>`
+
+#### Scenario: LLM 回覆提及敏感字詞但非機密
+
+- **WHEN** LLM 回覆文字包含「請準備您的 token」等自然語言內容（無 secret 格式特徵）
+- **THEN** 回覆全文完整保留，不被紅線
 
 #### Scenario: Token usage 記錄
 

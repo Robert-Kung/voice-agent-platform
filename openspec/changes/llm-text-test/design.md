@@ -34,13 +34,17 @@ Runtime 現況（研究結論，見 `agents/agent.py` / `agents/runtime/provider
    `AgentSession` 綁 room/audio lifecycle。text test 用 LiveKit LLM API 的 chat stream + `collect()`，自行維護 `ChatContext` 與 tool-call loop。這與 runtime 的 LLM 呼叫語意一致（同 provider、同 instructions），差異只在沒有 VAD/STT/TTS 包裝。
 
 3. **Graph text runner：合成 `goto_*` tools 模擬 handoff**
-   每個 node 一個 chat 步驟：instructions = global preamble + node prompt（與 `build_graph_root_agent` 同一組裝函式）；tools = node domain tools（dry-run dispatcher 包裝）+ 每條 `user_turn` edge 一個 `goto_<target>` 合成 tool（description 帶 NL condition，與 runtime `generation.py` 的產生方式對齊）。`tool_result` edge 在 domain tool 回傳後無條件轉移（對齊 runtime v1 語意）。LLM 呼叫 `goto_*` → 記 `edge_selected` + `node_entered`，切到 target node 繼續。終止條件：handoff node、end node、或 `max_steps`（預設 10）。
+   每個 node 一個 chat 步驟：instructions = global preamble + node prompt（與 `build_graph_root_agent` 同一組裝函式，`_build_node_instructions`）；tools = node domain tools（dry-run dispatcher 包裝）+ 每條 `user_turn` edge 一個 `goto_<target>` 合成 tool（description 帶 NL condition，與 runtime `_make_transition_tool` 的產生方式對齊）。`tool_result` edge 語意：domain tool 的 dry-run 結果先餵回 LLM 讓它完成本輪回覆，回覆完成後無條件轉移到 target node（對齊 runtime v1：LLM 講完結果即 handoff，不由 LLM 決定是否轉移）。LLM 呼叫 `goto_*` → 記 `edge_selected` + `node_entered`，切到 target node 繼續。終止條件：handoff node、end node、或 `max_steps`（預設 10）。
+
+   **ChatContext 生命週期**：全 run 單一 ChatContext，user/assistant/tool 訊息跨輪、跨 node 累積不重置；node 轉移時只替換 system instructions 與 tools（與 runtime handoff 保留對話歷史的語意一致）。轉移事件記錄 node 邊界，不在 context 內插入分隔標記。
 
 4. **多輪 messages 為一等公民**
    Request 帶 `messages: [str]`（Flow Test 的單 `message` 保持相容）。每輪：append user message → chat → 處理 tool calls → 記 `llm_response`。graph mode 下 node state 跨輪保留。
 
 5. **同表加 `kind` 欄位，不開新表**
-   `profile_test_runs.kind`（`flow` | `llm_text`，default `flow`，走 `_add_missing_columns` migration）。事件加新 types（`llm_response`、`token_usage`、`edge_selected`），payload `schema_version` 升為 2；sanitizer 原樣套用（LLM 回覆文字也過 sanitizer）。替代方案是新表——但 list/detail API、panel、sanitizer 全部要複製，不值得。
+   `profile_test_runs.kind`（`flow` | `llm_text`，default `flow`，走 `_add_missing_columns` migration）；多輪 messages 存 `user_messages_json`（新欄位），既有 `user_message` 保留存首輪保相容。事件加新 types（`llm_response`、`token_usage`、`edge_selected`），payload `schema_version` 升為 2，前端 parser 依版本容錯（v1 事件照舊顯示）。替代方案是新表——但 list/detail API、panel、sanitizer 全部要複製，不值得。
+
+   **Sanitizer 對 LLM 自然語言的規則分流**：結構化 payload（tool call 參數、config）照既有 key-based 規則；`llm_response` 的回覆全文改用保守的 pattern-based 規則（只紅線明確格式如 `KEY=value` 的 env secret 樣式與 URL query credentials），避免 key-based 遞迴規則誤傷對話中提到「token」等字的正常內容。新增 `sanitize_llm_text(text) -> str`。
 
 6. **Realtime profile fallback**
    `models.mode: realtime` 的 profile：不建 Gemini Live session，改用 pipeline 預設 LLM（`constants.py`）跑 prompt/graph text test，並記 `warning` 事件說明「text test 以 fallback LLM 執行，非 realtime 模型」。替代方案是直接拒絕——但這會讓 realtime profiles 完全無法用 text test，價值損失太大。
@@ -64,3 +68,4 @@ Runtime 現況（研究結論，見 `agents/agent.py` / `agents/runtime/provider
 
 - Panel UI 是雙 tab（Flow / Text）還是單 panel + mode 切換？（實作時依現有 panel 結構決定，傾向 tab。）
 - `google.LLM` direct path 的 credentials 在 API server 環境是否齊備？（integration test gate 可先驗。）
+- livekit-agents SDK 的 `llm.chat()` tool-call 回傳結構（FunctionCall 物件形狀、單次多 tool calls、inference.LLM vs google.LLM 語意差異）需在實作前用 spike test 驗證（tasks 2.0）。

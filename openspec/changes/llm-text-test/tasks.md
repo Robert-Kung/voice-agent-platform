@@ -8,6 +8,7 @@
 
 ## 2. LLM-only resolver 與共用 helpers
 
+- [ ] 2.0 Spike：驗證 livekit-agents SDK `llm.chat(chat_ctx, tools=...)` 的 tool-call 回傳結構與 loop 寫法（FunctionCall 形狀、多 tool calls、tool 結果如何 append 回 ChatContext），結論回寫 design.md
 - [ ] 2.1 新增 `resolve_text_test_llm(profile)`：從 `models.llm` spec 建 LLM instance（重用 `providers.py` / `constants.py`），realtime profile 回 fallback LLM + warning flag
 - [ ] 2.2 抽出 prompt instructions 組裝共用 helper（與 `create_agent_class()` 同源），graph node instructions 組裝共用 helper（與 `build_graph_root_agent` 同源）
 - [ ] 2.3 建 fake LLM（實作 LiveKit `llm.LLM` 介面，可腳本化回覆序列含 tool calls）供測試注入
@@ -15,7 +16,7 @@
 ## 3. Prompt mode LLM runner
 
 - [ ] 3.1 `run_profile_llm_text_test()` prompt path：ChatContext + `llm.chat()` loop、多輪 messages、tool call → dry-run dispatcher → 結果餵回 LLM
-- [ ] 3.2 事件記錄：`llm_response`、`tool_call`/`tool_result`、`token_usage`、`test_completed`；全部過 sanitizer
+- [ ] 3.2 事件記錄：`llm_response`、`tool_call`/`tool_result`、`token_usage`、`test_completed`；結構化 payload 過既有 sanitizer，LLM 回覆全文走新增 `sanitize_llm_text()`（pattern-based，避免誤傷自然語言）
 - [ ] 3.3 失敗處理：單輪 timeout、LLM API error → run failed + error 事件，無殭屍 run
 - [ ] 3.4 backend tests（fake LLM）：單輪、多輪、tool call 回饋、timeout→failed、realtime fallback warning
 
@@ -34,7 +35,7 @@
 ## 6. Frontend
 
 - [ ] 6.1 `admin-api.ts`：kind / messages / usage types 與 API calls
-- [ ] 6.2 Panel 分 Flow Test / Text Test（tab 或 mode switch）：Text Test 支援多輪輸入、顯示 LLM 回覆 / tool calls / graph path / usage、明示 token 花費；recent runs 標示 kind
+- [ ] 6.2 Panel 分 Flow Test / Text Test（tab 或 mode switch）：Text Test 支援多輪輸入、顯示 LLM 回覆 / tool calls / graph path / usage、明示 token 花費；recent runs 標示 kind；warning severity 給明顯視覺樣式，realtime fallback 時 run 頂部顯示 warning banner（「以 fallback LLM 執行，非 realtime 模型」）
 - [ ] 6.3 frontend tests：helpers（usage 彙總、kind 標示、event 呈現）與 API client
 
 ## 7. 驗證與文件
