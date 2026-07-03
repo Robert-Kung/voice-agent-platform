@@ -56,6 +56,40 @@ export interface SessionEvent {
   payload: Record<string, unknown>;
 }
 
+export type ToolExecutionMode = 'dry_run' | 'live';
+
+export interface ProfileTestRunSummary {
+  id: string;
+  profile_id: string;
+  status: 'created' | 'running' | 'completed' | 'failed' | 'cancelled';
+  tool_execution_mode: ToolExecutionMode;
+  user_message: string;
+  profile_config_hash: string;
+  profile_snapshot_at: string;
+  final_summary: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+  completed_at: string | null;
+}
+
+export interface ProfileTestRunEvent {
+  id: number;
+  seq: number;
+  event_type: string;
+  severity: 'info' | 'warning' | 'error' | string;
+  timestamp: string;
+  payload: Record<string, unknown>;
+}
+
+export interface ProfileTestRunDetail extends ProfileTestRunSummary {
+  events: ProfileTestRunEvent[];
+}
+
+export interface ProfileTestRunsListPage {
+  items: ProfileTestRunSummary[];
+  total: number;
+}
+
 export interface ProfileStats {
   profile_id: string | null;
   profile_name: string | null;
@@ -189,6 +223,31 @@ export const sessionsApi = {
     request<{ session_id: string; room_name: string; url: string; note: string }>(
       `/api/sessions/${id}/livekit-link`
     ),
+};
+
+// ── Profile text test runs ───────────────────────────────────────
+
+export const testRunsApi = {
+  create: (profileId: string, data: { message: string; tool_execution_mode?: ToolExecutionMode }) =>
+    request<ProfileTestRunDetail>(`/api/profiles/${profileId}/test-runs`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  list: async (
+    profileId: string,
+    params?: { limit?: number; offset?: number }
+  ): Promise<ProfileTestRunsListPage> => {
+    const qs = new URLSearchParams();
+    if (params?.limit) qs.set('limit', String(params.limit));
+    if (params?.offset) qs.set('offset', String(params.offset));
+    const suffix = qs.toString() ? `?${qs}` : '';
+    const { items, total } = await requestWithTotal<ProfileTestRunSummary[]>(
+      `/api/profiles/${profileId}/test-runs${suffix}`
+    );
+    return { items, total };
+  },
+  get: (profileId: string, runId: string) =>
+    request<ProfileTestRunDetail>(`/api/profiles/${profileId}/test-runs/${runId}`),
 };
 
 // ── Deploy (LiveKit Cloud) ────────────────────────────────

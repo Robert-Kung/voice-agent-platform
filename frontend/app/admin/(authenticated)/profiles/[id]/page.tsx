@@ -11,6 +11,7 @@ import { ModelVoiceView } from '@/components/admin/model-voice-view';
 import { NodeInspector } from '@/components/admin/node-inspector';
 import { ProfileEditorHeader } from '@/components/admin/profile-editor-header';
 import { ProfileEditorLayout } from '@/components/admin/profile-editor-layout';
+import { ProfileTextTestPanel } from '@/components/admin/profile-text-test-panel';
 import {
   AdvancedSection,
   HandoffSection,
@@ -546,6 +547,12 @@ function RightPanel({
             : '以下設定（含模型/語音 stack）套用於整個 agent。單一流程用 Prompt 即可；需要多情境分支時再「轉成 Graph」，graph 會疊在同一 global 之上。'}
         </p>
       </div>
+
+      <ProfileTextTestPanel
+        profileId={form.profile?.id === 'new' ? null : (form.profile?.id ?? null)}
+        isNew={form.isNew}
+        isDirty={form.isDirty}
+      />
 
       {/* Graph mode: global prompt shared by all nodes */}
       {isGraphMode && (
