@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, Bot, ChevronDown, ChevronRight, Clock3, GitBranch, Play, RefreshCw, ShieldCheck, Wrench } from 'lucide-react';
-import type { ProfileTestRunDetail, ProfileTestRunEvent, ProfileTestRunSummary, ToolExecutionMode } from '@/lib/admin-api';
+import type { ProfileTestRunDetail, ProfileTestRunEvent, ProfileTestRunSummary, TestRunKind, ToolExecutionMode } from '@/lib/admin-api';
 import { formatDate, testRunsApi } from '@/lib/admin-api';
 import { cn } from '@/lib/shadcn/utils';
 
@@ -23,6 +23,10 @@ const eventLabels: Record<string, string> = {
   handoff: 'Handoff',
   fallback: 'Fallback',
   assistant_output: 'Placeholder output',
+  llm_response: 'LLM response',
+  token_usage: 'Token usage',
+  llm_fallback: 'LLM fallback',
+  max_steps_reached: 'Max steps',
   test_completed: 'Completed',
   runner_error: 'Error',
   timeout: 'Timeout',
@@ -30,6 +34,7 @@ const eventLabels: Record<string, string> = {
 
 export function ProfileTextTestPanel({ profileId, isNew, isDirty }: ProfileTextTestPanelProps) {
   const [message, setMessage] = useState('');
+  const [kind, setKind] = useState<TestRunKind>('flow');
   const [mode, setMode] = useState<ToolExecutionMode>('dry_run');
   const [running, setRunning] = useState(false);
   const [loadingRuns, setLoadingRuns] = useState(false);
@@ -63,10 +68,12 @@ export function ProfileTextTestPanel({ profileId, isNew, isDirty }: ProfileTextT
     setRunning(true);
     setError(null);
     try {
-      const run = await testRunsApi.create(profileId, {
-        message: message.trim(),
-        tool_execution_mode: mode,
-      });
+      const run = await testRunsApi.create(
+        profileId,
+        kind === 'llm_text'
+          ? { kind, messages: parseTestMessages(message), tool_execution_mode: mode }
+          : { message: message.trim(), tool_execution_mode: mode }
+      );
       setActiveRun(run);
       setExpanded(new Set(run.events.filter((e) => e.severity !== 'info').map((e) => e.id)));
       setMessage('');
@@ -92,9 +99,11 @@ export function ProfileTextTestPanel({ profileId, isNew, isDirty }: ProfileTextT
 
   const assistantOutput = useMemo(() => findAssistantOutput(activeRun), [activeRun]);
   const fallback = activeRun?.events.find((e) => e.event_type === 'fallback');
+  const llmFallback = activeRun?.events.find((e) => e.event_type === 'llm_fallback');
   const warnings = activeRun?.events.filter((e) => e.severity === 'warning') ?? [];
   const errors = activeRun?.events.filter((e) => e.severity === 'error') ?? [];
   const path = useMemo(() => graphPath(activeRun), [activeRun]);
+  const usage = useMemo(() => runUsage(activeRun), [activeRun]);
 
   return (
     <section className="border-border bg-foreground/[0.025] mb-3 rounded-lg border px-3 py-3">
@@ -102,10 +111,12 @@ export function ProfileTextTestPanel({ profileId, isNew, isDirty }: ProfileTextT
         <div>
           <div className="text-foreground/80 flex items-center gap-1.5 text-xs font-semibold tracking-wide uppercase">
             <Bot size={13} />
-            Flow Test
+            Test
           </div>
           <p className="text-foreground/45 mt-0.5 text-[11px] leading-relaxed">
-            Checks saved prompt/graph wiring without LLM, voice, or external side effects.
+            {kind === 'flow'
+              ? 'Flow: checks saved prompt/graph wiring without LLM, voice, or external side effects.'
+              : 'Text: real LLM conversation (token cost applies) without voice or external side effects.'}
           </p>
         </div>
         <button
@@ -124,6 +135,24 @@ export function ProfileTextTestPanel({ profileId, isNew, isDirty }: ProfileTextT
           Unsaved edits are not included. Save first to test the latest profile.
         </div>
       )}
+
+      <div className="mb-2 flex rounded-md border border-border p-0.5" role="group" aria-label="Test kind">
+        {(['flow', 'llm_text'] as TestRunKind[]).map((value) => (
+          <button
+            key={value}
+            type="button"
+            onClick={() => setKind(value)}
+            className={cn(
+              'flex-1 rounded px-2 py-1 text-[11px] font-medium transition-colors',
+              kind === value
+                ? 'bg-primary text-primary-foreground'
+                : 'text-foreground/55 hover:bg-foreground/5 hover:text-foreground'
+            )}
+          >
+            {value === 'flow' ? 'Flow' : 'LLM Text'}
+          </button>
+        ))}
+      </div>
 
       <div className="mb-2 flex rounded-md border border-border p-0.5" role="group" aria-label="Tool execution mode">
         {(['dry_run', 'live'] as ToolExecutionMode[]).map((value) => (
@@ -149,7 +178,13 @@ export function ProfileTextTestPanel({ profileId, isNew, isDirty }: ProfileTextT
           onChange={(e) => setMessage(e.target.value)}
           rows={2}
           disabled={isNew}
-          placeholder={isNew ? 'Create profile before testing' : 'Type a sample message...'}
+          placeholder={
+            isNew
+              ? 'Create profile before testing'
+              : kind === 'llm_text'
+                ? 'One user message per line (multi-turn)...'
+                : 'Type a sample message...'
+          }
           className="border-border bg-background text-foreground focus:ring-primary/35 min-h-[64px] flex-1 resize-y rounded-md border px-2.5 py-2 text-xs focus:ring-2 focus:outline-none disabled:opacity-50"
         />
         <button
@@ -173,11 +208,22 @@ export function ProfileTextTestPanel({ profileId, isNew, isDirty }: ProfileTextT
         <div className="mt-3 space-y-2">
           <RunSummary run={activeRun} warnings={warnings.length} errors={errors.length} />
           {fallback && <FallbackBanner event={fallback} />}
+          {llmFallback && <FallbackBanner event={llmFallback} />}
           {path.length > 0 && <GraphPath events={path} />}
           {assistantOutput && (
             <div className="border-border rounded-md border px-2 py-1.5">
-              <div className="text-foreground/45 mb-1 text-[10px] font-medium uppercase">Placeholder output</div>
+              <div className="text-foreground/45 mb-1 text-[10px] font-medium uppercase">
+                {activeRun.kind === 'llm_text' ? 'LLM response' : 'Placeholder output'}
+              </div>
               <p className="text-foreground/75 text-xs leading-relaxed">{assistantOutput}</p>
+            </div>
+          )}
+          {usage && (
+            <div className="text-foreground/45 flex flex-wrap gap-1.5 text-[10px]">
+              <Badge tone="muted">prompt {usage.prompt_tokens}</Badge>
+              <Badge tone="muted">completion {usage.completion_tokens}</Badge>
+              <Badge tone="muted">total {usage.total_tokens}</Badge>
+              <Badge tone="muted">{usage.llm_calls} LLM call{usage.llm_calls === 1 ? '' : 's'}</Badge>
             </div>
           )}
           <div className="space-y-1.5">
@@ -212,8 +258,11 @@ export function ProfileTextTestPanel({ profileId, isNew, isDirty }: ProfileTextT
                 className="hover:bg-foreground/5 flex min-w-0 items-center justify-between gap-2 rounded px-2 py-1 text-left"
               >
                 <span className="text-foreground/65 min-w-0 truncate text-xs">{run.user_message}</span>
-                <span className="text-foreground/35 shrink-0 font-mono text-[10px]">
-                  {formatDate(run.created_at)}
+                <span className="flex shrink-0 items-center gap-1.5">
+                  <Badge tone={run.kind === 'llm_text' ? 'safe' : 'muted'}>
+                    {run.kind === 'llm_text' ? 'LLM' : 'Flow'}
+                  </Badge>
+                  <span className="text-foreground/35 font-mono text-[10px]">{formatDate(run.created_at)}</span>
                 </span>
               </button>
             ))}
@@ -230,6 +279,7 @@ function RunSummary({ run, warnings, errors }: { run: ProfileTestRunDetail; warn
       <Badge tone={run.status === 'completed' ? 'success' : run.status === 'failed' ? 'error' : 'muted'}>
         {run.status}
       </Badge>
+      <Badge tone={run.kind === 'llm_text' ? 'safe' : 'muted'}>{run.kind === 'llm_text' ? 'LLM' : 'Flow'}</Badge>
       <Badge tone={run.tool_execution_mode === 'dry_run' ? 'safe' : 'warning'}>
         {run.tool_execution_mode === 'dry_run' ? <ShieldCheck size={11} /> : <Wrench size={11} />}
         {run.tool_execution_mode}
@@ -251,6 +301,9 @@ function FallbackBanner({ event }: { event: ProfileTestRunEvent }) {
         <AlertTriangle size={12} />
         Fallback: {String(event.payload.reason ?? 'graph fallback')}
       </div>
+      {typeof event.payload.message === 'string' && (
+        <p className="mt-0.5 leading-relaxed opacity-90">{event.payload.message}</p>
+      )}
     </div>
   );
 }
@@ -331,8 +384,37 @@ export function findAssistantOutput(run: ProfileTestRunDetail | null): string | 
   if (!run) return null;
   const summaryText = run.final_summary.assistant_output;
   if (typeof summaryText === 'string' && summaryText.trim()) return summaryText;
-  const eventText = run.events.find((e) => e.event_type === 'assistant_output')?.payload.text;
+  const eventText = run.events.find(
+    (e) => e.event_type === 'assistant_output' || e.event_type === 'llm_response'
+  )?.payload.text;
   return typeof eventText === 'string' ? eventText : null;
+}
+
+export function parseTestMessages(input: string): string[] {
+  return input
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean);
+}
+
+export interface RunUsage {
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+  llm_calls: number;
+}
+
+export function runUsage(run: ProfileTestRunDetail | null): RunUsage | null {
+  const usage = run?.final_summary.usage;
+  if (!usage || typeof usage !== 'object') return null;
+  const u = usage as Record<string, unknown>;
+  if (typeof u.total_tokens !== 'number') return null;
+  return {
+    prompt_tokens: typeof u.prompt_tokens === 'number' ? u.prompt_tokens : 0,
+    completion_tokens: typeof u.completion_tokens === 'number' ? u.completion_tokens : 0,
+    total_tokens: u.total_tokens,
+    llm_calls: typeof u.llm_calls === 'number' ? u.llm_calls : 0,
+  };
 }
 
 export function graphPath(run: ProfileTestRunDetail | null): ProfileTestRunEvent[] {
