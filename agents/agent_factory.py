@@ -165,6 +165,24 @@ def load_profile(name: str) -> dict:
 # ── Dynamic Agent class creation ───────────────────────────
 
 
+def compose_prompt_instructions(profile: dict) -> str:
+    """Assemble the full prompt-mode system instructions exactly as the runtime
+    agent uses them: base instructions + inline QA block + services block.
+    Shared by create_agent_class and the LLM text test runner — keep in sync."""
+    agent_instructions = profile.get("instructions", "")
+
+    qa_mode = _qa_mode(profile)
+    qa_data = profile.get("qa_data", [])
+    if qa_mode == "inline" and qa_data:
+        agent_instructions += _render_qa_block(qa_data)
+
+    services = profile.get("services", {})
+    if services:
+        agent_instructions += _render_services_block(services)
+
+    return agent_instructions
+
+
 def create_agent_class(profile: dict, mode: str = "pipeline"):
     """
     根據 profile 動態建立主要 Phone Agent class。
@@ -183,7 +201,7 @@ def create_agent_class(profile: dict, mode: str = "pipeline"):
     此時 send_client_content 對 Gemini 3.1 仍有效。
     mid-session（第一個 model turn 完成後）才會被 1007 拒絕。
     """
-    agent_instructions = profile.get("instructions", "")
+    agent_instructions = compose_prompt_instructions(profile)
     welcome = profile.get("welcome_message", "您好，請問有什麼可以為您服務的？")
     # Realtime 用描述性指令（Gemini 自然生成），Pipeline 用逐字稿（TTS 直讀）
     welcome_instructions = profile.get(
@@ -191,16 +209,14 @@ def create_agent_class(profile: dict, mode: str = "pipeline"):
         "向來電者打招呼，簡短介紹自己並詢問需要什麼協助。"
     )
 
-    # ── Tier 2 資料 → instructions ────────────────────────
+    # ── Tier 2 資料 → instructions（已由 compose_prompt_instructions 嵌入）─
     qa_mode = _qa_mode(profile)
     qa_data = profile.get("qa_data", [])
     if qa_mode == "inline" and qa_data:
-        agent_instructions += _render_qa_block(qa_data)
         logger.info("QA inline mode: 嵌入 %d 筆 QA（總 %d chars）", len(qa_data), len(agent_instructions))
 
     services = profile.get("services", {})
     if services:
-        agent_instructions += _render_services_block(services)
         logger.info("Services 嵌入 instructions: %d 個服務項目", len(services))
 
     # ── Tool 建立 ──────────────────────────────────────────

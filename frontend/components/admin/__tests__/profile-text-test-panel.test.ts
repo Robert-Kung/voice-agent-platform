@@ -1,13 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import type { ProfileTestRunDetail } from '@/lib/admin-api';
-import { eventToolState, findAssistantOutput, graphPath } from '../profile-text-test-panel';
+import { eventToolState, findAssistantOutput, graphPath, parseTestMessages, runUsage } from '../profile-text-test-panel';
 
 const baseRun: ProfileTestRunDetail = {
   id: 'run-1',
   profile_id: 'profile-1',
   status: 'completed',
+  kind: 'flow',
   tool_execution_mode: 'dry_run',
   user_message: '電梯壞了',
+  user_messages: ['電梯壞了'],
   profile_config_hash: 'hash',
   profile_snapshot_at: '2026-06-29T00:00:00Z',
   final_summary: {},
@@ -148,5 +150,43 @@ describe('ProfileTextTestPanel helpers', () => {
         payload: { mode: 'live', executed: false, timed_out: false, result: { success: false } },
       })
     ).toEqual(['live', 'skipped', 'error']);
+  });
+
+  it('falls back to llm_response event text for llm_text runs', () => {
+    const run: ProfileTestRunDetail = {
+      ...baseRun,
+      kind: 'llm_text',
+      events: [
+        {
+          id: 1,
+          seq: 1,
+          event_type: 'llm_response',
+          severity: 'info',
+          timestamp: '2026-06-29T00:00:00Z',
+          payload: { turn: 1, text: '我們營業到晚上九點。', schema_version: 2 },
+        },
+      ],
+    };
+
+    expect(findAssistantOutput(run)).toBe('我們營業到晚上九點。');
+  });
+
+  it('splits multi-turn input into trimmed non-empty messages', () => {
+    expect(parseTestMessages('你好\n\n  營業時間？  \n')).toEqual(['你好', '營業時間？']);
+    expect(parseTestMessages('單輪訊息')).toEqual(['單輪訊息']);
+    expect(parseTestMessages('   \n  ')).toEqual([]);
+  });
+
+  it('extracts token usage from final summary', () => {
+    expect(runUsage(baseRun)).toBeNull();
+    expect(
+      runUsage({
+        ...baseRun,
+        kind: 'llm_text',
+        final_summary: {
+          usage: { prompt_tokens: 7, completion_tokens: 5, total_tokens: 12, llm_calls: 1 },
+        },
+      })
+    ).toEqual({ prompt_tokens: 7, completion_tokens: 5, total_tokens: 12, llm_calls: 1 });
   });
 });

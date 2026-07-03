@@ -58,12 +58,16 @@ export interface SessionEvent {
 
 export type ToolExecutionMode = 'dry_run' | 'live';
 
+export type TestRunKind = 'flow' | 'llm_text';
+
 export interface ProfileTestRunSummary {
   id: string;
   profile_id: string;
   status: 'created' | 'running' | 'completed' | 'failed' | 'cancelled';
+  kind: TestRunKind;
   tool_execution_mode: ToolExecutionMode;
   user_message: string;
+  user_messages: string[];
   profile_config_hash: string;
   profile_snapshot_at: string;
   final_summary: Record<string, unknown>;
@@ -228,18 +232,27 @@ export const sessionsApi = {
 // ── Profile text test runs ───────────────────────────────────────
 
 export const testRunsApi = {
-  create: (profileId: string, data: { message: string; tool_execution_mode?: ToolExecutionMode }) =>
+  create: (
+    profileId: string,
+    data: {
+      message?: string;
+      messages?: string[];
+      kind?: TestRunKind;
+      tool_execution_mode?: ToolExecutionMode;
+    }
+  ) =>
     request<ProfileTestRunDetail>(`/api/profiles/${profileId}/test-runs`, {
       method: 'POST',
       body: JSON.stringify(data),
     }),
   list: async (
     profileId: string,
-    params?: { limit?: number; offset?: number }
+    params?: { limit?: number; offset?: number; kind?: TestRunKind }
   ): Promise<ProfileTestRunsListPage> => {
     const qs = new URLSearchParams();
     if (params?.limit) qs.set('limit', String(params.limit));
     if (params?.offset) qs.set('offset', String(params.offset));
+    if (params?.kind) qs.set('kind', params.kind);
     const suffix = qs.toString() ? `?${qs}` : '';
     const { items, total } = await requestWithTotal<ProfileTestRunSummary[]>(
       `/api/profiles/${profileId}/test-runs${suffix}`

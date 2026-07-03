@@ -33,7 +33,7 @@
 #### Scenario: tool_result edge 轉移
 
 - **WHEN** LLM 呼叫的 domain tool 所在 node 有 `tool_result` edge
-- **THEN** runner 將 dry-run 工具結果餵回 LLM 完成本輪回覆，回覆完成後無條件轉移至 target node（不由 LLM 決定是否轉移，對齊 runtime v1 語意），並記錄 `tool_result` 與轉移事件：chat context 跨 node 保留不重置
+- **THEN** runner 無條件轉移至 target node（不由 LLM 決定是否轉移，對齊 runtime v1：source node 不產生回覆），target node 在含 dry-run 工具結果的 context 下產生回覆，並記錄 `tool_result` 與轉移事件；chat context 跨 node 保留不重置
 
 #### Scenario: 終止條件
 

@@ -104,8 +104,13 @@ class ProfileTestRun(Base):
     profile_config_hash: Mapped[str] = mapped_column(String(64), nullable=False, default="")
     profile_snapshot_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=_utcnow)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="created")
+    # "flow" (deterministic wiring smoke, no LLM) or "llm_text" (LLM-backed text test).
+    kind: Mapped[str] = mapped_column(String(20), nullable=False, default="flow")
     tool_execution_mode: Mapped[str] = mapped_column(String(20), nullable=False, default="dry_run")
     user_message: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    # JSON array of user messages for multi-turn llm_text runs; NULL for legacy
+    # single-message rows. user_message keeps the first message for compatibility.
+    user_messages_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     final_summary_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=_utcnow, onupdate=_utcnow)

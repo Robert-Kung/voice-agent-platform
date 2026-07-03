@@ -10,7 +10,7 @@ from sqlalchemy.pool import StaticPool
 
 from api.deps import get_db
 from api.main import app
-from db.event_sanitizer import REDACTED, sanitize_event_payload
+from db.event_sanitizer import REDACTED, SCHEMA_VERSION, sanitize_event_payload
 from db.models import Base
 
 
@@ -107,7 +107,7 @@ def test_prompt_text_run_records_ordered_events_and_summary(client):
     assert "assistant_output" in event_types
     assert event_types[-1] == "test_completed"
     assert data["events"][-1]["payload"]["status"] == "completed"
-    assert all(event["payload"]["schema_version"] == 1 for event in data["events"])
+    assert all(event["payload"]["schema_version"] == SCHEMA_VERSION for event in data["events"])
 
 
 def test_list_and_get_profile_test_runs_with_total_header(client):
@@ -173,7 +173,7 @@ def test_sanitizer_redacts_sensitive_payload_values(payload):
     assert "sv" not in text
     assert "token=secret" not in text
     assert REDACTED in text
-    assert sanitized["schema_version"] == 1
+    assert sanitized["schema_version"] == SCHEMA_VERSION
 
 
 def test_dry_run_tool_does_not_execute_external_http_tool(client):
@@ -237,7 +237,7 @@ def test_live_mode_records_live_tool_metadata_without_external_call(client):
 
 def test_graph_text_run_records_tool_result_transition_and_handoff(client):
     graph = {
-        "schema_version": 1,
+        "schema_version": SCHEMA_VERSION,
         "global_prompt": "全程使用繁體中文",
         "nodes": [
             {
@@ -294,7 +294,7 @@ def test_graph_text_run_records_tool_result_transition_and_handoff(client):
 
 def test_graph_text_run_records_user_turn_transition(client):
     graph = {
-        "schema_version": 1,
+        "schema_version": SCHEMA_VERSION,
         "nodes": [
             {
                 "id": "start",
