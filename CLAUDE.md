@@ -41,7 +41,7 @@ Profile Editor v2 已取代舊 prototype，default route 是 `frontend/app/admin
 | `profile-model-catalog-runtime` | ✅ archived | catalog endpoint + direct Google LLM + voice |
 | `profile-stack-language-selection` | ✅ archived | STT/TTS language matrix + controls |
 | `profile-editor-visual-refinement` | ✅ archived | full-width Model & Voice view + browser QA |
-| `profile-test-runs` | ✅ implemented | flow test panel + structured run log（待 archive） |
+| `profile-test-runs` | ✅ archived | flow test panel + structured run log |
 
 ### 目前殘項
 
