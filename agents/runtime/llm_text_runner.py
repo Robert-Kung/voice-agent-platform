@@ -577,30 +577,36 @@ async def _run_graph_text(
             if tool_calls:
                 if text:
                     _history_assistant(history, text)
-                transitioned = False
+                # Runtime parity for mixed chunks: domain tools always execute
+                # in the SOURCE node context first; at most one transition is
+                # applied afterwards (first goto wins, else the source node's
+                # tool_result edge if a domain tool ran).
+                goto_target: str | None = None
+                domain_tool_ran = False
                 for call in tool_calls:
                     if call.name in goto_targets:
-                        target_id = goto_targets[call.name]
-                        _history_tool_exchange(history, call, {"transitioned": True, "target": target_id})
-                        _emit_edge(
-                            {"source": current.get("id"), "target": target_id},
-                            "user_turn",
+                        if goto_target is None:
+                            goto_target = goto_targets[call.name]
+                        _history_tool_exchange(
+                            history, call, {"transitioned": True, "target": goto_targets[call.name]}
                         )
-                        current = node_by_id.get(target_id) or current
-                        _enter(current)
-                        transitioned = True
                     else:
                         result = _dispatch_domain_tool(db, run.id, dispatcher, config, call)
                         _history_tool_exchange(history, call, result)
-                        tr_edge = _tool_result_edge(current.get("id"))
-                        if tr_edge and tr_edge.get("target") in node_by_id:
-                            # Runtime parity: tool_result edges transition
-                            # unconditionally; the TARGET node speaks with the
-                            # tool result already in context.
-                            _emit_edge(tr_edge, "tool_result")
-                            current = node_by_id[tr_edge.get("target")]
-                            _enter(current)
-                            transitioned = True
+                        domain_tool_ran = True
+
+                if goto_target is not None:
+                    _emit_edge({"source": current.get("id"), "target": goto_target}, "user_turn")
+                    current = node_by_id[goto_target]
+                    _enter(current)
+                elif domain_tool_ran:
+                    tr_edge = _tool_result_edge(current.get("id"))
+                    if tr_edge and tr_edge.get("target") in node_by_id:
+                        # tool_result edges transition unconditionally; the
+                        # TARGET node speaks with the tool result in context.
+                        _emit_edge(tr_edge, "tool_result")
+                        current = node_by_id[tr_edge.get("target")]
+                        _enter(current)
 
                 if current.get("type") == "handoff":
                     test_run_store.append_event(
@@ -620,7 +626,6 @@ async def _run_graph_text(
                     terminated = True
                     break
                 # Let the (possibly new) node produce its reply.
-                _ = transitioned
                 continue
 
             last_response = text

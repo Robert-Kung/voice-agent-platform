@@ -374,6 +374,99 @@ def test_llm_text_graph_tool_result_transitions_unconditionally_to_handoff(clien
     assert len(fake.calls) == 1
 
 
+def test_llm_text_graph_tool_result_prompt_target_speaks_with_result_in_context(client, monkeypatch):
+    """tool_result edge: source node does not reply; the TARGET node generates
+    the reply with the dry-run tool result already in chat context."""
+    fake = _patch_fake_llm(
+        monkeypatch,
+        [
+            {"tool_calls": [{"name": "create_ticket", "arguments": '{"summary": "電梯壞了"}'}]},
+            {"content": "已建單，這是後續說明。"},
+        ],
+    )
+    graph = {
+        "schema_version": 1,
+        "nodes": [
+            {"id": "start", "type": "start", "title": "入口", "prompt": "詢問故障", "tools": ["create_ticket"], "position": {"x": 0, "y": 0}},
+            {"id": "confirm", "type": "prompt", "title": "建單確認", "prompt": "向使用者確認單據內容與後續流程", "tools": [], "position": {"x": 200, "y": 0}},
+        ],
+        "edges": [
+            {"id": "e1", "source": "start", "target": "confirm", "trigger": "tool_result", "condition": ""}
+        ],
+    }
+    profile_id = _create_profile(
+        client,
+        config=_graph_profile_config(
+            graph,
+            tools=[{"name": "create_ticket", "endpoint": "https://example.com/tickets"}],
+        ),
+    )
+
+    response = _post_llm_text(client, profile_id, message="電梯壞了")
+
+    assert response.status_code == 201, response.text
+    data = response.json()
+    assert data["status"] == "completed"
+    assert data["final_summary"]["graph_path"] == ["start", "confirm"]
+    replies = [e for e in data["events"] if e["event_type"] == "llm_response"]
+    assert len(replies) == 1
+    assert replies[0]["payload"]["node_id"] == "confirm"
+    # second LLM call ran with the TARGET node's instructions
+    assert len(fake.calls) == 2
+    assert "向使用者確認單據內容與後續流程" in fake.calls[1]["system"]
+
+
+def test_llm_text_graph_mixed_chunk_domain_tool_runs_before_transition(client, monkeypatch):
+    """Same-chunk [goto, domain tool]: domain tool executes in SOURCE node
+    context first, then exactly one transition to the goto target is applied."""
+    fake = _patch_fake_llm(
+        monkeypatch,
+        [
+            {
+                "tool_calls": [
+                    {"name": "goto_info", "arguments": "{}"},
+                    {"name": "get_current_time", "arguments": "{}"},
+                ]
+            },
+            {"content": "這裡是資訊節點的回覆。"},
+        ],
+    )
+    graph = {
+        "schema_version": 1,
+        "nodes": [
+            {"id": "start", "type": "start", "title": "入口", "prompt": "分流", "tools": ["get_current_time"], "position": {"x": 0, "y": 0}},
+            {"id": "info", "type": "prompt", "title": "資訊", "prompt": "提供資訊", "tools": [], "position": {"x": 200, "y": 0}},
+        ],
+        "edges": [
+            {"id": "e1", "source": "start", "target": "info", "trigger": "user_turn", "condition": "使用者詢問資訊"}
+        ],
+    }
+    profile_id = _create_profile(
+        client,
+        config=_graph_profile_config(graph, tools=[{"name": "get_current_time"}]),
+    )
+
+    response = _post_llm_text(client, profile_id, message="現在幾點？我要查資訊")
+
+    assert response.status_code == 201, response.text
+    data = response.json()
+    assert data["status"] == "completed"
+    # exactly one transition, no duplicate entries
+    assert data["final_summary"]["graph_path"] == ["start", "info"]
+    edges = [e for e in data["events"] if e["event_type"] == "edge_selected"]
+    assert len(edges) == 1
+    assert edges[0]["payload"]["trigger"] == "user_turn"
+    # domain tool dispatched before the transition (source node context)
+    tool_seq = next(e["seq"] for e in data["events"] if e["event_type"] == "tool_call")
+    info_entered_seq = next(
+        e["seq"]
+        for e in data["events"]
+        if e["event_type"] == "node_entered" and e["payload"]["node_id"] == "info"
+    )
+    assert tool_seq < info_entered_seq
+    assert len(fake.calls) == 2
+
+
 def test_llm_text_graph_invalid_falls_back_to_prompt_mode(client, monkeypatch):
     _patch_fake_llm(monkeypatch, [{"content": "prompt fallback 回覆"}])
     profile_id = _create_profile(
