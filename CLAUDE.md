@@ -42,6 +42,7 @@ Profile Editor v2 已取代舊 prototype，default route 是 `frontend/app/admin
 | `profile-stack-language-selection` | ✅ archived | STT/TTS language matrix + controls |
 | `profile-editor-visual-refinement` | ✅ archived | full-width Model & Voice view + browser QA |
 | `profile-test-runs` | ✅ archived | flow test panel + structured run log |
+| `llm-text-test` | ✅ archived | LLM Text Test（`kind: llm_text`）多輪真實 LLM 文字測試 |
 
 ### 目前殘項
 
