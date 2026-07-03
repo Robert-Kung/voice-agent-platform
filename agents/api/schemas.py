@@ -3,7 +3,7 @@
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 # Import-light: runtime.constants pulls NO livekit plugins, so validating a
 # profile's models block on save doesn't drag the agent's plugin graph (or
@@ -73,16 +73,35 @@ class ProfileOut(ProfileBase):
 
 
 class ProfileTextTestRequest(BaseModel):
-    message: str = Field(..., min_length=1, max_length=4000)
+    # Legacy single-message contract: `message` alone runs a flow test.
+    # llm_text runs may pass multi-turn `messages`; when both are absent → 422.
+    message: str | None = Field(None, min_length=1, max_length=4000)
+    messages: list[str] | None = Field(None, min_length=1, max_length=20)
+    kind: str = Field("flow", pattern="^(flow|llm_text)$")
     tool_execution_mode: str = Field("dry_run", pattern="^(dry_run|live)$")
+
+    @model_validator(mode="after")
+    def _require_message(self) -> "ProfileTextTestRequest":
+        if self.messages is None and (self.message is None or not self.message.strip()):
+            raise ValueError("either 'message' or 'messages' is required")
+        if self.messages is not None and not any(str(m).strip() for m in self.messages):
+            raise ValueError("'messages' must contain at least one non-empty message")
+        return self
+
+    def resolved_messages(self) -> list[str]:
+        if self.messages is not None:
+            return [str(m) for m in self.messages if str(m).strip()]
+        return [self.message] if self.message else []
 
 
 class ProfileTestRunSummary(BaseModel):
     id: str
     profile_id: str
     status: str
+    kind: str = "flow"
     tool_execution_mode: str
     user_message: str
+    user_messages: list[str] = Field(default_factory=list)
     profile_config_hash: str
     profile_snapshot_at: datetime
     final_summary: dict[str, Any] = Field(default_factory=dict)

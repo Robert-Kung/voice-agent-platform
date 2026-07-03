@@ -85,6 +85,8 @@ def _add_missing_columns(engine: Engine) -> None:
         "profile_test_runs": [
             ("profile_config_hash", "VARCHAR(64) NOT NULL DEFAULT ''"),
             ("profile_snapshot_at", "DATETIME NULL"),
+            ("kind", "VARCHAR(20) NOT NULL DEFAULT 'flow'"),
+            ("user_messages_json", "TEXT NULL"),
         ],
         "profile_test_run_events": [
             ("severity", "VARCHAR(20) NOT NULL DEFAULT 'info'"),

@@ -289,6 +289,27 @@ class ResolvedComponents:
     model_names: dict[str, Any] = field(default_factory=dict)
 
 
+def resolve_text_test_llm(profile: dict) -> tuple[Any, list[dict], str | None]:
+    """LLM-only resolver for the LLM text test runner (no STT/TTS, no room).
+
+    Returns (llm_component, used_specs, fallback_reason). For realtime-mode
+    profiles the Gemini Live path is never built for text-only tests; the
+    default pipeline LLM chain is used instead and fallback_reason is set so
+    the runner can record a warning event.
+    """
+    models = (profile or {}).get("models") or {}
+    mode = str(models.get("mode") or "pipeline").strip().lower()
+
+    fallback_reason: str | None = None
+    llm_specs = models.get("llm")
+    if mode == "realtime":
+        fallback_reason = "realtime_text_fallback"
+        llm_specs = None  # realtime block has no pipeline LLM pin; use defaults
+
+    comp, used = _build_with_preflight("llm", llm_specs, _DEFAULT_PIPELINE_LLM, build_llm)
+    return comp, used, fallback_reason
+
+
 def resolve_session_components(profile: dict, mode: str, env=None) -> ResolvedComponents:
     """Resolve a profile's `models` block into session components for the given mode.
 

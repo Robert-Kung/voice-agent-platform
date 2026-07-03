@@ -14,6 +14,7 @@ from api.schemas import (
 )
 from db import profile_store, test_run_store
 from db.models import ProfileTestRun, ProfileTestRunEvent
+from runtime.llm_text_runner import LLMTextTestRequest, run_profile_llm_text_test
 from runtime.profile_test_runner import TextTestRequest, run_profile_text_test
 
 logger = logging.getLogger("api.profile_test_runs")
@@ -30,8 +31,10 @@ def _run_to_summary(run: ProfileTestRun) -> ProfileTestRunSummary:
         id=run.id,
         profile_id=run.profile_id,
         status=run.status,
+        kind=run.kind,
         tool_execution_mode=run.tool_execution_mode,
         user_message=run.user_message,
+        user_messages=test_run_store.parse_user_messages(run),
         profile_config_hash=run.profile_config_hash,
         profile_snapshot_at=run.profile_snapshot_at,
         final_summary=test_run_store.parse_summary(run),
@@ -71,19 +74,31 @@ def create_profile_test_run_endpoint(
         logger.warning("create profile test run 404: profile_id=%s", profile_id)
         raise HTTPException(status_code=404, detail="Profile not found")
 
-    run = run_profile_text_test(
-        db,
-        profile=profile,
-        request=TextTestRequest(
-            message=payload.message,
-            tool_execution_mode=payload.tool_execution_mode,
-        ),
-    )
+    messages = payload.resolved_messages()
+    if payload.kind == "llm_text":
+        run = run_profile_llm_text_test(
+            db,
+            profile=profile,
+            request=LLMTextTestRequest(
+                messages=messages,
+                tool_execution_mode=payload.tool_execution_mode,
+            ),
+        )
+    else:
+        run = run_profile_text_test(
+            db,
+            profile=profile,
+            request=TextTestRequest(
+                message=messages[0],
+                tool_execution_mode=payload.tool_execution_mode,
+            ),
+        )
     events = test_run_store.get_events(db, run.id)
     logger.info(
-        "create profile test run: profile_id=%s run_id=%s status=%s events=%d",
+        "create profile test run: profile_id=%s run_id=%s kind=%s status=%s events=%d",
         profile_id,
         run.id,
+        run.kind,
         run.status,
         len(events),
     )
@@ -96,6 +111,7 @@ def list_profile_test_runs_endpoint(
     response: Response,
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
+    kind: str | None = Query(None, pattern="^(flow|llm_text)$"),
     db: Session = Depends(get_db),
 ):
     profile = profile_store.get_profile(db, profile_id)
@@ -103,8 +119,8 @@ def list_profile_test_runs_endpoint(
         logger.warning("list profile test runs 404: profile_id=%s", profile_id)
         raise HTTPException(status_code=404, detail="Profile not found")
 
-    runs = test_run_store.list_runs(db, profile_id=profile_id, limit=limit, offset=offset)
-    total = test_run_store.count_runs(db, profile_id=profile_id)
+    runs = test_run_store.list_runs(db, profile_id=profile_id, limit=limit, offset=offset, kind=kind)
+    total = test_run_store.count_runs(db, profile_id=profile_id, kind=kind)
     response.headers["X-Total-Count"] = str(total)
     response.headers["Access-Control-Expose-Headers"] = "X-Total-Count"
     logger.info(

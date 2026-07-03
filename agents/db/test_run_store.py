@@ -14,6 +14,7 @@ from db.models import Profile, ProfileTestRun, ProfileTestRunEvent
 TERMINAL_STATUSES = {"completed", "failed", "cancelled"}
 VALID_STATUSES = {"created", "running", *TERMINAL_STATUSES}
 VALID_TOOL_MODES = {"dry_run", "live"}
+VALID_RUN_KINDS = {"flow", "llm_text"}
 
 
 def profile_config_hash(config_json: str | dict[str, Any] | None) -> str:
@@ -37,20 +38,28 @@ def create_run(
     user_message: str,
     tool_execution_mode: str = "dry_run",
     status: str = "created",
+    kind: str = "flow",
+    user_messages: list[str] | None = None,
 ) -> ProfileTestRun:
-    """Create a profile-scoped text test run."""
+    """Create a profile-scoped test run (flow or llm_text)."""
     if tool_execution_mode not in VALID_TOOL_MODES:
         raise ValueError(f"invalid tool execution mode: {tool_execution_mode}")
     if status not in VALID_STATUSES:
         raise ValueError(f"invalid run status: {status}")
+    if kind not in VALID_RUN_KINDS:
+        raise ValueError(f"invalid run kind: {kind}")
 
     run = ProfileTestRun(
         profile_id=profile.id,
         profile_config_hash=profile_config_hash(profile.config_json),
         profile_snapshot_at=profile.updated_at or datetime.now(timezone.utc),
         status=status,
+        kind=kind,
         tool_execution_mode=tool_execution_mode,
         user_message=user_message,
+        user_messages_json=(
+            json.dumps(user_messages, ensure_ascii=False) if user_messages is not None else None
+        ),
     )
     db.add(run)
     db.commit()
@@ -185,19 +194,24 @@ def list_runs(
     profile_id: str,
     limit: int = 50,
     offset: int = 0,
+    kind: str | None = None,
 ) -> list[ProfileTestRun]:
+    query = db.query(ProfileTestRun).filter(ProfileTestRun.profile_id == profile_id)
+    if kind is not None:
+        query = query.filter(ProfileTestRun.kind == kind)
     return (
-        db.query(ProfileTestRun)
-        .filter(ProfileTestRun.profile_id == profile_id)
-        .order_by(desc(ProfileTestRun.created_at))
+        query.order_by(desc(ProfileTestRun.created_at))
         .offset(offset)
         .limit(limit)
         .all()
     )
 
 
-def count_runs(db: DbSession, *, profile_id: str) -> int:
-    return db.query(ProfileTestRun).filter(ProfileTestRun.profile_id == profile_id).count()
+def count_runs(db: DbSession, *, profile_id: str, kind: str | None = None) -> int:
+    query = db.query(ProfileTestRun).filter(ProfileTestRun.profile_id == profile_id)
+    if kind is not None:
+        query = query.filter(ProfileTestRun.kind == kind)
+    return query.count()
 
 
 def parse_summary(run: ProfileTestRun) -> dict[str, Any]:
@@ -205,6 +219,18 @@ def parse_summary(run: ProfileTestRun) -> dict[str, Any]:
         return json.loads(run.final_summary_json) if run.final_summary_json else {}
     except (json.JSONDecodeError, TypeError):
         return {}
+
+
+def parse_user_messages(run: ProfileTestRun) -> list[str]:
+    """Full ordered user message list; falls back to the legacy single message."""
+    if run.user_messages_json:
+        try:
+            parsed = json.loads(run.user_messages_json)
+            if isinstance(parsed, list):
+                return [str(m) for m in parsed]
+        except (json.JSONDecodeError, TypeError):
+            pass
+    return [run.user_message] if run.user_message else []
 
 
 def parse_event_payload(event: ProfileTestRunEvent) -> dict[str, Any]:
