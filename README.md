@@ -137,6 +137,8 @@ lk app env -w -d .env
 ### Profile 管理（`/admin/profiles`）
 結構化編輯：Identity / Messages / **Handoff to Human** / **QA Database**（inline ↔ tool 切換）/ **Service Hours** / Built-in Tools / **Custom HTTP Tools**。Advanced JSON 給未涵蓋欄位。
 
+Profile Editor 右側提供 **Flow Test**：對已儲存 profile 跑單輪 flow smoke/debug，保存 structured run log，顯示 prompt/graph path、tool-call mode、handoff/fallback、warning/error timeline。Flow Test 不打 LLM、不啟 LiveKit room；語音、STT/TTS、SIP/browser、LLM 回答品質與外部副作用仍以 voice Try / sessions log 或後續 LLM-backed text runner 驗證。詳見 [`docs/TEXT_TEST_GUIDE.md`](docs/TEXT_TEST_GUIDE.md)。
+
 ### Sessions（`/admin/sessions`）
 分頁列表（10/25/50）+ Profile / Status / Mode filter。Detail 頁有 Conversation chat（function call 折疊）、Metrics 表、Raw events tabs、LiveKit Cloud 錄音連結。
 
@@ -201,7 +203,7 @@ args:
 
 ```bash
 uv run pytest tests/ -q
-# 預期：147 passed
+cd frontend && pnpm test
 ```
 
 主要 test 檔：

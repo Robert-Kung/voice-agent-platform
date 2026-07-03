@@ -6,12 +6,13 @@
 - **Verified**: Try room `test-5f025c0aa3fd438291317001529632d1`：`goto_emergency` → `create_maintenance_ticket` → HTTP timeout → log 立即出現 `transfer_to_human: handing off to HumanOperator_...`；外部 LINE 單據也已由使用者確認收到，測試項目可行。
 - **Note**: 外部建單 timeout 目前判斷為測試端網路不穩造成；LINE 單據已收到，暫不列為產品 blocker。
 
-## Next SDD candidate: Test run log + text test
+## Flow test + test run log
 
-- **Priority**: 先做文字測試與結構化 test run log，再整合語音測試面板。
-- **Why now**: Graph agent e2e 已可行；下一步應讓使用者與開發者能看懂每次測試走到哪個 node、觸發哪條 edge、呼叫哪些 tools、是否 handoff。
-- **Scope**: 建立文字測試入口、保存 test run/event log、在 Profile Editor 顯示測試結果與 graph path/tool-call 狀態。
-- **SDD**: OpenSpec change `profile-test-runs`。
+- **Implemented 2026-06-29**: OpenSpec change `profile-test-runs` 已落地。Profile Editor 右側新增 Flow Test panel；backend 新增 profile-scoped test run/event store 與 API。
+- **Scope**: 單輪 deterministic flow smoke/debug、結構化 event timeline、graph path/tool-call/handoff/fallback 記錄、recent runs、dry-run/live mode metadata、sanitized payload。
+- **Docs**: `docs/TEXT_TEST_GUIDE.md`。
+- **Boundary**: Flow Test 不打 LLM、不啟 LiveKit room，不取代 voice Try；語音、STT/TTS、SIP/browser、LLM 回答品質、外部副作用仍以 Try/session log 或後續 LLM-backed text runner 驗證。
+- **Next**: 若維持 Flow Test 定位，應補自動 graph route coverage（遍歷可達 node/edge、產生 coverage summary）；真正文字對話測試另開 LLM-backed text runner。
 
 ## Graph 編輯器殘項（2026-06-12 /review 低優先）
 

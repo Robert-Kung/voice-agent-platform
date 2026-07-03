@@ -28,6 +28,7 @@ Profile Editor v2 已取代舊 prototype，default route 是 `frontend/app/admin
 - **Model & Voice full-width view**：Header Stack chip 開啟全頁視圖，編輯 `models.mode`、LLM/STT/TTS provider+model、voice、language、`via`。
 - **Catalog source of truth**：`GET /api/model-defaults` 由 backend constants 提供 LiveKit Inference catalog、voice suggestions、language matrix、pricing flags；frontend fallback 由 shared fixture 雙邊測試防 drift。
 - **AI Generate**：prompt create/enhance 已完成，使用 LM Studio endpoint；graph 草稿生成仍是延伸項。
+- **Flow Test + run log**：Profile Editor 右側 panel 可對已存 profile 跑單輪 deterministic flow smoke/debug；後端保存 `profile_test_runs` / `profile_test_run_events`，事件含 graph path、tool mode、handoff/fallback、sanitized payload。這不打 LLM，也不是 voice Try 替代品。
 
 ### 已落地 changes
 
@@ -40,10 +41,12 @@ Profile Editor v2 已取代舊 prototype，default route 是 `frontend/app/admin
 | `profile-model-catalog-runtime` | ✅ archived | catalog endpoint + direct Google LLM + voice |
 | `profile-stack-language-selection` | ✅ archived | STT/TTS language matrix + controls |
 | `profile-editor-visual-refinement` | ✅ archived | full-width Model & Voice view + browser QA |
+| `profile-test-runs` | ✅ implemented | flow test panel + structured run log（待 archive） |
 
 ### 目前殘項
 
 - Live 語音 e2e：`tool_result → handoff/transfer_to_human` 已修並在 Try log 驗證；外部 LINE 單據已確認收到。剩餘風險是建單 endpoint side effect 成功但 response 超過 agent HTTP tool 的 10s timeout，需調整 quick-ack / timeout / async job contract。
+- Flow Test：已支援單輪 deterministic flow smoke/debug 與 structured run log。dry-run 預設不觸發外部副作用；live mode 目前只記錄 live intent，實際 LLM/integration 仍走 voice Try 或後續 LLM-backed text runner。
 - CI workflow 已建立：root `.github/workflows/test.yml` 跑 backend pytest 與 frontend vitest。
 - Per-node model UI、AI Generate graph 草稿、end-node hang-up 仍是 follow-up，不是現有 blocker。
 
@@ -62,7 +65,7 @@ Profile Editor v2 已取代舊 prototype，default route 是 `frontend/app/admin
 - 安全 / 中間件 / auth：Apr 30 review 後已 hardened，動到 `frontend/middleware.ts`、`frontend/app/api/admin/*`、`api/routes_test.py` 前先看 git log 理解
 - Admin 路由結構：`frontend/app/admin/(authenticated)/` route group 包住所有登入後頁面（共用含 sidebar 的 layout），`frontend/app/admin/login/` 維持平行、不套 sidebar。新增登入後頁面請放進 `(authenticated)/` 內
 - 登入跳轉用 `window.location.assign()` 而非 `router.replace()`：login 頁與 dashboard 在不同 layout 下，但 App Router 仍會 prefetch dashboard 的 RSC payload；prefetch 發生時還沒 cookie，middleware 回 redirect 並被 client cache，導致登入後 `router.replace` 拿到的是舊的 redirect。hard navigation 直接繞過 client cache
-- Test：`cd agents && uv run pytest tests/ -q`（目前 275 passed / 44 skipped）；`cd frontend && pnpm test`（目前 76 passed）。`tests/test_api.py` 的 `client` fixture 會 unset `ADMIN_API_TOKEN`，auth 強制驗證用 `secured_client`
+- Test：`cd agents && uv run pytest tests/ -q`；`cd frontend && pnpm test`（目前 84 passed）。`tests/test_api.py` 的 `client` fixture 會 unset `ADMIN_API_TOKEN`，auth 強制驗證用 `secured_client`
 - DB：SQLite，profile 透過 `db.profile_store` 持久化；YAML 是 fallback。`db.engine` 是 module-global singleton，conftest.py 已將測試 DB 指向 `:memory:`
 - Profile 改名 / tool 拿掉時記得同步更新 `agents/tests/test_agent_system.py` 的 assertion
 - Cost：realtime 用 Gemini Live token rates（`db/cost.py`），pipeline 走 LLM/STT/TTS 分開計費

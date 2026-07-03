@@ -8,11 +8,11 @@ The next layer should introduce a text-first test run path and a structured even
 
 **Goals:**
 
-- Provide a text test entry point for a saved profile.
+- Provide a flow test entry point for a saved profile.
 - Record each test as a structured run with ordered events.
 - Surface node path, edge decisions, tool calls, tool outcomes, warnings, and final status in the Profile Editor.
 - Share profile loading, normalization, graph validation, and graph/prompt strategy selection with the production runtime where practical.
-- Default to side-effect-safe tool behavior for text tests while still allowing explicit live tool execution for controlled validation.
+- Default to side-effect-safe tool behavior for flow tests while exposing explicit live-mode intent without external execution in this iteration.
 
 **Non-Goals:**
 
@@ -26,7 +26,7 @@ The next layer should introduce a text-first test run path and a structured even
 
 ### Decision: Introduce profile-scoped test runs instead of overloading sessions
 
-Test runs should be separate from live session rows because their lifecycle, inputs, and safety semantics differ from real calls. A test run can complete in seconds, may use dry-run tools, and should be easy to replay or delete without affecting customer session history.
+Test runs should be separate from live session rows because their lifecycle, inputs, and safety semantics differ from real calls. A flow test run can complete in seconds, may use dry-run tools, and should be easy to replay or delete without affecting customer session history.
 
 Alternative considered: reuse the existing session/cost tables. This would reduce schema work, but it would mix authoring tests with real user calls and make future filtering/auditing harder.
 
@@ -38,17 +38,17 @@ Every event payload should include `schema_version: 1`. The API should sanitize 
 
 Alternative considered: persist raw log lines. Raw logs are cheap, but they are not stable enough for UI state, assertions, or replay.
 
-### Decision: Text tests use runtime adapters, not a LiveKit room
+### Decision: Flow tests use deterministic runtime adapters, not an LLM or LiveKit room
 
-The text test path should avoid LiveKit room setup, microphone permissions, STT, and TTS. It should still reuse profile parsing, graph validation, flattened prompt generation, tool registry resolution, and graph transition semantics where practical. If the production LiveKit `Agent` abstraction is too tightly bound to a live `RunContext`, implement a small adapter layer that emits the same test-run events around deterministic graph decisions and tool calls.
+The flow test path should avoid LLM calls, LiveKit room setup, microphone permissions, STT, and TTS. It should still reuse profile parsing, graph validation, flattened prompt generation, tool registry resolution, and graph transition semantics where practical. If the production LiveKit `Agent` abstraction is too tightly bound to a live `RunContext`, implement a small adapter layer that emits test-run events around deterministic graph decisions and tool calls.
 
-Alternative considered: spin up a full LiveKit room for text tests and inject text as user speech. That would improve e2e fidelity, but it keeps the slowest and most failure-prone pieces in the authoring loop.
+Alternative considered: spin up a full LiveKit room or call the configured LLM for this panel. That would improve behavioral fidelity, but it belongs in the next LLM-backed text runner; this change establishes the flow/run-log infrastructure first.
 
 ### Decision: Tool execution mode is explicit and safe by default
 
-Text tests should default to `dry_run` tool mode. In dry-run mode, built-in and HTTP tools should validate inputs and emit planned request metadata without performing external side effects. A `live` mode can be added for explicit validation when the user accepts that external systems may be called.
+Flow tests should default to `dry_run` tool mode. In dry-run mode, built-in and HTTP tools should validate inputs and emit planned request metadata without performing external side effects. In this iteration, `live` mode records explicit live-mode intent and a structured not-enabled result; real external validation remains in voice Try/session logs until flow-test live execution has a side-effect contract.
 
-Dry-run behavior should be implemented through a central test-run tool dispatcher rather than ad hoc branches inside every tool. The dispatcher should know whether a tool is side-effecting, record a planned call in dry-run mode, and enforce bounded timeouts in live mode. Text-mode handoff should record `handoff_attempted` / `handoff` events rather than trying to transfer a real voice session.
+Dry-run behavior should be implemented through a central test-run tool dispatcher rather than ad hoc branches inside every tool. The dispatcher should know whether a tool is side-effecting, record a planned call in dry-run mode, and record live-mode intent without external execution for now. Text-mode handoff should record `handoff_attempted` / `handoff` events rather than trying to transfer a real voice session.
 
 Alternative considered: always execute tools live. The recent LINE ticket verification showed live tools are valuable, but making that the default risks duplicate tickets and confusing side effects during routine authoring.
 
@@ -62,15 +62,15 @@ Alternative considered: always read the latest profile when retrieving a run. Th
 
 The Profile Editor should expose a text input, run status, event timeline, and graph path/tool state summary. The panel should be useful in both prompt and graph modes, with graph-specific node/path highlighting only when a graph is active.
 
-The compact panel should lead with input, tool mode, run button, current status, and final output. Detailed timeline rows, payloads, graph path, and recent runs should live behind expandable sections. The UI must label text tests as authoring/debug checks and keep voice Try visible as the final integration check for audio, STT/TTS, and external live behavior.
+The compact panel should lead with input, tool mode, run button, current status, and placeholder output. Detailed timeline rows, payloads, graph path, and recent runs should live behind expandable sections. The UI must label flow tests as deterministic authoring/debug checks and keep voice Try visible as the final integration check for LLM behavior, audio, STT/TTS, and external live behavior.
 
 Alternative considered: build a separate full testing page first. A separate page may be useful later, but putting the first version in the editor keeps the test loop close to the profile being edited.
 
 ## Risks / Trade-offs
 
-- Text-test behavior diverges from voice runtime -> Share normalization, validation, graph flattening, and transition logic; clearly label voice-only risks that still require Try.
-- Dry-run tools hide integration failures -> Provide explicit live mode and event metadata that shows when a tool was skipped versus executed.
+- Flow-test behavior diverges from voice/text LLM runtime -> Share normalization, validation, graph flattening, and transition logic; clearly label LLM/voice-only risks that still require a later text runner or Try.
+- Dry-run tools hide integration failures -> Provide explicit live-mode intent and event metadata that shows when a tool was skipped; keep real external validation in voice Try until flow-test live execution has a side-effect contract.
 - Event payloads leak sensitive request data -> Store sanitized payloads by default; redact secrets, auth headers, and large bodies.
 - Test run storage grows without bound -> Add retention limits or pagination from the first API version.
 - UI becomes too heavy inside the editor -> Keep the first panel compact and focused on current/recent runs, with deeper replay deferred.
-- LLM-routed graph paths are non-deterministic -> Record that a text test shows the path this run took, support explicit deterministic path overrides later, and keep voice Try as the final validation path.
+- Deterministic graph smoke paths can create false confidence -> Label the selected path as deterministic v1 behavior, add automatic route coverage as a follow-up, and keep LLM-backed text testing/voice Try as the behavioral validation path.
