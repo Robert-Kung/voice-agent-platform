@@ -50,6 +50,7 @@ class Profile(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=_utcnow, onupdate=_utcnow)
 
     sessions: Mapped[list["Session"]] = relationship(back_populates="profile")
+    test_runs: Mapped[list["ProfileTestRun"]] = relationship(back_populates="profile")
 
 
 class Session(Base):
@@ -93,3 +94,39 @@ class SessionEvent(Base):
     payload_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
 
     session: Mapped[Session] = relationship(back_populates="events")
+
+
+class ProfileTestRun(Base):
+    __tablename__ = "profile_test_runs"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_new_uuid)
+    profile_id: Mapped[str] = mapped_column(String(36), ForeignKey("profiles.id"), nullable=False, index=True)
+    profile_config_hash: Mapped[str] = mapped_column(String(64), nullable=False, default="")
+    profile_snapshot_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=_utcnow)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="created")
+    tool_execution_mode: Mapped[str] = mapped_column(String(20), nullable=False, default="dry_run")
+    user_message: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    final_summary_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=_utcnow, onupdate=_utcnow)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+    profile: Mapped[Profile] = relationship(back_populates="test_runs")
+    events: Mapped[list["ProfileTestRunEvent"]] = relationship(
+        back_populates="run",
+        cascade="all, delete-orphan",
+    )
+
+
+class ProfileTestRunEvent(Base):
+    __tablename__ = "profile_test_run_events"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    run_id: Mapped[str] = mapped_column(String(36), ForeignKey("profile_test_runs.id"), nullable=False, index=True)
+    seq: Mapped[int] = mapped_column(Integer, nullable=False)
+    event_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    severity: Mapped[str] = mapped_column(String(20), nullable=False, default="info")
+    timestamp: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=_utcnow)
+    payload_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+
+    run: Mapped[ProfileTestRun] = relationship(back_populates="events")

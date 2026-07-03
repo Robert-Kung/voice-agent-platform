@@ -82,6 +82,13 @@ def _add_missing_columns(engine: Engine) -> None:
             ("agent_mode", "VARCHAR(20) NULL"),
             ("model_names_json", "TEXT NULL"),
         ],
+        "profile_test_runs": [
+            ("profile_config_hash", "VARCHAR(64) NOT NULL DEFAULT ''"),
+            ("profile_snapshot_at", "DATETIME NULL"),
+        ],
+        "profile_test_run_events": [
+            ("severity", "VARCHAR(20) NOT NULL DEFAULT 'info'"),
+        ],
     }
     insp = inspect(engine)
     with engine.begin() as conn:

@@ -69,6 +69,45 @@ class ProfileOut(ProfileBase):
     model_config = ConfigDict(from_attributes=True)
 
 
+# ── Profile Test Runs ──────────────────────────────────────
+
+
+class ProfileTextTestRequest(BaseModel):
+    message: str = Field(..., min_length=1, max_length=4000)
+    tool_execution_mode: str = Field("dry_run", pattern="^(dry_run|live)$")
+
+
+class ProfileTestRunSummary(BaseModel):
+    id: str
+    profile_id: str
+    status: str
+    tool_execution_mode: str
+    user_message: str
+    profile_config_hash: str
+    profile_snapshot_at: datetime
+    final_summary: dict[str, Any] = Field(default_factory=dict)
+    created_at: datetime
+    updated_at: datetime
+    completed_at: datetime | None = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class ProfileTestRunEventOut(BaseModel):
+    id: int
+    seq: int
+    event_type: str
+    severity: str
+    timestamp: datetime
+    payload: dict[str, Any]
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class ProfileTestRunDetail(ProfileTestRunSummary):
+    events: list[ProfileTestRunEventOut] = Field(default_factory=list)
+
+
 # ── Session ──────────────────────────────────────────────────
 
 
