@@ -11,8 +11,15 @@
 - **Implemented 2026-06-29**: OpenSpec change `profile-test-runs` 已落地。Profile Editor 右側新增 Flow Test panel；backend 新增 profile-scoped test run/event store 與 API。
 - **Scope**: 單輪 deterministic flow smoke/debug、結構化 event timeline、graph path/tool-call/handoff/fallback 記錄、recent runs、dry-run/live mode metadata、sanitized payload。
 - **Docs**: `docs/TEXT_TEST_GUIDE.md`。
-- **Boundary**: Flow Test 不打 LLM、不啟 LiveKit room，不取代 voice Try；語音、STT/TTS、SIP/browser、LLM 回答品質、外部副作用仍以 Try/session log 或後續 LLM-backed text runner 驗證。
-- **Next**: 若維持 Flow Test 定位，應補自動 graph route coverage（遍歷可達 node/edge、產生 coverage summary）；真正文字對話測試另開 LLM-backed text runner。
+- **Boundary**: Flow Test 不打 LLM、不啟 LiveKit room，不取代 voice Try；語音、STT/TTS、SIP/browser、LLM 回答品質、外部副作用仍以 Try/session log 或 LLM Text Test 驗證。
+- **Next**: 若維持 Flow Test 定位，應補自動 graph route coverage（遍歷可達 node/edge、產生 coverage summary）。
+
+## LLM Text Test
+
+- **Implemented 2026-07-03**: OpenSpec change `llm-text-test` 已落地。同一 test panel 新增 `LLM Text` kind：打真實 LLM 的多輪文字對話測試（無 room / 語音 / 外部副作用）。
+- **Scope**: prompt profile 用共用 `compose_prompt_instructions`；graph profile 由 LLM 呼叫合成 `goto_*` 工具決定路由、`tool_result` edge 無條件轉移（runtime parity）；dry-run 工具結果餵回 LLM；usage / timeout / max_steps guard；`sanitize_llm_text` pattern-based redaction；realtime profile fallback 至預設 pipeline LLM + warning banner。
+- **Docs**: `docs/TEXT_TEST_GUIDE.md`（LLM Text Test 章節）。
+- **Boundary**: 不驗語音、rooms、realtime 模型行為、真實外部副作用；integration test 以 `LLM_TEXT_TEST_INTEGRATION=1` gate。
 
 ## Graph 編輯器殘項（2026-06-12 /review 低優先）
 

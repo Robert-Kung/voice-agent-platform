@@ -67,5 +67,12 @@ Runtime 現況（研究結論，見 `agents/agent.py` / `agents/runtime/provider
 ## Open Questions
 
 - Panel UI 是雙 tab（Flow / Text）還是單 panel + mode 切換？（實作時依現有 panel 結構決定，傾向 tab。）
+  - ✅ 已定案：單 panel + kind tab（Flow / LLM Text），多輪輸入為一行一則訊息。
 - `google.LLM` direct path 的 credentials 在 API server 環境是否齊備？（integration test gate 可先驗。）
 - livekit-agents SDK 的 `llm.chat()` tool-call 回傳結構（FunctionCall 物件形狀、單次多 tool calls、inference.LLM vs google.LLM 語意差異）需在實作前用 spike test 驗證（tasks 2.0）。
+  - ✅ Spike 結論（livekit-agents 1.5.2，實測 inference.LLM 無 room 成功）：
+    - `llm.chat(chat_ctx=..., tools=[...])` 回傳 `LLMStream`，chunk 為 `ChatChunk(id, delta, usage)`；`delta.tool_calls` 是 `FunctionToolCall(type, name, arguments(JSON str), call_id)` list，單 chunk 可帶多個 tool calls。
+    - Tool 結果餵回：`ChatContext` 插入 `FunctionCall(call_id, name, arguments)` + `FunctionCallOutput(call_id, name, output, is_error)` 後再次 `chat()`。
+    - usage 出現在最終 chunk 的 `CompletionUsage(prompt_tokens, completion_tokens, total_tokens)`。
+    - 無 room/job context 時需 `http_context._new_session_ctx()`（同 `_probe_gateway` 既有模式）。
+    - 合成工具用 `function_tool(noop, raw_schema={name, description, parameters})`；runner 自行攔截 stream 的 tool calls，工具函式本體不會被呼叫。
