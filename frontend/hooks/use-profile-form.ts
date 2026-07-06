@@ -23,6 +23,7 @@ import type { ModelMode, ModelSpec, ModelsConfig, RealtimeBlock } from '@/lib/mo
 // ── Types ──────────────────────────────────────────────────────────
 
 export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
+export type ResponseMode = 'wait' | 'quick_ack';
 export type ParamType = 'string' | 'number' | 'integer' | 'boolean';
 export type QaMode = 'inline' | 'tool';
 
@@ -62,6 +63,7 @@ export type ToolEntry = {
   method?: HttpMethod;
   auth_header?: string;
   timeout_seconds?: number;
+  response_mode?: ResponseMode;
   parameters?: HttpToolParam[];
 };
 

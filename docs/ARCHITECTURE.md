@@ -131,12 +131,18 @@ tools:
     method: POST
     auth_header: "Bearer ${ELEVATOR_API_KEY}"
     timeout_seconds: 10
+    response_mode: wait   # wait（預設）或 quick_ack
     parameters:
       - { name: building, type: string, required: true, description: 棟別 }
       - { name: symptom, type: string, description: 故障狀況 }
 ```
 
 業務邏輯（送 LINE / 開單 / 寫 DB）住在使用者自寫的 API server，agent 平台只負責對話 + 呼叫。
+
+#### Response mode（`response_mode`）
+
+- **`wait`（預設）**：同步等待回應。timeout 時回傳 `{"success": false, "pending": true, "error": "timeout", "detail": ...}`，detail 指示 LLM：請求已送出、後端可能仍在處理、不要重複提交（避免 side effect 成功但回應慢時誤報失敗、誘發重複建單）。4xx/5xx 與連線錯誤維持 `{"success": false, "error": ...}`。
+- **`quick_ack`**：fire-and-forget。請求以背景 task 送出，工具立即回 `{"success": true, "accepted": true, "detail": ...}`，消除語音 dead air。背景結果只記 log（成功 info / 失敗 warning），不回饋對話。適用於建單、通知類「必達型」API。
 
 #### SSRF 防護（`agent_tools._validate_endpoint`）
 

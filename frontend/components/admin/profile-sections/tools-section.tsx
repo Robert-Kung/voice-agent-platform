@@ -1,7 +1,12 @@
 'use client';
 
 import { useState } from 'react';
-import type { HttpMethod, ParamType, UseProfileFormReturn } from '@/hooks/use-profile-form';
+import type {
+  HttpMethod,
+  ParamType,
+  ResponseMode,
+  UseProfileFormReturn,
+} from '@/hooks/use-profile-form';
 import { HTTP_METHODS, PARAM_TYPES } from '@/hooks/use-profile-form';
 import { AUTO_MOUNTED_TOOL_NAMES } from '@/lib/agent-graph';
 import { CollapsibleSection } from '../collapsible-section';
@@ -214,6 +219,19 @@ function HttpToolCard({
             onChange={(e) => updateHttpTool(realIdx, { auth_header: e.target.value })}
             className={`${inputClass} font-mono text-xs`}
           />
+          <label className="flex items-center gap-2 text-xs">
+            <span className="text-foreground/70 shrink-0">Response</span>
+            <select
+              value={tool.response_mode || 'wait'}
+              onChange={(e) =>
+                updateHttpTool(realIdx, { response_mode: e.target.value as ResponseMode })
+              }
+              className={`${inputClass} text-xs`}
+            >
+              <option value="wait">wait — 等待 API 回應</option>
+              <option value="quick_ack">quick_ack — 立即回覆，背景送出</option>
+            </select>
+          </label>
           {/* Parameters */}
           <div>
             <div className="mb-1 flex items-center justify-between">

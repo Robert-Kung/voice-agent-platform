@@ -4,7 +4,7 @@
 
 - **Resolved 2026-06-29**: `elevator_repair_graph` 緊急分支的 `tool_result → handoff` runtime 語意已修。domain tool 回傳後若目標是 handoff node，wrapper 直接委託既有 `transfer_to_human` tool，避免 source node 先生成自由文字；工具結果會注入 handoff 目標 context。
 - **Verified**: Try room `test-5f025c0aa3fd438291317001529632d1`：`goto_emergency` → `create_maintenance_ticket` → HTTP timeout → log 立即出現 `transfer_to_human: handing off to HumanOperator_...`；外部 LINE 單據也已由使用者確認收到，測試項目可行。
-- **Note**: 外部建單 timeout 目前判斷為測試端網路不穩造成；LINE 單據已收到，暫不列為產品 blocker。
+- **Resolved 2026-07-06**: OpenSpec change `http-tool-quick-ack` 已落地。HTTP tool 新增 `response_mode: wait | quick_ack`：quick_ack 背景送出、立即回 ack；wait timeout 改回 `pending: true` + 「勿重複提交」detail，消除 side effect 成功卻報失敗的誤導。
 
 ## Flow test + test run log
 

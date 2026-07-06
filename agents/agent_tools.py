@@ -231,7 +231,10 @@ _VALID_PARAM_NAME = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 _ENV_VAR_PATTERN = re.compile(r"\$\{([A-Z][A-Z0-9_]*)\}")
 _ALLOWED_HTTP_METHODS = {"GET", "POST", "PUT", "PATCH", "DELETE"}
 _ALLOWED_PARAM_TYPES = {"string", "number", "integer", "boolean"}
+_ALLOWED_RESPONSE_MODES = {"wait", "quick_ack"}
 _DEFAULT_HTTP_TIMEOUT_S = 10.0
+# quick_ack 背景 task 的強引用集合 — 防止 create_task 後被 GC 提前回收
+_BACKGROUND_HTTP_TASKS: set[asyncio.Task] = set()
 _BLOCKED_HOSTNAMES = frozenset({
     "localhost",
     "metadata.google.internal",      # GCE metadata
@@ -289,6 +292,7 @@ def make_http_tool(profile: dict, config: dict):
           method: POST                 # 預設 POST
           auth_header: "Bearer ${ELEVATOR_API_KEY}"
           timeout_seconds: 10
+          response_mode: wait          # wait（預設）或 quick_ack（fire-and-forget，立即回 ack）
           parameters:
             - name: building
               type: string
@@ -317,6 +321,12 @@ def make_http_tool(profile: dict, config: dict):
     timeout = float(config.get("timeout_seconds") or _DEFAULT_HTTP_TIMEOUT_S)
     if timeout <= 0 or timeout > 60:
         raise ValueError(f"timeout_seconds must be in (0, 60], got {timeout}")
+
+    response_mode = (config.get("response_mode") or "wait").strip()
+    if response_mode not in _ALLOWED_RESPONSE_MODES:
+        raise ValueError(
+            f"invalid response_mode '{response_mode}' (allowed: {sorted(_ALLOWED_RESPONSE_MODES)})"
+        )
 
     auth_header_raw = config.get("auth_header") or ""
     auth_header_resolved = _substitute_env(auth_header_raw) if auth_header_raw else ""
@@ -367,24 +377,70 @@ def make_http_tool(profile: dict, config: dict):
     _JSON_TO_PYTYPE = {"string": str, "number": float, "integer": int, "boolean": bool}
     param_defs = config.get("parameters", []) or []
 
-    async def _handler(self, **kwargs) -> dict:
+    async def _do_request(kwargs_clean: dict) -> dict:
+        """單次 HTTP 請求 — wait 與 quick_ack 共用。timeout / 錯誤在 caller 處理。"""
         headers = {"Content-Type": "application/json"}
         if auth_header_resolved:
             headers["Authorization"] = auth_header_resolved
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=timeout)) as session:
+            if method == "GET":
+                async with session.request(method, endpoint, headers=headers, params=kwargs_clean) as resp:
+                    return await _parse_response(resp)
+            else:
+                async with session.request(method, endpoint, headers=headers, json=kwargs_clean) as resp:
+                    return await _parse_response(resp)
 
-        logger.info("http_tool '%s' → %s %s (params=%s)", name, method, endpoint, list(kwargs.keys()))
+    async def _background_request(kwargs_clean: dict) -> None:
+        """quick_ack 背景執行 — 結果只記 log，不回饋對話，例外不外洩。"""
         try:
-            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=timeout)) as session:
-                kwargs_clean = {k: v for k, v in kwargs.items() if v is not None}
-                if method == "GET":
-                    async with session.request(method, endpoint, headers=headers, params=kwargs_clean) as resp:
-                        return await _parse_response(resp)
-                else:
-                    async with session.request(method, endpoint, headers=headers, json=kwargs_clean) as resp:
-                        return await _parse_response(resp)
+            result = await _do_request(kwargs_clean)
+            if result.get("success"):
+                logger.info("http_tool '%s' (quick_ack) background request succeeded", name)
+            else:
+                logger.warning(
+                    "http_tool '%s' (quick_ack) background request failed: %s",
+                    name, {k: result.get(k) for k in ("status", "error")},
+                )
+        except asyncio.TimeoutError:
+            logger.warning("http_tool '%s' (quick_ack) background request timed out after %ss", name, timeout)
+        except asyncio.CancelledError:
+            logger.warning("http_tool '%s' (quick_ack) background request cancelled before completion", name)
+            raise
+        except aiohttp.ClientError as e:
+            logger.warning("http_tool '%s' (quick_ack) background client error: %s", name, e)
+        except Exception:
+            logger.exception("http_tool '%s' (quick_ack) background unexpected error", name)
+
+    async def _handler(self, **kwargs) -> dict:
+        kwargs_clean = {k: v for k, v in kwargs.items() if v is not None}
+        logger.info(
+            "http_tool '%s' → %s %s (params=%s, mode=%s)",
+            name, method, endpoint, list(kwargs_clean.keys()), response_mode,
+        )
+
+        if response_mode == "quick_ack":
+            task = asyncio.create_task(_background_request(kwargs_clean))
+            _BACKGROUND_HTTP_TASKS.add(task)
+            task.add_done_callback(_BACKGROUND_HTTP_TASKS.discard)
+            return {
+                "success": True,
+                "accepted": True,
+                "detail": "請求已送出，後端處理中；請告知使用者已收到請求，稍後會完成處理",
+            }
+
+        try:
+            return await _do_request(kwargs_clean)
         except asyncio.TimeoutError:
             logger.warning("http_tool '%s' timed out after %ss", name, timeout)
-            return {"success": False, "error": f"請求逾時（{timeout}s）"}
+            return {
+                "success": False,
+                "pending": True,
+                "error": "timeout",
+                "detail": (
+                    f"請求已送出但未在 {timeout}s 內收到回應；後端可能仍在處理。"
+                    "請告知使用者請求已送出、稍候確認，不要重複提交"
+                ),
+            }
         except aiohttp.ClientError as e:
             logger.warning("http_tool '%s' client error: %s", name, e)
             return {"success": False, "error": f"連線錯誤：{type(e).__name__}"}

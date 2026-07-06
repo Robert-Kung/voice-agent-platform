@@ -386,3 +386,158 @@ class TestHttpBehaviour:
             await tool._func(None, x="hello", optional_field=None)  # type: ignore[attr-defined]
         call_kwargs = session.request.call_args.kwargs
         assert "optional_field" not in call_kwargs["json"]
+
+
+# ═══════════════════════════════════════════════════════════
+# response_mode（wait / quick_ack）
+# ═══════════════════════════════════════════════════════════
+
+
+class TestResponseModeValidation:
+    def _config(self, **overrides):
+        base = {"name": "t", "endpoint": "https://api.example.com/x"}
+        base.update(overrides)
+        return base
+
+    def test_default_mode_is_wait(self):
+        # 未設定 response_mode 建置成功（行為驗證見 TestWaitModeTimeout）
+        make_http_tool({}, self._config())
+
+    def test_wait_accepted(self):
+        make_http_tool({}, self._config(response_mode="wait"))
+
+    def test_quick_ack_accepted(self):
+        make_http_tool({}, self._config(response_mode="quick_ack"))
+
+    def test_invalid_mode_rejected(self):
+        with pytest.raises(ValueError, match="response_mode"):
+            make_http_tool({}, self._config(response_mode="fire"))
+
+
+class TestWaitModeTimeout(TestHttpBehaviour):
+    """wait mode 的 timeout 應回傳 pending 語意；其他錯誤維持原 shape。"""
+
+    @pytest.mark.anyio
+    async def test_timeout_returns_pending(self):
+        import asyncio
+        tool = self._build_tool()
+        session_ctx, _, _ = self._mock_session(raise_exc=asyncio.TimeoutError())
+        with patch("agent_tools.aiohttp.ClientSession", return_value=session_ctx):
+            result = await tool._func(None, x="hello")  # type: ignore[attr-defined]
+        assert result["success"] is False
+        assert result["pending"] is True
+        assert result["error"] == "timeout"
+        assert "不要重複提交" in result["detail"]
+
+    @pytest.mark.anyio
+    async def test_http_500_has_no_pending(self):
+        tool = self._build_tool()
+        session_ctx, _, _ = self._mock_session(status=500, json_body=None, text_body="boom")
+        with patch("agent_tools.aiohttp.ClientSession", return_value=session_ctx):
+            result = await tool._func(None, x="hello")  # type: ignore[attr-defined]
+        assert result["success"] is False
+        assert "pending" not in result
+
+    @pytest.mark.anyio
+    async def test_connection_error_has_no_pending(self):
+        import aiohttp
+        tool = self._build_tool()
+        session_ctx, _, _ = self._mock_session(raise_exc=aiohttp.ClientConnectionError())
+        with patch("agent_tools.aiohttp.ClientSession", return_value=session_ctx):
+            result = await tool._func(None, x="hello")  # type: ignore[attr-defined]
+        assert result["success"] is False
+        assert "pending" not in result
+
+
+class TestQuickAckMode(TestHttpBehaviour):
+    """quick_ack：立即回 ack、背景 task 執行請求並記 log。"""
+
+    async def _drain_background(self):
+        import agent_tools
+        import asyncio
+        if agent_tools._BACKGROUND_HTTP_TASKS:
+            await asyncio.gather(*agent_tools._BACKGROUND_HTTP_TASKS, return_exceptions=True)
+
+    @pytest.mark.anyio
+    async def test_returns_ack_before_endpoint_responds(self):
+        """慢 endpoint 下 handler 立即回 ack，不等回應。"""
+        import asyncio
+        tool = self._build_tool(response_mode="quick_ack")
+        release = asyncio.Event()
+
+        resp = MagicMock()
+        resp.status = 200
+        resp.json = AsyncMock(return_value={"ok": True})
+        resp.text = AsyncMock(return_value="")
+
+        async def slow_enter():
+            await release.wait()
+            return resp
+
+        request_ctx = MagicMock()
+        request_ctx.__aenter__ = AsyncMock(side_effect=slow_enter)
+        request_ctx.__aexit__ = AsyncMock(return_value=False)
+        session = MagicMock()
+        session.request = MagicMock(return_value=request_ctx)
+        session_ctx = MagicMock()
+        session_ctx.__aenter__ = AsyncMock(return_value=session)
+        session_ctx.__aexit__ = AsyncMock(return_value=False)
+
+        with patch("agent_tools.aiohttp.ClientSession", return_value=session_ctx):
+            result = await tool._func(None, x="hello")  # type: ignore[attr-defined]
+            # ack 已回，但 endpoint 尚未回應
+            assert result["success"] is True
+            assert result["accepted"] is True
+            assert "detail" in result
+            release.set()
+            await self._drain_background()
+
+    @pytest.mark.anyio
+    async def test_background_success_logged_info(self, caplog):
+        import logging
+        tool = self._build_tool(response_mode="quick_ack")
+        session_ctx, _, _ = self._mock_session(status=200, json_body={"ok": True})
+        with patch("agent_tools.aiohttp.ClientSession", return_value=session_ctx):
+            with caplog.at_level(logging.INFO, logger="agent-tools"):
+                result = await tool._func(None, x="hello")  # type: ignore[attr-defined]
+                await self._drain_background()
+        assert result["accepted"] is True
+        assert any("background request succeeded" in r.message for r in caplog.records)
+
+    @pytest.mark.anyio
+    async def test_background_http_error_logged_warning(self, caplog):
+        import logging
+        tool = self._build_tool(response_mode="quick_ack")
+        session_ctx, _, _ = self._mock_session(status=500, json_body=None, text_body="boom")
+        with patch("agent_tools.aiohttp.ClientSession", return_value=session_ctx):
+            with caplog.at_level(logging.WARNING, logger="agent-tools"):
+                result = await tool._func(None, x="hello")  # type: ignore[attr-defined]
+                await self._drain_background()
+        assert result["accepted"] is True
+        assert any(
+            r.levelno == logging.WARNING and "background request failed" in r.message
+            for r in caplog.records
+        )
+
+    @pytest.mark.anyio
+    async def test_background_timeout_logged_warning(self, caplog):
+        import asyncio
+        import logging
+        tool = self._build_tool(response_mode="quick_ack")
+        session_ctx, _, _ = self._mock_session(raise_exc=asyncio.TimeoutError())
+        with patch("agent_tools.aiohttp.ClientSession", return_value=session_ctx):
+            with caplog.at_level(logging.WARNING, logger="agent-tools"):
+                result = await tool._func(None, x="hello")  # type: ignore[attr-defined]
+                await self._drain_background()
+        assert result["accepted"] is True
+        assert any("timed out" in r.message for r in caplog.records)
+
+    @pytest.mark.anyio
+    async def test_task_registry_cleaned_after_completion(self):
+        import agent_tools
+        tool = self._build_tool(response_mode="quick_ack")
+        session_ctx, _, _ = self._mock_session(status=200, json_body={})
+        with patch("agent_tools.aiohttp.ClientSession", return_value=session_ctx):
+            await tool._func(None, x="hello")  # type: ignore[attr-defined]
+            await self._drain_background()
+        assert not agent_tools._BACKGROUND_HTTP_TASKS
