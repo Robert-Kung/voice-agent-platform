@@ -43,10 +43,11 @@ Profile Editor v2 已取代舊 prototype，default route 是 `frontend/app/admin
 | `profile-editor-visual-refinement` | ✅ archived | full-width Model & Voice view + browser QA |
 | `profile-test-runs` | ✅ archived | flow test panel + structured run log |
 | `llm-text-test` | ✅ archived | LLM Text Test（`kind: llm_text`）多輪真實 LLM 文字測試 |
+| `http-tool-quick-ack` | ✅ archived | HTTP tool `response_mode` wait/quick_ack + wait timeout pending 語意 |
 
 ### 目前殘項
 
-- Live 語音 e2e：`tool_result → handoff/transfer_to_human` 已修並在 Try log 驗證；外部 LINE 單據已確認收到。剩餘風險是建單 endpoint side effect 成功但 response 超過 agent HTTP tool 的 10s timeout，需調整 quick-ack / timeout / async job contract。
+- Live 語音 e2e：`tool_result → handoff/transfer_to_human` 已修並在 Try log 驗證；外部 LINE 單據已確認收到。建單 endpoint 超時風險已由 `http-tool-quick-ack` 解決：wait 模式 timeout 回 `pending: true` + 勿重複提交指示，`quick_ack` 模式立即 ack + 背景送出；三種路徑已對真實 elevator endpoint 驗證（2026-07-17）。
 - Flow Test：已支援單輪 deterministic flow smoke/debug 與 structured run log。dry-run 預設不觸發外部副作用。LLM Text Test（`kind: llm_text`）已落地：同 panel 打真實 LLM 的多輪文字測試（無 room / 語音 / 副作用），graph 路由由 LLM 呼叫合成 `goto_*` 工具決定，realtime profile fallback 至 pipeline LLM + warning。
 - CI workflow 已建立：root `.github/workflows/test.yml` 跑 backend pytest 與 frontend vitest。
 - Per-node model UI、AI Generate graph 草稿、end-node hang-up 仍是 follow-up，不是現有 blocker。
