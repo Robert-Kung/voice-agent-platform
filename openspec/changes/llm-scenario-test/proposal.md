@@ -14,7 +14,7 @@ LLM Text Test 解決了「不開 room 打真實 LLM」，但多輪使用者輸�
 - 結果模型：per-case、per-criterion 結果持久化（沿用 run/event store 模式），suite 執行產出彙總（gate pass/fail + advisory 分數）。
 - Simulator 與 judge 的 LLM endpoint 可設定，預設走 LM Studio OpenAI-compatible endpoint（AI Generate 既有路徑），被測 agent 使用 profile 自身模型。
 - Profile Editor Test panel 新增 Scenario 分頁：case/criteria CRUD、單 case 執行、suite 執行、對話 transcript 與 per-criterion 結果檢視。
-- v1 種子資料：移植 Pathors 電梯三案例（緊急受困／一般報修／非報修諮詢，15 條 criteria 轉為結構化＋NL 混合形式）作為 `elevator_repair` profile 的內建範例 suite。
+- v1 種子資料：移植 Pathors 電梯三案例（緊急受困／一般報修／非報修諮詢，15 條 criteria 轉為結構化＋NL 混合形式）作為 `elevator_repair_graph` profile（graph-mode）的內建範例 suite。
 
 明確不做（v1 邊界）：
 
@@ -39,7 +39,8 @@ LLM Text Test 解決了「不開 room 打真實 LLM」，但多輪使用者輸�
 - `agents/api/routes_profile_test_runs.py` — kind 擴充、scenario case/suite CRUD 與執行 endpoints。
 - `agents/runtime/`（llm_text runner 所在模組）— simulator 迴圈包裝層、判定引擎（event 斷言 + judge 呼叫）。
 - `agents/db/` — scenario case / criteria / suite / criterion result 資料表與 store。
-- `agents/profiles/elevator_repair.yaml` 或 seed 機制 — 內建範例 suite。
+- seed 機制（DB seed + marker）— `elevator_repair_graph` 內建範例 suite。
+- `agents/runtime/llm_text_runner.py` — 最小改動：per-turn input provider、kind 參數化（design 決策 1）。
 - `frontend/components/admin/`（Test panel）— Scenario 分頁。
 - `agents/tests/` + `frontend` vitest — 新增對應測試。
 - 不影響：Flow Test 與 LLM Text Test 既有契約、runtime 生產路徑、cost 計算（scenario 的被測 LLM usage 沿用既有 usage 記錄）。
