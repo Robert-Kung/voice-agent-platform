@@ -1,7 +1,7 @@
 // Server-side proxy from /api/admin-proxy/* → ADMIN_API_URL/*.
 //
 // Architecture: the browser is authenticated via the ADMIN_PASSWORD session
-// cookie (validated by middleware.ts). The FastAPI backend is authenticated
+// cookie (validated by proxy.ts). The FastAPI backend is authenticated
 // independently via the X-Admin-Token header. This proxy is the bridge:
 //
 //   Browser  ──cookie──▶  Next.js middleware  ──cookie ok──▶  this proxy
