@@ -1,8 +1,25 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { AlertTriangle, Bot, ChevronDown, ChevronRight, Clock3, GitBranch, Play, RefreshCw, ShieldCheck, Wrench } from 'lucide-react';
-import type { ProfileTestRunDetail, ProfileTestRunEvent, ProfileTestRunSummary, TestRunKind, ToolExecutionMode } from '@/lib/admin-api';
+import {
+  AlertTriangle,
+  Bot,
+  ChevronDown,
+  ChevronRight,
+  Clock3,
+  GitBranch,
+  Play,
+  RefreshCw,
+  ShieldCheck,
+  Wrench,
+} from 'lucide-react';
+import type {
+  ProfileTestRunDetail,
+  ProfileTestRunEvent,
+  ProfileTestRunSummary,
+  TestRunKind,
+  ToolExecutionMode,
+} from '@/lib/admin-api';
 import { formatDate, testRunsApi } from '@/lib/admin-api';
 import { cn } from '@/lib/shadcn/utils';
 
@@ -136,7 +153,11 @@ export function ProfileTextTestPanel({ profileId, isNew, isDirty }: ProfileTextT
         </div>
       )}
 
-      <div className="mb-2 flex rounded-md border border-border p-0.5" role="group" aria-label="Test kind">
+      <div
+        className="border-border mb-2 flex rounded-md border p-0.5"
+        role="group"
+        aria-label="Test kind"
+      >
         {(['flow', 'llm_text'] as TestRunKind[]).map((value) => (
           <button
             key={value}
@@ -154,7 +175,11 @@ export function ProfileTextTestPanel({ profileId, isNew, isDirty }: ProfileTextT
         ))}
       </div>
 
-      <div className="mb-2 flex rounded-md border border-border p-0.5" role="group" aria-label="Tool execution mode">
+      <div
+        className="border-border mb-2 flex rounded-md border p-0.5"
+        role="group"
+        aria-label="Tool execution mode"
+      >
         {(['dry_run', 'live'] as ToolExecutionMode[]).map((value) => (
           <button
             key={value}
@@ -191,7 +216,7 @@ export function ProfileTextTestPanel({ profileId, isNew, isDirty }: ProfileTextT
           type="button"
           onClick={() => void runTest()}
           disabled={!canRun}
-          className="bg-primary text-primary-foreground hover:opacity-90 inline-flex w-10 shrink-0 items-center justify-center rounded-md disabled:opacity-45"
+          className="bg-primary text-primary-foreground inline-flex w-10 shrink-0 items-center justify-center rounded-md hover:opacity-90 disabled:opacity-45"
           aria-label="Run flow test"
         >
           {running ? <RefreshCw size={15} className="animate-spin" /> : <Play size={15} />}
@@ -223,7 +248,9 @@ export function ProfileTextTestPanel({ profileId, isNew, isDirty }: ProfileTextT
               <Badge tone="muted">prompt {usage.prompt_tokens}</Badge>
               <Badge tone="muted">completion {usage.completion_tokens}</Badge>
               <Badge tone="muted">total {usage.total_tokens}</Badge>
-              <Badge tone="muted">{usage.llm_calls} LLM call{usage.llm_calls === 1 ? '' : 's'}</Badge>
+              <Badge tone="muted">
+                {usage.llm_calls} LLM call{usage.llm_calls === 1 ? '' : 's'}
+              </Badge>
             </div>
           )}
           <div className="space-y-1.5">
@@ -247,7 +274,7 @@ export function ProfileTextTestPanel({ profileId, isNew, isDirty }: ProfileTextT
       )}
 
       {recentRuns.length > 0 && (
-        <div className="mt-3 border-t border-border pt-2">
+        <div className="border-border mt-3 border-t pt-2">
           <div className="text-foreground/45 mb-1.5 text-[10px] font-medium uppercase">Recent</div>
           <div className="grid gap-1">
             {recentRuns.map((run) => (
@@ -257,12 +284,16 @@ export function ProfileTextTestPanel({ profileId, isNew, isDirty }: ProfileTextT
                 onClick={() => void inspectRun(run.id)}
                 className="hover:bg-foreground/5 flex min-w-0 items-center justify-between gap-2 rounded px-2 py-1 text-left"
               >
-                <span className="text-foreground/65 min-w-0 truncate text-xs">{run.user_message}</span>
+                <span className="text-foreground/65 min-w-0 truncate text-xs">
+                  {run.user_message}
+                </span>
                 <span className="flex shrink-0 items-center gap-1.5">
                   <Badge tone={run.kind === 'llm_text' ? 'safe' : 'muted'}>
                     {run.kind === 'llm_text' ? 'LLM' : 'Flow'}
                   </Badge>
-                  <span className="text-foreground/35 font-mono text-[10px]">{formatDate(run.created_at)}</span>
+                  <span className="text-foreground/35 font-mono text-[10px]">
+                    {formatDate(run.created_at)}
+                  </span>
                 </span>
               </button>
             ))}
@@ -273,13 +304,25 @@ export function ProfileTextTestPanel({ profileId, isNew, isDirty }: ProfileTextT
   );
 }
 
-function RunSummary({ run, warnings, errors }: { run: ProfileTestRunDetail; warnings: number; errors: number }) {
+function RunSummary({
+  run,
+  warnings,
+  errors,
+}: {
+  run: ProfileTestRunDetail;
+  warnings: number;
+  errors: number;
+}) {
   return (
     <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
-      <Badge tone={run.status === 'completed' ? 'success' : run.status === 'failed' ? 'error' : 'muted'}>
+      <Badge
+        tone={run.status === 'completed' ? 'success' : run.status === 'failed' ? 'error' : 'muted'}
+      >
         {run.status}
       </Badge>
-      <Badge tone={run.kind === 'llm_text' ? 'safe' : 'muted'}>{run.kind === 'llm_text' ? 'LLM' : 'Flow'}</Badge>
+      <Badge tone={run.kind === 'llm_text' ? 'safe' : 'muted'}>
+        {run.kind === 'llm_text' ? 'LLM' : 'Flow'}
+      </Badge>
       <Badge tone={run.tool_execution_mode === 'dry_run' ? 'safe' : 'warning'}>
         {run.tool_execution_mode === 'dry_run' ? <ShieldCheck size={11} /> : <Wrench size={11} />}
         {run.tool_execution_mode}
@@ -331,10 +374,18 @@ function GraphPath({ events }: { events: ProfileTestRunEvent[] }) {
   );
 }
 
-function EventRow({ event, open, onToggle }: { event: ProfileTestRunEvent; open: boolean; onToggle: () => void }) {
+function EventRow({
+  event,
+  open,
+  onToggle,
+}: {
+  event: ProfileTestRunEvent;
+  open: boolean;
+  onToggle: () => void;
+}) {
   const label = eventLabels[event.event_type] ?? event.event_type;
   return (
-    <div className="border-border rounded-md border bg-background/60">
+    <div className="border-border bg-background/60 rounded-md border">
       <button
         type="button"
         onClick={onToggle}
@@ -342,20 +393,39 @@ function EventRow({ event, open, onToggle }: { event: ProfileTestRunEvent; open:
         className="hover:bg-foreground/5 flex w-full items-center gap-2 px-2 py-1.5 text-left"
       >
         {open ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-        <Badge tone={event.severity === 'error' ? 'error' : event.severity === 'warning' ? 'warning' : 'muted'}>
+        <Badge
+          tone={
+            event.severity === 'error'
+              ? 'error'
+              : event.severity === 'warning'
+                ? 'warning'
+                : 'muted'
+          }
+        >
           {event.severity}
         </Badge>
         <span className="text-foreground/75 min-w-0 flex-1 truncate text-xs">{label}</span>
         {eventToolState(event).map((state) => (
-          <Badge key={state} tone={state === 'error' || state === 'timeout' ? 'error' : state === 'live' ? 'warning' : 'safe'}>
+          <Badge
+            key={state}
+            tone={
+              state === 'error' || state === 'timeout'
+                ? 'error'
+                : state === 'live'
+                  ? 'warning'
+                  : 'safe'
+            }
+          >
             {state}
           </Badge>
         ))}
-        <span className="text-foreground/35 hidden font-mono text-[10px] sm:inline">{formatDate(event.timestamp)}</span>
+        <span className="text-foreground/35 hidden font-mono text-[10px] sm:inline">
+          {formatDate(event.timestamp)}
+        </span>
         <span className="text-foreground/35 font-mono text-[10px]">#{event.seq}</span>
       </button>
       {open && (
-        <pre className="text-foreground/60 max-h-56 overflow-auto border-t border-border px-2 py-2 text-[10px] leading-relaxed">
+        <pre className="text-foreground/60 border-border max-h-56 overflow-auto border-t px-2 py-2 text-[10px] leading-relaxed">
           {JSON.stringify(event.payload, null, 2)}
         </pre>
       )}
@@ -363,15 +433,24 @@ function EventRow({ event, open, onToggle }: { event: ProfileTestRunEvent; open:
   );
 }
 
-function Badge({ children, tone }: { children: React.ReactNode; tone: 'muted' | 'safe' | 'success' | 'warning' | 'error' }) {
+function Badge({
+  children,
+  tone,
+}: {
+  children: React.ReactNode;
+  tone: 'muted' | 'safe' | 'success' | 'warning' | 'error';
+}) {
   return (
     <span
       className={cn(
         'inline-flex items-center gap-1 rounded-full border px-1.5 py-0.5 text-[10px] font-medium',
         tone === 'muted' && 'border-border bg-foreground/5 text-foreground/55',
-        tone === 'safe' && 'border-emerald-500/25 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300',
-        tone === 'success' && 'border-green-500/25 bg-green-500/10 text-green-700 dark:text-green-300',
-        tone === 'warning' && 'border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300',
+        tone === 'safe' &&
+          'border-emerald-500/25 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300',
+        tone === 'success' &&
+          'border-green-500/25 bg-green-500/10 text-green-700 dark:text-green-300',
+        tone === 'warning' &&
+          'border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300',
         tone === 'error' && 'border-red-500/30 bg-red-500/10 text-red-700 dark:text-red-300'
       )}
     >
@@ -419,7 +498,9 @@ export function runUsage(run: ProfileTestRunDetail | null): RunUsage | null {
 
 export function graphPath(run: ProfileTestRunDetail | null): ProfileTestRunEvent[] {
   if (!run) return [];
-  return run.events.filter((e) => e.event_type === 'node_entered' || e.event_type === 'edge_selected');
+  return run.events.filter(
+    (e) => e.event_type === 'node_entered' || e.event_type === 'edge_selected'
+  );
 }
 
 export function eventToolState(event: ProfileTestRunEvent): string[] {
@@ -429,6 +510,7 @@ export function eventToolState(event: ProfileTestRunEvent): string[] {
   if (event.payload.timed_out === true) states.push('timeout');
   else if (event.payload.executed === true) states.push('executed');
   else states.push('skipped');
-  if ((event.payload.result as { success?: unknown } | undefined)?.success === false) states.push('error');
+  if ((event.payload.result as { success?: unknown } | undefined)?.success === false)
+    states.push('error');
   return states;
 }

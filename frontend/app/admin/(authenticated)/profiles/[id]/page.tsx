@@ -11,7 +11,6 @@ import { ModelVoiceView } from '@/components/admin/model-voice-view';
 import { NodeInspector } from '@/components/admin/node-inspector';
 import { ProfileEditorHeader } from '@/components/admin/profile-editor-header';
 import { ProfileEditorLayout } from '@/components/admin/profile-editor-layout';
-import { ProfileTextTestPanel } from '@/components/admin/profile-text-test-panel';
 import {
   AdvancedSection,
   HandoffSection,
@@ -20,6 +19,7 @@ import {
   QaSection,
   ToolsSection,
 } from '@/components/admin/profile-sections';
+import { ProfileTextTestPanel } from '@/components/admin/profile-text-test-panel';
 import { PromptEditor } from '@/components/admin/prompt-editor';
 import { useProfileForm } from '@/hooks/use-profile-form';
 import { graphToPrompt, normalizeGraph } from '@/lib/agent-graph';

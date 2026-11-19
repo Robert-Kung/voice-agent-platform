@@ -1,7 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { testRunsApi } from '../admin-api';
 
-function jsonResponse(body: unknown, init: { status?: number; headers?: Record<string, string> } = {}) {
+function jsonResponse(
+  body: unknown,
+  init: { status?: number; headers?: Record<string, string> } = {}
+) {
   return {
     ok: (init.status ?? 200) < 400,
     status: init.status ?? 200,
@@ -20,9 +23,9 @@ describe('testRunsApi', () => {
   });
 
   it('creates a profile text test run with dry-run mode', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(
-      jsonResponse({ id: 'run-1', events: [], status: 'completed' })
-    );
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(jsonResponse({ id: 'run-1', events: [], status: 'completed' }));
     vi.stubGlobal('fetch', fetchMock);
 
     const run = await testRunsApi.create('profile-1', {
@@ -43,9 +46,9 @@ describe('testRunsApi', () => {
   it('lists recent runs with total count metadata', async () => {
     vi.stubGlobal(
       'fetch',
-      vi.fn().mockResolvedValue(
-        jsonResponse([{ id: 'run-1' }], { headers: { 'X-Total-Count': '7' } })
-      )
+      vi
+        .fn()
+        .mockResolvedValue(jsonResponse([{ id: 'run-1' }], { headers: { 'X-Total-Count': '7' } }))
     );
 
     const page = await testRunsApi.list('profile-1', { limit: 5, offset: 0 });

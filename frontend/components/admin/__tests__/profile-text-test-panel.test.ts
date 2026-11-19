@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import type { ProfileTestRunDetail } from '@/lib/admin-api';
-import { eventToolState, findAssistantOutput, graphPath, parseTestMessages, runUsage } from '../profile-text-test-panel';
+import {
+  eventToolState,
+  findAssistantOutput,
+  graphPath,
+  parseTestMessages,
+  runUsage,
+} from '../profile-text-test-panel';
 
 const baseRun: ProfileTestRunDetail = {
   id: 'run-1',
