@@ -2,7 +2,7 @@
 //
 // All requests go through the same-origin Next.js proxy at /api/admin-proxy.
 // The proxy injects X-Admin-Token from server-side env (ADMIN_API_TOKEN) and
-// is gated by middleware.ts on the ADMIN_PASSWORD session cookie. The token
+// is gated by proxy.ts on the ADMIN_PASSWORD session cookie. The token
 // never reaches the browser bundle.
 //
 // Backend FastAPI URL is configured server-side via ADMIN_API_URL — see

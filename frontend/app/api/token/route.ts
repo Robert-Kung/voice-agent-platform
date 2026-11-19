@@ -22,7 +22,7 @@ export const revalidate = 0;
 const ROOM_NAME_RE = /^[A-Za-z0-9_-]{1,64}$/;
 
 export async function POST(req: Request) {
-  // Auth is enforced by middleware.ts (ADMIN_PASSWORD + session cookie).
+  // Auth is enforced by proxy.ts (ADMIN_PASSWORD + session cookie).
   // If ADMIN_PASSWORD is unset the middleware passes all requests through (local dev).
   try {
     if (LIVEKIT_URL === undefined) {

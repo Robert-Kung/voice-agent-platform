@@ -30,10 +30,13 @@ function isRemoteFile(uri: string) {
 }
 
 function doesLocalFileExist(uri: string) {
-  return existsSync(join(process.cwd(), uri));
+  return existsSync(join(/*turbopackIgnore: true*/ process.cwd(), uri));
 }
 
 // LOCAL FILES MUST BE IN PUBLIC FOLDER
+// turbopackIgnore: files are read from public/ at runtime (copied into the
+// image by the Dockerfile); without it Turbopack traces the whole project into
+// .next/standalone.
 async function loadFileData(filePath: string): Promise<ArrayBuffer> {
   if (isRemoteFile(filePath)) {
     const response = await fetch(filePath);
@@ -45,7 +48,7 @@ async function loadFileData(filePath: string): Promise<ArrayBuffer> {
 
   // Try file system first (works in local development)
   if (doesLocalFileExist(filePath)) {
-    const buffer = await readFile(join(process.cwd(), filePath));
+    const buffer = await readFile(join(/*turbopackIgnore: true*/ process.cwd(), filePath));
     return buffer.buffer.slice(
       buffer.byteOffset,
       buffer.byteOffset + buffer.byteLength

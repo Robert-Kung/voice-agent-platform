@@ -64,7 +64,7 @@ Profile Editor v2 已取代舊 prototype，default route 是 `frontend/app/admin
 
 ## 工程慣例
 
-- 安全 / 中間件 / auth：Apr 30 review 後已 hardened，動到 `frontend/middleware.ts`、`frontend/app/api/admin/*`、`api/routes_test.py` 前先看 git log 理解
+- 安全 / 中間件 / auth：Apr 30 review 後已 hardened，動到 `frontend/proxy.ts`（Next 16 前為 middleware.ts）、`frontend/app/api/admin/*`、`api/routes_test.py` 前先看 git log 理解
 - Admin 路由結構：`frontend/app/admin/(authenticated)/` route group 包住所有登入後頁面（共用含 sidebar 的 layout），`frontend/app/admin/login/` 維持平行、不套 sidebar。新增登入後頁面請放進 `(authenticated)/` 內
 - 登入跳轉用 `window.location.assign()` 而非 `router.replace()`：login 頁與 dashboard 在不同 layout 下，但 App Router 仍會 prefetch dashboard 的 RSC payload；prefetch 發生時還沒 cookie，middleware 回 redirect 並被 client cache，導致登入後 `router.replace` 拿到的是舊的 redirect。hard navigation 直接繞過 client cache
 - Test：`cd agents && uv run pytest tests/ -q`；`cd frontend && pnpm test`（目前 84 passed）。`tests/test_api.py` 的 `client` fixture 會 unset `ADMIN_API_TOKEN`，auth 強制驗證用 `secured_client`
